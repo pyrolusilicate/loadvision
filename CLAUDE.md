@@ -4,7 +4,7 @@ Hackathon MVP: estimate cargo load (0-100%) from a truck body photo, store it by
 
 ## Commands
 
-- `uv sync` install, `uv add <pkg>` add dependency (ask the team first)
+- `uv sync` install (every dependency group by default, so pyright and import-linter see all imports), `uv add <pkg>` add dependency (ask the team first)
 - `scripts/check.sh` (or `just check`) = ruff check, ruff format --check, pyright, lint-imports, fast pytest. Single source of checks for the pre-push hook and CI; change checks only there
 - Pre-push hook: `.githooks/pre-push`, enabled per clone with `git config core.hooksPath .githooks`
 - GitLab CI: the hackathon GitLab has no runners; pipelines are created only when the CI/CD variable `RUN_CI=true` is set
@@ -14,7 +14,8 @@ Hackathon MVP: estimate cargo load (0-100%) from a truck body photo, store it by
 
 ## Layout and rules
 
-- Layers, enforced by import-linter: `api | cli` -> `infrastructure | ml` -> `application` -> `domain`. Domain imports no frameworks.
+- Layers, enforced by import-linter: `api | cli` -> `infrastructure | ml` -> `application` -> `domain`. Forbidden contracts add: domain imports no frameworks; application imports no web, database, XML or ML frameworks; shared modules (`errors`, `settings`, `observability`, `imaging`) import no project layers and no ML runtime.
+- `ShipmentId` format lives only in `domain/shipment.py` (`SHIPMENT_ID_PATTERN`) and is repeated in the XSD; keep it out of configs.
 - One file = one responsibility, roughly 50-300 lines. Split by the folder plan instead of growing a file.
 - Protocols only where two implementations exist (real and fake for tests). Registries in `ml/registry.py` for backbones and heads.
 - Shared contracts change only with both owners: `application/ports.py`, model package manifest, XSD, `errors.py`, observability event names, TrainingRunner, first migration.

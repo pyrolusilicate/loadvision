@@ -58,6 +58,8 @@ markers = [
 
 [tool.importlinter]
 root_package = "loadvision"
+# External packages join the import graph, so forbidden contracts can name frameworks.
+include_external_packages = true
 
 [[tool.importlinter.contracts]]
 name = "Layers: entry points -> adapters -> application -> domain"
@@ -69,10 +71,82 @@ layers = [
     "loadvision.domain",
 ]
 
+[[tool.importlinter.contracts]]
+name = "Domain imports no frameworks"
+type = "forbidden"
+source_modules = ["loadvision.domain"]
+forbidden_modules = [
+    "fastapi",
+    "starlette",
+    "sqlalchemy",
+    "psycopg",
+    "alembic",
+    "pydantic",
+    "pydantic_xml",
+    "lxml",
+    "yaml",
+    "structlog",
+    "PIL",
+    "numpy",
+    "sklearn",
+    "torch",
+    "torchvision",
+    "timm",
+    "onnxruntime",
+]
+
+[[tool.importlinter.contracts]]
+name = "Application imports no web, database, XML or ML frameworks"
+type = "forbidden"
+source_modules = ["loadvision.application"]
+forbidden_modules = [
+    "fastapi",
+    "starlette",
+    "sqlalchemy",
+    "psycopg",
+    "alembic",
+    "pydantic_xml",
+    "lxml",
+    "sklearn",
+    "torch",
+    "torchvision",
+    "timm",
+    "onnxruntime",
+]
+
+# Shared modules are outside the layers and anyone may import them. If they imported a layer
+# or an ML runtime, the service would pull it in, e.g. torch through imaging.
+[[tool.importlinter.contracts]]
+name = "Shared modules import no project layers and no ML runtime"
+type = "forbidden"
+source_modules = [
+    "loadvision.errors",
+    "loadvision.settings",
+    "loadvision.observability",
+    "loadvision.imaging",
+]
+forbidden_modules = [
+    "loadvision.domain",
+    "loadvision.application",
+    "loadvision.infrastructure",
+    "loadvision.ml",
+    "loadvision.api",
+    "loadvision.cli",
+    "torch",
+    "torchvision",
+    "timm",
+    "onnxruntime",
+]
+
 [dependency-groups]
 dev = [
     "import-linter>=2.15",
-    "pyright>=1.1.414",
+    "pyright[nodejs]>=1.1.414",
     "pytest>=9.1.1",
     "ruff>=0.16.7",
 ]
+
+[tool.uv]
+# Every dependency group installs by default, so pyright and import-linter see all imports.
+# Service images should pick their groups explicitly.
+default-groups = "all"
