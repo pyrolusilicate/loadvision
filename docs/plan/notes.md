@@ -27,10 +27,11 @@
 - Код: всё, кроме перечисленного, — однострочные docstring-заготовки. Реализовано:
   - в `main`: `errors.py`, `domain/` (`shipment.py`, `timestamps.py`, `assessment.py`, `model_version.py`), `imaging/prepared_image.py`, `application/ports.py`, зависимость numpy 2.5.3 и unit-тесты к ним;
   - закоммичено в `feat/contracts-pipeline` (`17a4f77`): фейки портов в `tests/fakes/`, контракты портов в `tests/port_contracts/`, строители `tests/builders.py`, тесты `test_fake_ports.py` и `test_fakes.py`; в `pyproject.toml` — `pythonpath = ["."]` для pytest и `tests` в `known-first-party` для ruff;
-  - не закоммичено: `observability/events.py`, `observability/run_recorder.py`, `ml/pipeline/stage.py`, `ml/pipeline/runner.py`, код `STAGE_CHECK_FAILED` в `errors.py`, `format_utc` в `domain/timestamps.py`; тесты `tests/ml/test_stage.py`, `tests/ml/test_runner.py`, `tests/unit/test_events.py`, `tests/unit/test_run_recorder.py`, новые тесты в `test_timestamps.py`.
-- Проверки: `scripts/check.sh` зелёный — ruff, format, pyright (0 ошибок), import-linter (4 контракта), pytest (233 теста).
+  - закоммичено в `feat/contracts-pipeline` (`49b28a9`): `observability/events.py`, `observability/run_recorder.py`, `ml/pipeline/stage.py`, `ml/pipeline/runner.py`, код `STAGE_CHECK_FAILED` в `errors.py`, `format_utc` в `domain/timestamps.py` и тесты к ним;
+  - не закоммичено: запрет повторного `run_id` и `new_run_id`; `ml/packaging/manifest.py`, `ml/packaging/model_package.py`, код `MODEL_PACKAGE_INVALID` в `errors.py`, зависимость pydantic 2.13.5; тесты `tests/ml/test_manifest.py`, `tests/ml/test_model_package.py`, строители пакетов `tests/model_packages.py`.
+- Проверки: `scripts/check.sh` зелёный — ruff, format, pyright (0 ошибок), import-linter (4 контракта), pytest (310 тестов).
 - Данные: `data/train` (716 фото, `train.csv`, `train_groups.csv`), `data/test` (307 фото, `test.csv`, `sample_submission.csv`).
-- Следующий шаг: показать A отличия реализации Stage и runner от плана A (раздел «Stage и TrainingRunner»), затем манифест пакета v0 и загрузчик — после них A работает независимо.
+- Следующий шаг: A смотрит отличия Stage и runner от плана A и решения по манифесту (К4), собирает пакет v0 (задача 0.9) через `write_package`. B — XSD v1 и примеры, первая миграция.
 
 ## Команда и роли (решено 15.09)
 
@@ -241,7 +242,7 @@ tests/
   - `observability/events.py`: имена из плана A плюс `run.started` и `run.finished`.
   - `domain/timestamps.format_utc` — единственное место формата времени. Время форматирует runner: `observability` не импортирует `domain`.
   - 33 мутации, все пойманы. Тесты не ловят атомарность записи `summary.json` и число кадров трейсбека.
-  - Открыто: повторный запуск с тем же `run_id` дописывает события в старый `run.jsonl` и перезаписывает `summary.json`. Решить вместе с `--from-stage`: запрещать повтор или всегда начинать новый `run_id`.
+  - Решено 16.09 (B): папка запуска никогда не переиспользуется. `RunRecorder` создаёт её через `mkdir` без `exist_ok`: существующая папка — `FileExistsError`, этапы не запускаются, старые записи не трогаются. Создание папки атомарно, поэтому два процесса с одним `run_id` не запишут в одну папку. Каждый запуск, включая перезапуск после сбоя, берёт новый id из `new_run_id(now)`: `run_YYYYMMDD_HHMMSS_xxxxxx`, время в UTC, 6 случайных hex. Поэтому `--from-stage` (4.2) — новый запуск, который берёт готовые этапы из кэша по хэшу входов, а не дописывает старую папку. Ссылку на прерванный запуск (`resumed_from`) добавить вместе с 4.2. `config.resolved.yaml` и `env.json` (4.3) пишет runner в созданную им папку: если CLI создаст папку заранее, runner откажется.
 
 ### Манифест пакета модели (согласовано с A 16.09)
 
@@ -252,6 +253,18 @@ tests/
 - `ood: {k, threshold, reference}`: `reference` — эмбеддинги train внутри пакета, до них считается расстояние.
 - `postprocess`: округление к кратным 5 и притяжение к 100 включаются флагами, только если OOF это подтверждает. Нужен ли там `clip` — вопрос К2.
 - Пакет v0: один член, `backbone: baseline_features`, `runtime: numpy`, голова — Ridge из `baseline/model.npz`, `preprocessing: {name: baseline_v0, params: {}}` (baseline считает признаки по картинке 32×32, а не по входу 3:4). Проверка: прогноз на 8 фото совпадает с baseline до 1e-6.
+- Реализовано 16.09 (B, не закоммичено; решения, помеченные «предложено», ждут A — вопрос К4):
+  - `ml/packaging/manifest.py`: модель pydantic `Manifest`. Неизвестные поля — ошибка (`extra="forbid"`), NaN и бесконечность запрещены, модели неизменяемы. Время пишется через `format_utc`.
+  - Поля: `schema_version` (строго 1, предложено), `version` (проверка через `ModelVersionId`), `created_at` (с часовым поясом), `git_commit` (40 hex, обязателен — предложено), `data_hash` (64 hex без префикса `sha256:` — предложено), `members` (не пусто), `cv`, `ood`, `postprocess`, `folds`, `licenses`, `files`.
+  - Член: `backbone` и `preprocessing.name` — ключи реестров `[a-z][a-z0-9_]{0,63}`; `runtime` — `numpy`, `onnx` или `torch`; `weights` обязателен для `onnx` и `torch`, для `numpy` может быть None; `head` обязателен (предложено; вопрос — fine-tune с головой внутри ONNX); `weight` в [0, 1], сумма весов 1 с допуском 1e-6; `preprocessing.params` — только числа, `true` и строки отклоняются.
+  - `cv` (`mae` ≥ 0, `within_10` в процентах 0–100 — предложено, `mae_by_range`) и `folds` (`file` — путь в репозитории, `sha256`) задаются только вместе: метрики без фолдов нельзя сравнить. У пакета v0 оба None: baseline мерился на своём holdout.
+  - `postprocess`: `round_to` (шаг, > 0) и `snap_100` (порог, от которого прогноз становится 100); по умолчанию выключены. Поля `clip` нет: клип в [0, 100] всегда (предложение К2). Смысл `snap_100` как порога — предложено.
+  - Пути в пакете: сегменты без точки в начале, без `..`, `\`, пустых сегментов и абсолютных путей; `manifest.json` в `files` нельзя. Каждый файл, на который ссылается манифест (`weights`, `head`, `ood.reference`, `licenses`), обязан быть в `files`.
+  - `ml/packaging/model_package.py`: `ModelPackage.load(root)` читает манифест и сверяет sha256 каждого файла из `files`; все проблемы с файлами — в одной ошибке. Файл вне пакета (симлинк наружу) — ошибка. Файлы, которых нет в `files`, игнорируются. `package.path(name)` отдаёт только перечисленные файлы. `write_package(root, manifest)` пишет манифест и сразу загружает пакет обратно; `hash_package_files(root)` строит `files` по папке.
+  - Ошибка — `ModelPackageError` с кодом `MODEL_PACKAGE_INVALID` (`http_status` None; сервис при битом пакете отвечает `MODEL_NOT_READY`). Текст ошибок pydantic сокращён до «поле: сообщение», без ссылок на документацию и без входных значений.
+  - JSON Schema для README: `Manifest.model_json_schema()`.
+  - 31 мутация, все пойманы.
+  - Не сделано (не зона 0.8): предиктор по пакету (3.2, 3.6), реестры backbone и preprocessing, сам пакет v0 (0.9, A).
 
 ## Запреты и ловушки
 

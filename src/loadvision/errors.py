@@ -24,6 +24,7 @@ class ErrorCode(StrEnum):
     MODEL_NOT_READY = "MODEL_NOT_READY"
     MODEL_INFERENCE_FAILED = "MODEL_INFERENCE_FAILED"
     STAGE_CHECK_FAILED = "STAGE_CHECK_FAILED"
+    MODEL_PACKAGE_INVALID = "MODEL_PACKAGE_INVALID"
     INTERNAL_ERROR = "INTERNAL_ERROR"
 
 
@@ -121,6 +122,12 @@ ERROR_CATALOG: Final[Mapping[ErrorCode, ErrorSpec]] = MappingProxyType(
             None,
             "Постусловие этапа пайплайна не выполнено.",
             "Откройте summary.json и run.jsonl этого запуска: там этап и причина.",
+        ),
+        ErrorCode.MODEL_PACKAGE_INVALID: ErrorSpec(
+            None,
+            "Пакет модели повреждён или не соответствует схеме манифеста.",
+            "Скачайте пакет заново или пересоберите его. Какой файл или поле не прошли проверку, "
+            "написано в логе.",
         ),
         ErrorCode.INTERNAL_ERROR: ErrorSpec(
             500,
