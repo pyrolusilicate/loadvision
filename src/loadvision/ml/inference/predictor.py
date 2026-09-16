@@ -1,5 +1,6 @@
 """LoadPredictor implementation backed by a model package."""
 
+import math
 from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
@@ -11,12 +12,22 @@ from numpy.typing import NDArray
 from loadvision.application.ports import Prediction
 from loadvision.domain.assessment import LoadPercent
 from loadvision.domain.model_version import ModelVersionId
-from loadvision.imaging.prepared_image import PreparedImage
+from loadvision.errors import LoadvisionError
+from loadvision.imaging.prepared_image import MediaType, PreparedImage
 from loadvision.imaging.preprocessing import preprocess
+from loadvision.ml.packaging.baseline_package import BASELINE_BACKBONE
 from loadvision.ml.packaging.manifest import Member, Postprocess, Runtime
 from loadvision.ml.packaging.model_package import ModelPackage, ModelPackageError
 
 _HEAD_KEYS: Final = frozenset({"mean", "scale", "weights", "intercept"})
+
+# The numpy runtime has no network: the preprocessing already returns the features the head
+# reads, and the baseline features are the only ones it knows.
+_NUMPY_BACKBONES: Final = frozenset({BASELINE_BACKBONE})
+
+# Size of the blank photo every member predicts on at load time.
+_PROBE_HEIGHT: Final = 8
+_PROBE_WIDTH: Final = 6
 
 _MIN_LOAD_PCT = 0.0
 _MAX_LOAD_PCT = 100.0
@@ -99,7 +110,10 @@ class _LoadedMember:
 def _apply_postprocess(value: float, postprocess: Postprocess) -> float:
     clipped = min(max(value, _MIN_LOAD_PCT), _MAX_LOAD_PCT)
     if postprocess.round_to is not None:
-        clipped = round(clipped / postprocess.round_to) * postprocess.round_to
+        # Python's round sends a half to the even neighbour, so with a step of 5 it would turn
+        # 12.5 into 10 but 17.5 into 20; here a half always goes up.
+        step = postprocess.round_to
+        clipped = math.floor(clipped / step + 0.5) * step
     if postprocess.snap_100 is not None and clipped >= postprocess.snap_100:
         clipped = _MAX_LOAD_PCT
     return min(max(clipped, _MIN_LOAD_PCT), _MAX_LOAD_PCT)
@@ -116,8 +130,11 @@ class PackagePredictor:
         package: Verified model package.
 
     Raises:
-        ModelPackageError: If a member needs a runtime that is not supported yet, or its head
-            cannot be read. Both fail here, at load time, not on the first request.
+        ModelPackageError: If a member needs a runtime or backbone that is not supported, its
+            head cannot be read, or its preprocessing and head do not fit together. Every
+            member predicts on a blank photo here, so an unknown preprocessing, a wrong
+            parameter or a head for other features fails at load time, not on the first
+            request.
     """
 
     def __init__(self, package: ModelPackage) -> None:
@@ -126,12 +143,26 @@ class PackagePredictor:
             _LoadedMember(member=member, head=self._load_head(package, member))
             for member in package.manifest.members
         )
+        self._check_on_blank_photo()
 
     @staticmethod
     def _load_head(package: ModelPackage, member: Member) -> RidgeHead:
         if member.runtime is not Runtime.NUMPY:
             raise ModelPackageError(f"runtime {member.runtime} is not supported yet")
+        if member.backbone not in _NUMPY_BACKBONES:
+            raise ModelPackageError(
+                f"backbone {member.backbone!r} is not supported by runtime {member.runtime}"
+            )
         return RidgeHead.load(package.path(member.head))
+
+    def _check_on_blank_photo(self) -> None:
+        pixels: NDArray[np.uint8] = np.zeros((_PROBE_HEIGHT, _PROBE_WIDTH, 3), dtype=np.uint8)
+        probe = PreparedImage(b"blank", MediaType.PNG, pixels)
+        for index, loaded in enumerate(self._members):
+            try:
+                self._member_value(loaded, probe)
+            except LoadvisionError as error:
+                raise ModelPackageError(f"member {index}: {error.detail}") from error
 
     @property
     def version(self) -> ModelVersionId:
@@ -153,15 +184,13 @@ class PackagePredictor:
         """
         return [self._predict_one(image) for image in images]
 
+    @staticmethod
+    def _member_value(loaded: _LoadedMember, image: PreparedImage) -> float:
+        preprocessing = loaded.member.preprocessing
+        return loaded.head.apply(preprocess(preprocessing.name, image, preprocessing.params))
+
     def _predict_one(self, image: PreparedImage) -> Prediction:
-        values = [
-            loaded.head.apply(
-                preprocess(
-                    loaded.member.preprocessing.name, image, loaded.member.preprocessing.params
-                )
-            )
-            for loaded in self._members
-        ]
+        values = [self._member_value(loaded, image) for loaded in self._members]
         average = sum(
             value * loaded.member.weight
             for value, loaded in zip(values, self._members, strict=True)

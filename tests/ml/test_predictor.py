@@ -84,6 +84,17 @@ def test_predictions_stay_within_the_range(tmp_path: Path, intercept: float) -> 
 
 
 @pytest.mark.ml
+@pytest.mark.parametrize(
+    ("intercept", "expected"),
+    [(12.5, 15.0), (17.5, 20.0), (12.4, 10.0), (2.4, 0.0), (99.0, 100.0)],
+)
+def test_round_to_sends_halves_up(tmp_path: Path, intercept: float, expected: float) -> None:
+    package = build_ensemble(tmp_path, [intercept], [1.0], postprocess={"round_to": 5})
+    [prediction] = PackagePredictor(package).predict([make_image()])
+    assert prediction.load_pct.value == pytest.approx(expected)
+
+
+@pytest.mark.ml
 def test_postprocess_rounds_and_snaps(tmp_path: Path) -> None:
     package = build_ensemble(tmp_path, [97.0], [1.0], postprocess={"round_to": 5, "snap_100": 95})
     [prediction] = PackagePredictor(package).predict([make_image()])
@@ -102,15 +113,49 @@ def test_an_unsupported_runtime_fails_when_the_predictor_is_built(tmp_path: Path
 
 
 @pytest.mark.ml
-def test_a_head_that_expects_other_features_is_reported(tmp_path: Path) -> None:
+def test_a_head_that_expects_other_features_fails_when_the_predictor_is_built(
+    tmp_path: Path,
+) -> None:
     head = tmp_path / "head.npz"
     head.parent.mkdir(parents=True, exist_ok=True)
     np.savez(
         head, mean=np.zeros(5), scale=np.ones(5), weights=np.zeros(5), intercept=np.asarray(1.0)
     )
     package = build_package(tmp_path, files={"head.npz": head.read_bytes()})
-    with pytest.raises(ModelPackageError, match="233"):
-        PackagePredictor(package).predict([make_image()])
+    with pytest.raises(ModelPackageError, match="member 0: head expects 5 features, got 233"):
+        PackagePredictor(package)
+
+
+@pytest.mark.ml
+@pytest.mark.parametrize(
+    ("preprocessing", "message"),
+    [
+        ({"name": "resize_pda", "params": {}}, "unknown preprocessing 'resize_pda'"),
+        (
+            {"name": "resize_pad", "params": {"height": 512}},
+            "preprocessing parameter 'width' is missing",
+        ),
+    ],
+)
+def test_a_broken_preprocessing_fails_when_the_predictor_is_built(
+    tmp_path: Path, preprocessing: dict[str, Any], message: str
+) -> None:
+    head = write_head(tmp_path / "head.npz", intercept=1.0)
+    package = build_package(
+        tmp_path, files={"head.npz": head}, members=[member_data(preprocessing=preprocessing)]
+    )
+    with pytest.raises(ModelPackageError, match=f"member 0: {message}"):
+        PackagePredictor(package)
+
+
+@pytest.mark.ml
+def test_an_unknown_numpy_backbone_fails_when_the_predictor_is_built(tmp_path: Path) -> None:
+    head = write_head(tmp_path / "head.npz", intercept=1.0)
+    package = build_package(
+        tmp_path, files={"head.npz": head}, members=[member_data(backbone="dinov3_vitb16")]
+    )
+    with pytest.raises(ModelPackageError, match="backbone 'dinov3_vitb16'"):
+        PackagePredictor(package)
 
 
 @pytest.mark.ml
