@@ -29,9 +29,11 @@
   - закоммичено в `feat/contracts-pipeline` (`17a4f77`): фейки портов в `tests/fakes/`, контракты портов в `tests/port_contracts/`, строители `tests/builders.py`, тесты `test_fake_ports.py` и `test_fakes.py`; в `pyproject.toml` — `pythonpath = ["."]` для pytest и `tests` в `known-first-party` для ruff;
   - закоммичено в `feat/contracts-pipeline` (`49b28a9`): `observability/events.py`, `observability/run_recorder.py`, `ml/pipeline/stage.py`, `ml/pipeline/runner.py`, код `STAGE_CHECK_FAILED` в `errors.py`, `format_utc` в `domain/timestamps.py` и тесты к ним;
   - не закоммичено: запрет повторного `run_id` и `new_run_id`; `ml/packaging/manifest.py`, `ml/packaging/model_package.py`, код `MODEL_PACKAGE_INVALID` в `errors.py`, зависимость pydantic 2.13.5; тесты `tests/ml/test_manifest.py`, `tests/ml/test_model_package.py`, строители пакетов `tests/model_packages.py`.
-- Проверки: `scripts/check.sh` зелёный — ruff, format, pyright (0 ошибок), import-linter (4 контракта), pytest (310 тестов).
+  - в `feat/contracts-pipeline` поверх ревью (B решил не заводить новую ветку): `api/xsd/loadvision-v1.xsd`, примеры `tests/fixtures/xml/*.xml`, `tests/contract/test_xsd.py`, зависимости lxml 6.1.3 и (dev) types-lxml 2026.2.16. `uv.lock` может конфликтовать с веткой A (Pillow): при слиянии не править lock руками, а взять любую сторону и выполнить `uv lock`.
+- Проверки: `scripts/check.sh` зелёный — ruff, format, pyright (0 ошибок), import-linter (4 контракта), pytest (362 теста).
+- A 16.09 (со слов, в ветке B ещё не видно — `git fetch` не проходит из песочницы): препроцессинг, предиктор и пакет v0 готовы, паритет с baseline на реальных фото до 1e-6. Предиктор: `package = ModelPackage.load(path)`, `predictor = PackagePredictor(package)` (реализует `LoadPredictor`). Пакет v0 собирает `build_baseline_package(...)` из `ml/packaging/baseline_package.py`. Ключи реестра препроцессингов: `resize_pad`, `baseline_v0`. Средние и отклонения нормализации — шесть чисел в `params`: `mean_r`, `mean_g`, `mean_b`, `std_r`, `std_g`, `std_b`. Добавлен Pillow: после подтягивания `uv sync`.
 - Данные: `data/train` (716 фото, `train.csv`, `train_groups.csv`), `data/test` (307 фото, `test.csv`, `sample_submission.csv`).
-- Следующий шаг: A смотрит отличия Stage и runner от плана A и решения по манифесту (К4), собирает пакет v0 (задача 0.9) через `write_package`. B — XSD v1 и примеры, первая миграция.
+- Следующий шаг: B — первая миграция Alembic и таблицы на SQLAlchemy Core (0.13, 6.1).
 
 ## Команда и роли (решено 15.09)
 
@@ -75,6 +77,9 @@
 - База — план A «Loadvision» v1 от 15.09. План от Gemini отброшен. (решено 15.09)
 - Слои: `api | cli` → `infrastructure | ml` → `application` → `domain`. Три forbidden-контракта: домен без фреймворков; application без веба, БД, XML и ML; общие модули (`errors`, `settings`, `observability`, `imaging`) не импортируют слои проекта и ML-рантаймы. (решено 16.09)
 - БД: PostgreSQL, SQLAlchemy 2 **sync** и psycopg 3. Async не нужен: модель всё равно считается в отдельном потоке. (решено 15.09)
+- SQLite не берём: в базу одновременно пишут API и CLI или воркер дообучения, а SQLite допускает одного пишущего; нет `FOR UPDATE SKIP LOCKED` для очереди; файл базы между контейнерами ненадёжен; типизация слабая. (решено B 16.09)
+- SQLAlchemy **Core**, не ORM: таблицы и запросы; репозиторий явно собирает неизменяемые доменные dataclass из строк. ORM требует изменяемых объектов с отслеживанием изменений и ленивой загрузкой. Транзакция — на `UnitOfWork`. Alembic — миграции с откатом и проверкой расхождений по метаданным таблиц. (решено B 16.09)
+- XML: lxml (проверка XSD на libxml2, явные настройки безопасного парсера); типы для pyright — `types-lxml` в dev: без них pyright не видит `lxml.etree`. pydantic-xml под вопросом: решить на 5.4. (решено B 16.09)
 - UI: Jinja2 + htmx 2.x локальным файлом, без сборки фронтенда. UI вызывает сценарии application напрямую, не через XML API. (решено 15.09)
 - Фото передаются только в base64 внутри XML. (план A)
 - Быстрое дообучение — только на замороженных энкодерах. Фолды существующих строк не меняются. Источник правды для метрик — `runs/`. (`CLAUDE.md`, 16.09)
@@ -193,12 +198,25 @@
 - `LoadPct` — `xs:decimal`: NaN и бесконечности в нём непредставимы.
 - Шаблон `ShipmentId` — та же строка, что `SHIPMENT_ID_PATTERN`; тест сверяет их, когда появится XSD.
 - Элементы review и signals необязательные.
-- `DeclaredLoadPct` — процент из нормативного отчёта (Should, предложено, с A не согласовано).
+- `DeclaredLoadPct` — процент из нормативного отчёта (Should). A 16.09 попросил его в XSD вместе с отклонением.
+- Реализовано 16.09 (B, не в git):
+  - Файл `src/loadvision/api/xsd/loadvision-v1.xsd` — внутри пакета, чтобы `GET /api/v1/schema.xsd` отдавал его через `importlib.resources`. XSD 1.0: libxml2 другой версии не знает.
+  - Сообщения (глобальные элементы) и методы: `AssessmentRequest` → `Assessment` (POST оценки, GET оценки), `Shipment` (GET перевозки), `LabelRequest` → `Label` (PUT метки), `Models` и `Model` (GET моделей, POST активации), `Health`, `Error`. Should-методы (`training-jobs`, отчёт по недогрузу) добавятся новыми элементами: старые документы от этого не ломаются.
+  - От ML (A 16.09): `Signals` с атрибутами `uncertainty`, `oodScore`, `brightness`, `sharpness` — все необязательные, ≥ 0; `Review needed` с причинами `low_confidence`, `unusual_scene`, `too_dark`, `blurry`; в запросе необязательный `DeclaredLoadPct`, в ответе `Declared loadPct deviation`. `deviation` = оценка − нормативная, в п. п., от −100 до 100: меньше нуля — недогруз против отчёта. В базе отклонение не хранится, считается при сборке XML.
+  - Решения B (показать A): у `Image` в запросе нет атрибутов `mediaType` и `encoding` из примера плана A — формат определяется по байтам, base64 единственный, лишний атрибут мог бы разойтись с содержимым. В ответе `Image` несёт определённый сервисом `mediaType`. Метка относится к фото, а не к оценке (в `Label` есть `imageSha256`), поэтому видна во всех оценках этого фото: `ConfirmedLabel` в `Assessment`, `confirmedLoadPct` в истории перевозки. У `Current` и элементов истории один тип с атрибутом `id`. `Health` — только при готовности; без модели 503 и `Error MODEL_NOT_READY`. `requestId` — `[A-Za-z0-9._-]{1,128}`: чужой `X-Request-ID` в другом формате middleware заменит своим (задача 5.2).
+  - `LoadPct`: `xs:decimal` от 0 до 100, не больше одного знака (метки train — целые). Время — `xs:dateTime` только с `Z`, дробная часть до 6 знаков, как пишет `format_utc`.
+  - Шаблоны `ShipmentIdType` и `ModelVersionType` и перечисления `ErrorCodeType` (коды каталога с HTTP-статусом), `ReviewReasonType`, `ModelStatusType`, `MediaTypeType` сверяются с кодом тестом. Тексты `Message` и `Hint` в `error.xml` сверяются с каталогом.
+  - Ловушка: libxml2 проверяет `xs:base64Binary` нестрого — пропускает префикс `data:image/jpeg;base64,`. Строгое декодирование делает API (5.4) и отвечает `INVALID_ENCODING`.
+  - Какой код отдавать, если XSD не прошёл: ошибка на `ShipmentId` — `INVALID_SHIPMENT_ID`, на `Image` — `INVALID_ENCODING`, остальное — `INVALID_XML`. Сопоставление по пути ошибки из `error_log` lxml делает API (5.4).
+  - Примеры в `tests/fixtures/xml/` — по одному на каждое сообщение (тест требует), они же пойдут в README. В `assessment_request.xml` base64 условный: для API-теста 5.4 нужно настоящее фото с короткой стороной не меньше лимита из `configs/app.yaml`.
+  - 52 теста в `tests/contract/test_xsd.py`, 11 мутаций схемы, все пойманы.
 
 ### Первая миграция
 
 - `load_pct double precision` и `CHECK (load_pct BETWEEN 0 AND 100)`. Проверить тестом, что NaN не проходит CHECK: в Postgres NaN считается больше любого числа, ожидаем отказ.
 - Таблицы и ограничения — по плану A, см. `plan-a-spec.md`.
+- От A 16.09: в `assessments` добавить `brightness` и `sharpness`; колонку `needs_review` не заводить — флаг вычисляется из причин.
+- Для `DeclaredLoadPct` нужна колонка `declared_load_pct double precision NULL` с тем же CHECK диапазона; в домене у `Assessment` такого поля пока нет — добавить вместе с миграцией.
 
 ### Тесты (план)
 
