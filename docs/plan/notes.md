@@ -22,17 +22,15 @@
 
 ## Состояние на 16.09.2026
 
-- В `main` на сервере: каркас A и MR `chore/import-contracts-pyright` (слит 16.09).
-- Работа идёт в ветке `feat/contracts-v1` от свежего `main`.
+- В `main` на сервере: каркас A, MR `chore/import-contracts-pyright` и `feat/contracts-v1` (слиты 16.09, `feat/contracts-v1` — squash `3b89428`).
+- Работа идёт в ветке `feat/contracts-pipeline` от `main` (`d852a7b`).
 - Код: всё, кроме перечисленного, — однострочные docstring-заготовки. Реализовано:
-  - в `main`: `domain/shipment.py` (`SHIPMENT_ID_PATTERN`, `ShipmentId`), тесты `test_shipment_id.py` и `test_layers_import.py`;
-  - закоммичено в `feat/contracts-v1` (`7bc9810`): `errors.py` (`ErrorCode`, `ErrorSpec`, `ERROR_CATALOG`, `LoadvisionError`) и тесты `test_errors.py`; `ShipmentId` бросает `LoadvisionError(INVALID_SHIPMENT_ID)`, `InvalidShipmentIdError` удалён;
-  - закоммичено в `feat/contracts-v1` (`90a446a`): `domain/timestamps.py` (`ensure_aware`), `Shipment`, `domain/assessment.py` (`LoadPercent`, `ReviewReason`, `Signals`, `Assessment`), `domain/model_version.py` (`MODEL_VERSION_PATTERN`, `ModelVersionId`, `ModelVersionStatus`, `ModelVersion` с переходами); тесты `test_timestamps.py`, `test_shipment.py`, `test_assessment.py`, `test_model_version.py`;
-  - закоммичено в `feat/contracts-v1` (`2595481`): `imaging/prepared_image.py` (`MediaType`, `PreparedImage`), `application/ports.py` (протоколы и `ImageRecord`), тесты `test_prepared_image.py` и `test_image_record.py`, зависимость numpy 2.5.3.
-  - не закоммичено: фейки портов в `tests/fakes/`, контракты портов в `tests/port_contracts/`, строители `tests/builders.py`, тесты `test_fake_ports.py` и `test_fakes.py`; в `pyproject.toml` — `pythonpath = ["."]` для pytest и `tests` в `known-first-party` для ruff.
-- Проверки: `scripts/check.sh` зелёный — ruff, format, pyright (0 ошибок), import-linter (4 контракта), pytest (178 тестов).
+  - в `main`: `errors.py`, `domain/` (`shipment.py`, `timestamps.py`, `assessment.py`, `model_version.py`), `imaging/prepared_image.py`, `application/ports.py`, зависимость numpy 2.5.3 и unit-тесты к ним;
+  - закоммичено в `feat/contracts-pipeline` (`17a4f77`): фейки портов в `tests/fakes/`, контракты портов в `tests/port_contracts/`, строители `tests/builders.py`, тесты `test_fake_ports.py` и `test_fakes.py`; в `pyproject.toml` — `pythonpath = ["."]` для pytest и `tests` в `known-first-party` для ruff;
+  - не закоммичено: `observability/events.py`, `observability/run_recorder.py`, `ml/pipeline/stage.py`, `ml/pipeline/runner.py`, код `STAGE_CHECK_FAILED` в `errors.py`, `format_utc` в `domain/timestamps.py`; тесты `tests/ml/test_stage.py`, `tests/ml/test_runner.py`, `tests/unit/test_events.py`, `tests/unit/test_run_recorder.py`, новые тесты в `test_timestamps.py`.
+- Проверки: `scripts/check.sh` зелёный — ruff, format, pyright (0 ошибок), import-linter (4 контракта), pytest (233 теста).
 - Данные: `data/train` (716 фото, `train.csv`, `train_groups.csv`), `data/test` (307 фото, `test.csv`, `sample_submission.csv`).
-- Следующий шаг: протокол `Stage`, `RunContext`, `StageResult`, `TrainingRunner` и имена событий, затем манифест пакета v0 и загрузчик — после них A работает независимо.
+- Следующий шаг: показать A отличия реализации Stage и runner от плана A (раздел «Stage и TrainingRunner»), затем манифест пакета v0 и загрузчик — после них A работает независимо.
 
 ## Команда и роли (решено 15.09)
 
@@ -232,6 +230,18 @@ tests/
 - `RunContext`: `run_id`, папка запуска `runs/<run_id>/`, разрешённый конфиг эксперимента, пути к `data/`, сид и `cache_dir` — кэш между запусками (эмбеддинги), не внутри `runs/<run_id>/`. Кэш эмбеддингов A делает внутри своего этапа, от runner нужен только путь. Предложение B: `runs/cache/` (уже в `.gitignore` через `runs/`).
 - `StageResult`: `artifacts` (имя → путь), `metrics` (имя → число), `counts` (имя → int), `cached: bool` — чтобы в `summary.json` было видно, что этап взят из кэша.
 - `TrainingRunner` входит в контракты сейчас, а не на день 4 (просьба A): один runner для CLI и воркера, чтобы они не состыковывались в последний момент. Must — последовательный запуск с постусловиями, папка запуска и `summary.json`; кэш по хэшу и `--from-stage` — Should (4.2).
+- Реализовано 16.09 (не закоммичено; отличия от плана A показать A):
+  - `Stage`: `name` и `version` — read-only свойства, а не изменяемые атрибуты, как в плане A. Так протоколу подходят и атрибут класса, и поле frozen dataclass. `inputs` возвращает `Mapping[str, str]`, реализация может вернуть `dict`.
+  - `RunContext(run_id, runs_dir, cache_dir, data_dir, config, seed)`; `run_dir` = `runs_dir / run_id` — свойство, чтобы папка не разошлась с `run_id`. `run_id` соответствует `RUN_ID_PATTERN` (`[A-Za-z0-9][A-Za-z0-9._-]{0,99}`): имя папки без точки в начале и без разделителей пути. То, что `cache_dir` лежит вне папки запуска, только описано в docstring: сравнение путей без `resolve` ненадёжно.
+  - `StageResult`: поля по умолчанию пустые. NaN и бесконечность в `metrics` дают `ValueError` при создании, иначе `summary.json` не запишется: JSON пишется без NaN.
+  - `StageCheckError(detail)` — наследник `LoadvisionError` с кодом `STAGE_CHECK_FAILED` (`http_status` None, в API не уходит); подсказка берётся из каталога. Подкласс со своей сигнатурой переопределяет `__reduce__`, иначе ошибка не переживёт передачу между процессами.
+  - `TrainingRunner(clock, timer=perf_counter).run(stages, ctx) -> RunSummary`. Этапы идут по порядку; `check` вызывается после каждого `run`, в том числе при `cached=True`. Ошибка этапа не пробрасывается: этап получает `failed`, остальные `not_run`, итог пишется в `summary.json`, код выхода решает вызывающий. Код ошибки: у `LoadvisionError` свой, у прочих исключений `INTERNAL_ERROR` с detail «Тип: сообщение». Имена этапов (`STAGE_NAME_PATTERN` `[a-z][a-z0-9_]{0,63}`, без повторов) проверяются до запуска: `ValueError`, папка не создаётся. `KeyboardInterrupt` не ловится, `summary.json` тогда не пишется.
+  - `summary.json`: `run_id`, `status`, `started_at`, `finished_at` (UTC с `Z`), `failed_stage`, `error_code`, `hint`, `stages[]` (`name`, `version`, `status`, `cached`, `duration_ms`, `counts`, `metrics`, `artifacts`, `error_code`, `error_detail`). Поле `rerun` появится вместе с `--from-stage` (4.2).
+  - `run.jsonl`: `run.started`; `stage.started`; `stage.finished` с `cached` и `duration_ms`; `stage.failed` с `error_code`, `detail`, `exc_type`, `traceback` (последние 5 кадров) и `duration_ms`; `run.finished` со `status`. У всех событий есть `ts`, `level`, `event`, `module`, `run_id`. `RunRecorder` пишет JSON-строки сам; structlog подключится позже и должен писать те же поля.
+  - `observability/events.py`: имена из плана A плюс `run.started` и `run.finished`.
+  - `domain/timestamps.format_utc` — единственное место формата времени. Время форматирует runner: `observability` не импортирует `domain`.
+  - 33 мутации, все пойманы. Тесты не ловят атомарность записи `summary.json` и число кадров трейсбека.
+  - Открыто: повторный запуск с тем же `run_id` дописывает события в старый `run.jsonl` и перезаписывает `summary.json`. Решить вместе с `--from-stage`: запрещать повтор или всегда начинать новый `run_id`.
 
 ### Манифест пакета модели (согласовано с A 16.09)
 
