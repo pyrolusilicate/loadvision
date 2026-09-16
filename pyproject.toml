@@ -27,7 +27,7 @@ ignore = ["D1", "RUF001", "RUF002", "RUF003"]
 convention = "google"
 
 [tool.ruff.lint.isort]
-known-first-party = ["loadvision"]
+known-first-party = ["loadvision", "tests"]
 
 [tool.ruff.lint.per-file-ignores]
 "tests/**" = ["D"]
@@ -46,6 +46,9 @@ strict = ["src/loadvision/domain", "src/loadvision/application"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+# The console pytest does not put the project root on sys.path; tests import tests.builders and
+# tests.fakes from it.
+pythonpath = ["."]
 addopts = ["-ra", "--strict-markers", "--import-mode=importlib"]
 xfail_strict = true
 markers = [

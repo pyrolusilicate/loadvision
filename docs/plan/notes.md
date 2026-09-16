@@ -29,9 +29,10 @@
   - закоммичено в `feat/contracts-v1` (`7bc9810`): `errors.py` (`ErrorCode`, `ErrorSpec`, `ERROR_CATALOG`, `LoadvisionError`) и тесты `test_errors.py`; `ShipmentId` бросает `LoadvisionError(INVALID_SHIPMENT_ID)`, `InvalidShipmentIdError` удалён;
   - закоммичено в `feat/contracts-v1` (`90a446a`): `domain/timestamps.py` (`ensure_aware`), `Shipment`, `domain/assessment.py` (`LoadPercent`, `ReviewReason`, `Signals`, `Assessment`), `domain/model_version.py` (`MODEL_VERSION_PATTERN`, `ModelVersionId`, `ModelVersionStatus`, `ModelVersion` с переходами); тесты `test_timestamps.py`, `test_shipment.py`, `test_assessment.py`, `test_model_version.py`;
   - закоммичено в `feat/contracts-v1` (`2595481`): `imaging/prepared_image.py` (`MediaType`, `PreparedImage`), `application/ports.py` (протоколы и `ImageRecord`), тесты `test_prepared_image.py` и `test_image_record.py`, зависимость numpy 2.5.3.
-- Проверки: `scripts/check.sh` зелёный — ruff, format, pyright (0 ошибок), import-linter (4 контракта), pytest (151 тест).
+  - не закоммичено: фейки портов в `tests/fakes/`, контракты портов в `tests/port_contracts/`, строители `tests/builders.py`, тесты `test_fake_ports.py` и `test_fakes.py`; в `pyproject.toml` — `pythonpath = ["."]` для pytest и `tests` в `known-first-party` для ruff.
+- Проверки: `scripts/check.sh` зелёный — ruff, format, pyright (0 ошибок), import-linter (4 контракта), pytest (178 тестов).
 - Данные: `data/train` (716 фото, `train.csv`, `train_groups.csv`), `data/test` (307 фото, `test.csv`, `sample_submission.csv`).
-- Следующий шаг: фейки портов в `tests/fakes/` и общие тесты портов, затем XSD v1 и примеры XML.
+- Следующий шаг: протокол `Stage`, `RunContext`, `StageResult`, `TrainingRunner` и имена событий, затем манифест пакета v0 и загрузчик — после них A работает независимо.
 
 ## Команда и роли (решено 15.09)
 
@@ -214,6 +215,33 @@ tests/
 
 - С `--import-mode=importlib` пакет `tests.fakes` просто так не импортируется: нужен `pythonpath` в настройках pytest или фикстуры в `conftest.py`.
 - После каждого нового теста ломать реализацию и проверять, что падает ровно нужный тест.
+- Реализовано 16.09 (фейки и контракты портов):
+  - `tests/fakes/in_memory_db.py`: `InMemoryStore` и `InMemoryUnitOfWork` с репозиториями. Записи копятся в черновике и попадают в хранилище только при `commit`; выход без `commit` или с исключением их отбрасывает; вне блока `with` — `RuntimeError`.
+  - Фейк повторяет ограничения базы: дубль (перевозка, sha256) — `AssessmentAlreadyExistsError` при рабочем `UnitOfWork`; вторая активная версия модели — `ValueError`, как частичный UNIQUE-индекс; повторная регистрация и обновление незарегистрированной версии — `ValueError`.
+  - Изоляции параллельных транзакций в фейке нет: гонки проверяются на Postgres.
+  - `tests/fakes/predictor.py` (`FakePredictor`: заданные или вычисленные из хэша проценты, режим ошибки, запись батчей), `image_storage.py`, `clock.py` (`FixedClock`, `SequentialIds`).
+  - `tests/port_contracts/`: классы-контракты `UnitOfWorkContract`, `ImageStorageContract`, `LoadPredictorContract`. Реализации на Postgres и настоящий предиктор подключаются наследованием тестового класса — так фейк гарантированно ведёт себя как настоящая реализация.
+  - Контракт предиктора: пустой батч даёт пустой список; прогноз батчем совпадает с прогнозами по одному фото, в том числе при обратном порядке (допуск 1e-3 п.п.).
+  - Помощники импортируются как `tests.builders` и `tests.fakes…`: pytest нужен `pythonpath = ["."]`, ruff — `tests` в `known-first-party`.
+  - 14 мутаций фейков, каждая валит ровно свои тесты.
+  - Ловушка: в zsh переменная с несколькими путями не разбивается на аргументы — пути в командах писать явно.
+
+### Stage и TrainingRunner (согласовано с A 16.09)
+
+- Протокол как в плане A: `name`, `version`, `inputs(ctx) -> dict[str, str]`, `run(ctx) -> StageResult`, `check(ctx, result) -> None`; постусловия бросают `StageCheckError`.
+- `RunContext`: `run_id`, папка запуска `runs/<run_id>/`, разрешённый конфиг эксперимента, пути к `data/`, сид и `cache_dir` — кэш между запусками (эмбеддинги), не внутри `runs/<run_id>/`. Кэш эмбеддингов A делает внутри своего этапа, от runner нужен только путь. Предложение B: `runs/cache/` (уже в `.gitignore` через `runs/`).
+- `StageResult`: `artifacts` (имя → путь), `metrics` (имя → число), `counts` (имя → int), `cached: bool` — чтобы в `summary.json` было видно, что этап взят из кэша.
+- `TrainingRunner` входит в контракты сейчас, а не на день 4 (просьба A): один runner для CLI и воркера, чтобы они не состыковывались в последний момент. Must — последовательный запуск с постусловиями, папка запуска и `summary.json`; кэш по хэшу и `--from-stage` — Should (4.2).
+
+### Манифест пакета модели (согласовано с A 16.09)
+
+- JSON-файл; схема — модель pydantic в `ml/packaging/manifest.py` (в `ml` pydantic разрешён), для README — JSON Schema.
+- Поля: `version` (формат `ModelVersionId`), `created_at`, `git_commit`, `data_hash`, `members`, `cv`, `ood`, `postprocess`, `folds`, `licenses`, `files` (путь → sha256, загрузчик проверяет целостность).
+- Препроцессинг — у каждого члена ансамбля, а не один на пакет: разным энкодерам нужен разный вход (DINOv2 patch14 — 518, SigLIP 2 и PE-Spatial — 512). Член: `backbone`, `runtime`, `weights`, `head`, `weight`, `preprocessing: {name, params}`; `name` — ключ реестра в `imaging/preprocessing.py`, `params` — числа.
+- `folds: {file, sha256}` — на каких фолдах считались метрики; без этого gate не сравнит версии честно.
+- `ood: {k, threshold, reference}`: `reference` — эмбеддинги train внутри пакета, до них считается расстояние.
+- `postprocess`: округление к кратным 5 и притяжение к 100 включаются флагами, только если OOF это подтверждает. Нужен ли там `clip` — вопрос К2.
+- Пакет v0: один член, `backbone: baseline_features`, `runtime: numpy`, голова — Ridge из `baseline/model.npz`, `preprocessing: {name: baseline_v0, params: {}}` (baseline считает признаки по картинке 32×32, а не по входу 3:4). Проверка: прогноз на 8 фото совпадает с baseline до 1e-6.
 
 ## Запреты и ловушки
 
