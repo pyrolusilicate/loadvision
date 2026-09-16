@@ -1,0 +1,29 @@
+# The hackathon GitLab has no runners, so pipelines are created only when the project
+# CI/CD variable RUN_CI is "true". Until then checks run locally in the pre-push hook.
+workflow:
+  rules:
+    - if: $RUN_CI == "true"
+    - when: never
+
+variables:
+  UV_VERSION: "0.12.14"
+  PYTHON_VERSION: "3.12"
+  BASE_LAYER: trixie-slim
+  # GitLab mounts the build dir separately, hard links from the uv cache do not work there.
+  UV_LINK_MODE: copy
+  UV_CACHE_DIR: .uv-cache
+
+check:
+  image: ghcr.io/astral-sh/uv:$UV_VERSION-python$PYTHON_VERSION-$BASE_LAYER
+  cache:
+    - key:
+        files:
+          - uv.lock
+      paths:
+        - $UV_CACHE_DIR
+  before_script:
+    - uv sync --locked
+  script:
+    - scripts/check.sh
+  after_script:
+    - uv cache prune --ci

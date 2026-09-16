@@ -1,0 +1,1 @@
+"""XML response class."""

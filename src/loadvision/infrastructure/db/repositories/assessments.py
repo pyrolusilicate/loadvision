@@ -1,0 +1,1 @@
+"""Postgres repository for assessments."""

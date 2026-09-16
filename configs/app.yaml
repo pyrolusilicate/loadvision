@@ -1,0 +1,24 @@
+# Service settings. Secrets and connection strings come from the environment, see .env.example.
+api:
+  max_body_mb: 20
+  request_id_header: X-Request-ID
+
+images:
+  max_decoded_mb: 15
+  max_megapixels: 50
+  min_side_px: 256
+  allowed_formats: [jpeg, png, webp]
+
+shipment:
+  id_pattern: "^[A-Za-z0-9_-]{1,64}$"
+
+storage:
+  images_dir: storage/images
+  models_dir: storage/models
+
+logging:
+  format: json
+  level: INFO
+
+runs:
+  dir: runs
