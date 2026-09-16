@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<AssessmentRequest xmlns="urn:loadvision:api:v1">
+  <ShipmentId>RP-2026-000123</ShipmentId>
+  <Image>/9j/4AAQSkZJRgABAQ==</Image>
+  <DeclaredLoadPct>70</DeclaredLoadPct>
+</AssessmentRequest>
