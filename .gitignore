@@ -12,6 +12,7 @@ dist/
 .uv-cache/
 .coverage
 htmlcov/
+.import_linter_cache/
 
 # Data, runs and artifacts are never committed
 data/
