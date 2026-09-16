@@ -20,21 +20,15 @@
 
 Заметки лежат в репозитории в `docs/plan/`. Только локально (`.git/info/exclude`) остаётся `CLAUDE.local.md`.
 
-## Состояние на 16.09.2026
+## Состояние на 16.09.2026, вечер
 
-- В `main` на сервере: каркас A, MR `chore/import-contracts-pyright` и `feat/contracts-v1` (слиты 16.09, `feat/contracts-v1` — squash `3b89428`).
-- Работа идёт в ветке `feat/contracts-pipeline` от `main` (`d852a7b`).
-- Код: всё, кроме перечисленного, — однострочные docstring-заготовки. Реализовано:
-  - в `main`: `errors.py`, `domain/` (`shipment.py`, `timestamps.py`, `assessment.py`, `model_version.py`), `imaging/prepared_image.py`, `application/ports.py`, зависимость numpy 2.5.3 и unit-тесты к ним;
-  - закоммичено в `feat/contracts-pipeline` (`17a4f77`): фейки портов в `tests/fakes/`, контракты портов в `tests/port_contracts/`, строители `tests/builders.py`, тесты `test_fake_ports.py` и `test_fakes.py`; в `pyproject.toml` — `pythonpath = ["."]` для pytest и `tests` в `known-first-party` для ruff;
-  - закоммичено в `feat/contracts-pipeline` (`49b28a9`): `observability/events.py`, `observability/run_recorder.py`, `ml/pipeline/stage.py`, `ml/pipeline/runner.py`, код `STAGE_CHECK_FAILED` в `errors.py`, `format_utc` в `domain/timestamps.py` и тесты к ним;
-  - не закоммичено: запрет повторного `run_id` и `new_run_id`; `ml/packaging/manifest.py`, `ml/packaging/model_package.py`, код `MODEL_PACKAGE_INVALID` в `errors.py`, зависимость pydantic 2.13.5; тесты `tests/ml/test_manifest.py`, `tests/ml/test_model_package.py`, строители пакетов `tests/model_packages.py`.
-  - в `feat/contracts-pipeline` поверх ревью (B решил не заводить новую ветку): `api/xsd/loadvision-v1.xsd`, примеры `tests/fixtures/xml/*.xml`, `tests/contract/test_xsd.py`, зависимости lxml 6.1.3 и (dev) types-lxml 2026.2.16. `uv.lock` может конфликтовать с веткой A (Pillow): при слиянии не править lock руками, а взять любую сторону и выполнить `uv lock`.
-- Проверки: `scripts/check.sh` зелёный — ruff, format, pyright (0 ошибок), import-linter (4 контракта), pytest (362 теста).
+- В `main` (`aa607f5`): каркас A; запреты импортов и pyright; контракты v1 (ошибки, домен, `PreparedImage`, порты); контракты пайплайна (фейки и контракты портов, `Stage` и `PipelineRunner`, записи запусков, события, манифест и загрузчик пакета, XSD v1 с примерами; от A — препроцессинг, `PackagePredictor`, пакет v0, порт `TrainingRunner`). `scripts/check.sh` зелёный, 409 быстрых тестов.
+- Ветка A `feature/loaders` (MR не слит): `.gitignore` с правилами от корня (`2d89666`) и загрузчик датасета `ml/data/manifest.py` (`f22a8d4`).
+- Ветка B `feat/db-schema` от `main`: `c200d57` — перенесённая правка `.gitignore` A; не закоммичено — первая миграция (раздел «Первая миграция»).
 - A 16.09 в `feat/contracts-pipeline` (`0f3eb9e`, `cd40f1c`, слито B в `a4109fd`): препроцессинг `imaging/preprocessing.py` (реестр `resize_pad`, `baseline_v0`; нормализация — шесть чисел `mean_r`…`std_b` в `params`), `ml/inference/predictor.py` (`PackagePredictor(package)` реализует `LoadPredictor`, пока только runtime `numpy` с Ridge-головой), `ml/packaging/baseline_package.py` (`build_baseline_package`), порт `TrainingRunner` в `application/ports.py`, зависимость Pillow 12.3.0. B 16.09 проверил: `uv lock --check` чистый, `scripts/check.sh` зелёный (401 тест), паритет пакета v0 с `baseline/submission.csv` на 8 фото test до 1e-6 проходит (`pytest -m data tests/quality`).
 - B 16.09 поправил `PackagePredictor` (с согласия B, код A): при создании каждый член ансамбля прогоняется на пустом фото 8×6, так что неизвестный ключ препроцессинга, неверные параметры и голова под другое число признаков падают при загрузке пакета с `ModelPackageError` «member N: …», а не на первом запросе; у runtime `numpy` допустим только backbone `baseline_features`. `round_to` округляет половину вверх (`floor(x / step + 0.5) * step`): встроенный `round` отправлял половину к чётному (12.5 → 10, но 17.5 → 20).
 - Данные: `data/train` (716 фото, `train.csv`, `train_groups.csv`), `data/test` (307 фото, `test.csv`, `sample_submission.csv`).
-- Следующий шаг: слить MR `feat/contracts-pipeline` в `main`, дальше работа по зонам. B — первая миграция Alembic и таблицы на SQLAlchemy Core (0.13, 6.1), затем проверка фото (7.5) и `POST /assessments` (7.2, 5.x).
+- Следующий шаг B: закоммитить миграцию, MR с ревью A (первая миграция — общий контракт); затем хранилище фото (6.3), проверка фото (7.5, 7.6), `assess_photo` (7.2), API (5.1–5.4).
 
 ## Команда и роли (решено 15.09)
 
@@ -218,7 +212,18 @@
 - `load_pct double precision` и `CHECK (load_pct BETWEEN 0 AND 100)`. Проверить тестом, что NaN не проходит CHECK: в Postgres NaN считается больше любого числа, ожидаем отказ.
 - Таблицы и ограничения — по плану A, см. `plan-a-spec.md`.
 - От A 16.09: в `assessments` добавить `brightness` и `sharpness`; колонку `needs_review` не заводить — флаг вычисляется из причин.
-- Для `DeclaredLoadPct` нужна колонка `declared_load_pct double precision NULL` с тем же CHECK диапазона; в домене у `Assessment` такого поля пока нет — добавить вместе с миграцией.
+- Для `DeclaredLoadPct` нужна колонка `declared_load_pct double precision NULL` с тем же CHECK диапазона; в домене у `Assessment` такого поля пока нет — добавить при реализации 5.11.
+- Ловушка (`.gitignore`, найдено A 16.09): правило `data/` без `/` в начале скрывает папку с этим именем на любой глубине — так пропали `ml/data/` и `infrastructure/storage/`. Правила только от корня: `/data/`, `/runs/`, `/storage/`.
+- Реализовано 16.09 (B, `feat/db-schema`, не закоммичено; решения B 16.09):
+  - Зависимости: SQLAlchemy 2.0.54, Alembic 1.20.0, `psycopg[binary]` 3.3.5.
+  - `infrastructure/db/tables.py` — схема на SQLAlchemy Core, источник правды для миграций. Соглашение об именах: `pk_<таблица>`, `fk_<таблица>_<колонка>`, `uq_…`, `ix_…`, `ck_<таблица>_<правило>`. Форматы и списки значений в CHECK строятся из констант: `SHIPMENT_ID_PATTERN`, `MODEL_VERSION_PATTERN`, `SHA256_HEX_PATTERN`, `ReviewReason`, `ModelVersionStatus`, `MediaType`, `TrainingMode`, `ErrorCode`. Пока без доменного типа: `LABEL_SOURCES` (api, ui, import) и `JOB_STATUSES` (queued, running, succeeded, failed) — уйдут в домен с `ConfirmedLabel` и `TrainingJob` (7.1).
+  - Таблицы: `images` (без `path`: путь выводится из sha256 в хранилище), `shipments`, `model_versions` (`package_uri`, `manifest`, `cv_mae`, `within_10`, `gate_report` допускают NULL до `model register`, 4.10; частичный UNIQUE — одна `active`; `activated_at` задан тогда и только тогда, когда статус `active` или `retired`), `assessments` (UNIQUE перевозка + фото; `review_reasons text[]` только из четырёх причин; без `needs_review`; индексы для истории перевозки и для повторного использования прогноза по фото и версии), `confirmed_labels` (PK — sha256 фото: одна метка на фото), `training_jobs` (частичный UNIQUE — одна `running`; `started_at` пуст только у `queued`, `finished_at` задан у завершённых, `error_code` — только у `failed`).
+  - Ловушка NaN: в Postgres NaN больше любого числа, поэтому `x >= 0` пропускает NaN и бесконечность. Диапазон 0–100 закрыт верхней границей `<= 100`; неотрицательные значения проверяются как `x >= 0 AND x < 'Infinity'`.
+  - Миграции: `alembic.ini` в корне, `script_location = loadvision.infrastructure.db:migrations` — путь через пакет, миграции едут в wheel и образ. URL только из `DATABASE_URL` (константа `DATABASE_URL_ENV` в `settings.py`), в `alembic.ini` его нет. Номера ревизий по порядку: `0001`, следующая — `--rev-id 0002`.
+  - `0001_initial_schema.py` — тексты ограничений скопированы, а не импортированы из `tables.py`: миграция — снимок. Ловушка: Alembic применяет соглашение об именах из `tables.metadata` и к операциям миграции, поэтому готовое имя без `op.f(...)` получает префикс второй раз (`ck_images_ck_images_…`).
+  - Команды: `just db-migrate` — применить миграции к базе из `.env`; `just integration` — тесты на Postgres (`just db-up` перед этим).
+  - Тесты: unit `tests/unit/test_migrations.py` — одна голова у цепочки миграций (параллельные миграции B и A дадут две). Integration `tests/integration/` — каждый прогон создаёт базы со случайным именем и удаляет их (`DROP DATABASE … WITH (FORCE)`), базу из `DATABASE_URL` не трогает. Проверки: каталоги Postgres (колонки, ограничения, индексы) у базы после миграции и у базы из `tables.py` совпадают — autogenerate не сравнивает тексты CHECK и условия частичных индексов; autogenerate не видит разницы; откат до `base` и повторный подъём; каждое ограничение отказывает с ожидаемым именем; формат номера, версии, sha256 и правило `activated_at` в базе совпадают с доменом на одних и тех же значениях. 96 интеграционных тестов.
+  - 11 мутаций (6 в миграции, 5 в `tables.py`), все пойманы; мутации `tables.py` ловит только сравнение каталогов, как и задумано.
 
 ### Тесты (план)
 
