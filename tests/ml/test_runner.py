@@ -288,6 +288,19 @@ def test_failure_event_has_code_type_and_traceback(ctx: RunContext) -> None:
 
 
 @pytest.mark.ml
+def test_refuses_to_reuse_run_folder(ctx: RunContext) -> None:
+    run([ScriptedStage("split")], ctx)
+    events, summary = read_events(ctx), read_summary(ctx)
+    log: list[str] = []
+
+    with pytest.raises(FileExistsError):
+        run([ScriptedStage("train", log)], ctx)
+
+    assert log == []
+    assert (read_events(ctx), read_summary(ctx)) == (events, summary)
+
+
+@pytest.mark.ml
 @pytest.mark.parametrize(
     ("names", "message"),
     [

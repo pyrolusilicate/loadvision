@@ -17,12 +17,21 @@ SUMMARY_FILE: Final = "summary.json"
 class RunRecorder:
     """Writes `run.jsonl` and `summary.json` into the folder of one run.
 
+    Every run gets a new folder, so records of different runs never mix: a rerun, including a
+    future restart from a failed stage, takes a new run id and reuses finished stages from the
+    cache.
+
     Args:
-        run_dir: Folder of the run; created if missing.
+        run_dir: Folder of the new run; missing parents are created.
+
+    Raises:
+        FileExistsError: If `run_dir` already exists. Creating a folder is atomic, so two
+            processes that start the same run id cannot both get it.
     """
 
     def __init__(self, run_dir: Path) -> None:
-        run_dir.mkdir(parents=True, exist_ok=True)
+        run_dir.parent.mkdir(parents=True, exist_ok=True)
+        run_dir.mkdir()
         self._run_dir = run_dir
 
     def event(

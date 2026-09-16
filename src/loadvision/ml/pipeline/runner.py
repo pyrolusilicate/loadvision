@@ -150,6 +150,8 @@ class TrainingRunner:
         Raises:
             ValueError: If a stage name is malformed or repeated; nothing runs and nothing is
                 written then.
+            FileExistsError: If the run folder already exists; nothing runs, the earlier
+                records stay untouched.
         """
         _validate_stage_names(stages)
         recorder = RunRecorder(ctx.run_dir)

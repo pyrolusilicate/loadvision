@@ -1,10 +1,19 @@
 import pickle
+import re
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import pytest
 
 from loadvision.errors import ERROR_CATALOG, ErrorCode, LoadvisionError
-from loadvision.ml.pipeline.stage import RunContext, StageCheckError, StageResult
+from loadvision.ml.pipeline.stage import (
+    RUN_ID_PATTERN,
+    RunContext,
+    StageCheckError,
+    StageResult,
+    new_run_id,
+)
+from tests.builders import T0
 
 
 def make_ctx(tmp_path: Path, run_id: str = "run_20260916_120000_a3f") -> RunContext:
@@ -31,6 +40,25 @@ def test_run_context_accepts_folder_safe_run_id(tmp_path: Path, run_id: str) -> 
 def test_run_context_rejects_unsafe_run_id(tmp_path: Path, run_id: str) -> None:
     with pytest.raises(ValueError, match="run id"):
         make_ctx(tmp_path, run_id)
+
+
+@pytest.mark.ml
+def test_new_run_id_is_utc_start_time_and_random_tail() -> None:
+    moscow = T0.astimezone(timezone(timedelta(hours=3)))
+    run_id = new_run_id(moscow)
+    assert re.fullmatch(r"run_20260916_120000_[0-9a-f]{6}", run_id)
+    assert re.fullmatch(RUN_ID_PATTERN, run_id)
+
+
+@pytest.mark.ml
+def test_new_run_ids_differ_within_one_second() -> None:
+    assert len({new_run_id(T0) for _ in range(20)}) == 20
+
+
+@pytest.mark.ml
+def test_new_run_id_rejects_naive_time() -> None:
+    with pytest.raises(ValueError, match="now"):
+        new_run_id(datetime(2026, 9, 16, 12, 0))
 
 
 @pytest.mark.ml
