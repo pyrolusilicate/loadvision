@@ -1,0 +1,33 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+*.egg-info/
+build/
+dist/
+
+# Tool caches
+.ruff_cache/
+.pytest_cache/
+.uv-cache/
+.coverage
+htmlcov/
+
+# Data, runs and artifacts are never committed
+data/
+runs/
+storage/
+mlruns/
+mlflow.db
+
+# Secrets
+.env
+
+# OS and editors
+.DS_Store
+.idea/
+.vscode/
+.zed/
+
+# Baseline
+baseline/
