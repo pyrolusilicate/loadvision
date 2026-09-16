@@ -1,6 +1,7 @@
 import pytest
 
-from loadvision.domain.shipment import InvalidShipmentIdError, ShipmentId
+from loadvision.domain.shipment import ShipmentId
+from loadvision.errors import ErrorCode, LoadvisionError
 
 
 @pytest.mark.unit
@@ -25,8 +26,9 @@ def test_accepts_valid_id(value: str) -> None:
     ],
 )
 def test_rejects_invalid_id(value: str) -> None:
-    with pytest.raises(InvalidShipmentIdError):
+    with pytest.raises(LoadvisionError) as error:
         ShipmentId(value)
+    assert error.value.code is ErrorCode.INVALID_SHIPMENT_ID
 
 
 @pytest.mark.unit
