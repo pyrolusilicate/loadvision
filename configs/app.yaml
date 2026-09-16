@@ -9,9 +9,6 @@ images:
   min_side_px: 256
   allowed_formats: [jpeg, png, webp]
 
-shipment:
-  id_pattern: "^[A-Za-z0-9_-]{1,64}$"
-
 storage:
   images_dir: storage/images
   models_dir: storage/models
