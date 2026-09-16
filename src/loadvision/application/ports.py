@@ -1,17 +1,23 @@
 """Protocols the application layer depends on: repositories, storage, predictor."""
 
-from collections.abc import Callable, Sequence
-from dataclasses import dataclass
+import re
+from collections.abc import Callable, Mapping, Sequence
+from dataclasses import dataclass, field
 from datetime import datetime
+from enum import StrEnum
+from pathlib import Path
 from types import TracebackType
-from typing import Protocol, Self
+from typing import Final, Protocol, Self
 from uuid import UUID
 
-from loadvision.domain.assessment import Assessment, LoadPercent
+from loadvision.domain.assessment import SHA256_HEX_PATTERN, Assessment, LoadPercent
 from loadvision.domain.model_version import ModelVersion, ModelVersionId
 from loadvision.domain.shipment import Shipment, ShipmentId
 from loadvision.domain.timestamps import ensure_aware
+from loadvision.errors import ErrorCode
 from loadvision.imaging.prepared_image import MediaType, PreparedImage
+
+_SHA256_HEX_RE: Final = re.compile(SHA256_HEX_PATTERN)
 
 # Use cases receive time and ids as functions: the domain never reads the clock itself and tests
 # pass fixed values.
@@ -250,3 +256,136 @@ class UnitOfWork(Protocol):
 
 
 type UnitOfWorkFactory = Callable[[], UnitOfWork]
+
+
+class TrainingMode(StrEnum):
+    """How much of the pipeline a retraining run repeats.
+
+    Attributes:
+        FAST: Heads and ensemble weights on cached embeddings of a frozen encoder. Minutes on
+            a CPU, so the worker can run it.
+        FULL: The whole pipeline, fine-tuning included. Needs a GPU and runs from the CLI.
+    """
+
+    FAST = "fast"
+    FULL = "full"
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class LabeledImage:
+    """A confirmed label handed to training.
+
+    Attributes:
+        image_sha256: Lowercase hex SHA-256 of the photo; training reads the bytes from
+            `ImageStorage`.
+        load_pct: Load confirmed by a person.
+    """
+
+    image_sha256: str
+    load_pct: LoadPercent
+
+    def __post_init__(self) -> None:
+        """Validates the photo hash.
+
+        Raises:
+            ValueError: If `image_sha256` is not 64 lowercase hex characters.
+        """
+        if _SHA256_HEX_RE.fullmatch(self.image_sha256) is None:
+            raise ValueError("image_sha256 must be 64 lowercase hex characters")
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class TrainingRequest:
+    """What the worker asks training to do.
+
+    The base dataset is not listed here: training reads it from the dataset manifest, so the
+    request stays small whatever the dataset size.
+
+    Attributes:
+        mode: How much of the pipeline to repeat.
+        labels: Confirmed labels added on top of the base dataset; empty means retraining on
+            the base dataset alone.
+        base_version: Active model version the candidate is compared against, or None before
+            the first activation.
+    """
+
+    mode: TrainingMode
+    labels: tuple[LabeledImage, ...] = ()
+    base_version: ModelVersionId | None = None
+
+    def __post_init__(self) -> None:
+        """Validates the labels.
+
+        Raises:
+            ValueError: If the same photo appears twice; two labels of one photo would
+                contradict each other.
+        """
+        if len({label.image_sha256 for label in self.labels}) != len(self.labels):
+            raise ValueError("labels must not repeat a photo")
+
+
+class TrainingStatus(StrEnum):
+    """Whether training produced a package."""
+
+    SUCCEEDED = "succeeded"
+    FAILED = "failed"
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class TrainingOutcome:
+    """What training reports back to the worker.
+
+    A rejected candidate is a success: training worked and the gate did its job. Only a run
+    that produced no package is a failure.
+
+    Attributes:
+        run_id: Id of the run; its folder holds the events, the summary and the metrics.
+        status: Whether a package was produced.
+        package_path: Folder of the candidate package, or None when the run failed.
+        gate_passed: Whether the candidate may replace the active version.
+        gate_report: Numbers behind the gate decision, ready for JSON and for the API.
+        error_code: Code of the failure, or None when the run succeeded.
+        error_detail: Context of the failure for logs, never shown to clients.
+    """
+
+    run_id: str
+    status: TrainingStatus
+    package_path: Path | None = None
+    gate_passed: bool = False
+    gate_report: Mapping[str, object] = field(default_factory=dict[str, object])
+    error_code: ErrorCode | None = None
+    error_detail: str | None = None
+
+    def __post_init__(self) -> None:
+        """Validates that the fields agree with the status.
+
+        Raises:
+            ValueError: If a successful run has no package or carries an error code, if a
+                failed run carries a package or no error code, or if a failed run reports a
+                passed gate.
+        """
+        succeeded = self.status is TrainingStatus.SUCCEEDED
+        if succeeded and (self.package_path is None or self.error_code is not None):
+            raise ValueError("a succeeded run has a package and no error code")
+        if not succeeded and (self.package_path is not None or self.error_code is None):
+            raise ValueError("a failed run has an error code and no package")
+        if not succeeded and self.gate_passed:
+            raise ValueError("a failed run cannot pass the gate")
+
+
+class TrainingRunner(Protocol):
+    """Retraining on confirmed labels, called by the worker and by the CLI."""
+
+    def run(self, request: TrainingRequest) -> TrainingOutcome:
+        """Trains a candidate and compares it with the active version.
+
+        Expected failures, such as too few labels or a stage postcondition, come back in the
+        outcome, so the worker records them in the job instead of catching exceptions.
+
+        Args:
+            request: What to train and what to compare against.
+
+        Returns:
+            Outcome with the run id, the package and the gate decision.
+        """
+        ...

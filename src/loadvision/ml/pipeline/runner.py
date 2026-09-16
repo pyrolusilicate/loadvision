@@ -117,7 +117,7 @@ class RunSummary:
         }
 
 
-class TrainingRunner:
+class PipelineRunner:
     """Runs stages in order, checks their postconditions and records the run.
 
     The CLI and the worker use the same runner, so research runs and retraining follow the

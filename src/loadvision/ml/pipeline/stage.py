@@ -115,7 +115,7 @@ class StageCheckError(LoadvisionError):
 
 
 class Stage(Protocol):
-    """One step of a pipeline, run by `TrainingRunner`."""
+    """One step of a pipeline, run by `PipelineRunner`."""
 
     @property
     def name(self) -> str:

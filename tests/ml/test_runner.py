@@ -6,7 +6,7 @@ from pathlib import Path
 import pytest
 
 from loadvision.errors import ERROR_CATALOG, ErrorCode, LoadvisionError
-from loadvision.ml.pipeline.runner import RunStatus, RunSummary, StageStatus, TrainingRunner
+from loadvision.ml.pipeline.runner import PipelineRunner, RunStatus, RunSummary, StageStatus
 from loadvision.ml.pipeline.stage import RunContext, StageCheckError, StageResult
 from loadvision.observability.run_recorder import EVENTS_FILE, SUMMARY_FILE
 from tests.builders import T0
@@ -77,7 +77,7 @@ def ctx(tmp_path: Path) -> RunContext:
 
 
 def run(stages: list[ScriptedStage], ctx: RunContext) -> RunSummary:
-    return TrainingRunner(clock=TickingClock(), timer=StepTimer()).run(stages, ctx)
+    return PipelineRunner(clock=TickingClock(), timer=StepTimer()).run(stages, ctx)
 
 
 def read_events(ctx: RunContext) -> list[dict[str, object]]:
