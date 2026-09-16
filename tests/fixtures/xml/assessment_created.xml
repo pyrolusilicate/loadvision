@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<Assessment xmlns="urn:loadvision:api:v1" id="3f6c2a4e-7b1d-4c55-9a0e-5d2f8e41c7aa"
+            shipmentId="RP-2026-000123" reused="false">
+  <LoadPct>85.0</LoadPct>
+  <Declared loadPct="70.0" deviation="15.0"/>
+  <Review needed="true">
+    <Reason>low_confidence</Reason>
+  </Review>
+  <Signals uncertainty="7.4" oodScore="0.12" brightness="0.31" sharpness="0.78"/>
+  <Image sha256="3168830d8926f931e143037f47bd446cacf1f647b0fca637fa888d54ebb0bc84" mediaType="image/jpeg" width="1440" height="1920"/>
+  <Model version="2026-09-20.1"/>
+  <ProcessingMs>184</ProcessingMs>
+  <CreatedAt>2026-09-20T10:15:03Z</CreatedAt>
+</Assessment>

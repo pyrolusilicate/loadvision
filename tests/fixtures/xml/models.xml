@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<Models xmlns="urn:loadvision:api:v1">
+  <Model version="2026-09-20.1" status="active" createdAt="2026-09-20T08:40:00Z"
+         activatedAt="2026-09-20T08:45:12Z" cvMae="7.9" within10="81.5"/>
+  <Model version="baseline-v0" status="retired" createdAt="2026-09-16T12:00:00Z"
+         activatedAt="2026-09-16T12:05:00Z"/>
+</Models>

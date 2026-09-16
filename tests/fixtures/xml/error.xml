@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<Error xmlns="urn:loadvision:api:v1" code="CORRUPTED_IMAGE" requestId="req_7Hc2kQ">
+  <Message>Изображение не удалось декодировать: файл повреждён, обрезан или его размеры вне допустимых.</Message>
+  <Hint>Отправьте исходный файл фото без изменений. Требования к размерам описаны в документации API.</Hint>
+</Error>

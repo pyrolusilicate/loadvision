@@ -22,16 +22,19 @@
 
 ## Состояние на 16.09.2026
 
-- В `main` на сервере: каркас A и MR `chore/import-contracts-pyright` (слит 16.09).
-- Работа идёт в ветке `feat/contracts-v1` от свежего `main`.
+- В `main` на сервере: каркас A, MR `chore/import-contracts-pyright` и `feat/contracts-v1` (слиты 16.09, `feat/contracts-v1` — squash `3b89428`).
+- Работа идёт в ветке `feat/contracts-pipeline` от `main` (`d852a7b`).
 - Код: всё, кроме перечисленного, — однострочные docstring-заготовки. Реализовано:
-  - в `main`: `domain/shipment.py` (`SHIPMENT_ID_PATTERN`, `ShipmentId`), тесты `test_shipment_id.py` и `test_layers_import.py`;
-  - закоммичено в `feat/contracts-v1` (`7bc9810`): `errors.py` (`ErrorCode`, `ErrorSpec`, `ERROR_CATALOG`, `LoadvisionError`) и тесты `test_errors.py`; `ShipmentId` бросает `LoadvisionError(INVALID_SHIPMENT_ID)`, `InvalidShipmentIdError` удалён;
-  - закоммичено в `feat/contracts-v1` (`90a446a`): `domain/timestamps.py` (`ensure_aware`), `Shipment`, `domain/assessment.py` (`LoadPercent`, `ReviewReason`, `Signals`, `Assessment`), `domain/model_version.py` (`MODEL_VERSION_PATTERN`, `ModelVersionId`, `ModelVersionStatus`, `ModelVersion` с переходами); тесты `test_timestamps.py`, `test_shipment.py`, `test_assessment.py`, `test_model_version.py`;
-  - закоммичено в `feat/contracts-v1` (`2595481`): `imaging/prepared_image.py` (`MediaType`, `PreparedImage`), `application/ports.py` (протоколы и `ImageRecord`), тесты `test_prepared_image.py` и `test_image_record.py`, зависимость numpy 2.5.3.
-- Проверки: `scripts/check.sh` зелёный — ruff, format, pyright (0 ошибок), import-linter (4 контракта), pytest (151 тест).
+  - в `main`: `errors.py`, `domain/` (`shipment.py`, `timestamps.py`, `assessment.py`, `model_version.py`), `imaging/prepared_image.py`, `application/ports.py`, зависимость numpy 2.5.3 и unit-тесты к ним;
+  - закоммичено в `feat/contracts-pipeline` (`17a4f77`): фейки портов в `tests/fakes/`, контракты портов в `tests/port_contracts/`, строители `tests/builders.py`, тесты `test_fake_ports.py` и `test_fakes.py`; в `pyproject.toml` — `pythonpath = ["."]` для pytest и `tests` в `known-first-party` для ruff;
+  - закоммичено в `feat/contracts-pipeline` (`49b28a9`): `observability/events.py`, `observability/run_recorder.py`, `ml/pipeline/stage.py`, `ml/pipeline/runner.py`, код `STAGE_CHECK_FAILED` в `errors.py`, `format_utc` в `domain/timestamps.py` и тесты к ним;
+  - не закоммичено: запрет повторного `run_id` и `new_run_id`; `ml/packaging/manifest.py`, `ml/packaging/model_package.py`, код `MODEL_PACKAGE_INVALID` в `errors.py`, зависимость pydantic 2.13.5; тесты `tests/ml/test_manifest.py`, `tests/ml/test_model_package.py`, строители пакетов `tests/model_packages.py`.
+  - в `feat/contracts-pipeline` поверх ревью (B решил не заводить новую ветку): `api/xsd/loadvision-v1.xsd`, примеры `tests/fixtures/xml/*.xml`, `tests/contract/test_xsd.py`, зависимости lxml 6.1.3 и (dev) types-lxml 2026.2.16. `uv.lock` может конфликтовать с веткой A (Pillow): при слиянии не править lock руками, а взять любую сторону и выполнить `uv lock`.
+- Проверки: `scripts/check.sh` зелёный — ruff, format, pyright (0 ошибок), import-linter (4 контракта), pytest (362 теста).
+- A 16.09 в `feat/contracts-pipeline` (`0f3eb9e`, `cd40f1c`, слито B в `a4109fd`): препроцессинг `imaging/preprocessing.py` (реестр `resize_pad`, `baseline_v0`; нормализация — шесть чисел `mean_r`…`std_b` в `params`), `ml/inference/predictor.py` (`PackagePredictor(package)` реализует `LoadPredictor`, пока только runtime `numpy` с Ridge-головой), `ml/packaging/baseline_package.py` (`build_baseline_package`), порт `TrainingRunner` в `application/ports.py`, зависимость Pillow 12.3.0. B 16.09 проверил: `uv lock --check` чистый, `scripts/check.sh` зелёный (401 тест), паритет пакета v0 с `baseline/submission.csv` на 8 фото test до 1e-6 проходит (`pytest -m data tests/quality`).
+- B 16.09 поправил `PackagePredictor` (с согласия B, код A): при создании каждый член ансамбля прогоняется на пустом фото 8×6, так что неизвестный ключ препроцессинга, неверные параметры и голова под другое число признаков падают при загрузке пакета с `ModelPackageError` «member N: …», а не на первом запросе; у runtime `numpy` допустим только backbone `baseline_features`. `round_to` округляет половину вверх (`floor(x / step + 0.5) * step`): встроенный `round` отправлял половину к чётному (12.5 → 10, но 17.5 → 20).
 - Данные: `data/train` (716 фото, `train.csv`, `train_groups.csv`), `data/test` (307 фото, `test.csv`, `sample_submission.csv`).
-- Следующий шаг: фейки портов в `tests/fakes/` и общие тесты портов, затем XSD v1 и примеры XML.
+- Следующий шаг: слить MR `feat/contracts-pipeline` в `main`, дальше работа по зонам. B — первая миграция Alembic и таблицы на SQLAlchemy Core (0.13, 6.1), затем проверка фото (7.5) и `POST /assessments` (7.2, 5.x).
 
 ## Команда и роли (решено 15.09)
 
@@ -75,6 +78,9 @@
 - База — план A «Loadvision» v1 от 15.09. План от Gemini отброшен. (решено 15.09)
 - Слои: `api | cli` → `infrastructure | ml` → `application` → `domain`. Три forbidden-контракта: домен без фреймворков; application без веба, БД, XML и ML; общие модули (`errors`, `settings`, `observability`, `imaging`) не импортируют слои проекта и ML-рантаймы. (решено 16.09)
 - БД: PostgreSQL, SQLAlchemy 2 **sync** и psycopg 3. Async не нужен: модель всё равно считается в отдельном потоке. (решено 15.09)
+- SQLite не берём: в базу одновременно пишут API и CLI или воркер дообучения, а SQLite допускает одного пишущего; нет `FOR UPDATE SKIP LOCKED` для очереди; файл базы между контейнерами ненадёжен; типизация слабая. (решено B 16.09)
+- SQLAlchemy **Core**, не ORM: таблицы и запросы; репозиторий явно собирает неизменяемые доменные dataclass из строк. ORM требует изменяемых объектов с отслеживанием изменений и ленивой загрузкой. Транзакция — на `UnitOfWork`. Alembic — миграции с откатом и проверкой расхождений по метаданным таблиц. (решено B 16.09)
+- XML: lxml (проверка XSD на libxml2, явные настройки безопасного парсера); типы для pyright — `types-lxml` в dev: без них pyright не видит `lxml.etree`. pydantic-xml под вопросом: решить на 5.4. (решено B 16.09)
 - UI: Jinja2 + htmx 2.x локальным файлом, без сборки фронтенда. UI вызывает сценарии application напрямую, не через XML API. (решено 15.09)
 - Фото передаются только в base64 внутри XML. (план A)
 - Быстрое дообучение — только на замороженных энкодерах. Фолды существующих строк не меняются. Источник правды для метрик — `runs/`. (`CLAUDE.md`, 16.09)
@@ -157,6 +163,7 @@
 
 - Живёт в `imaging/`, а не в `application/ports.py`. Иначе получится цикл импортов: контракт запрещает `imaging` импортировать `application`, а `application` использует `imaging`.
 - Поля: `sha256`, `media_type`, `pixels: NDArray[np.uint8]` формы (H, W, 3), RGB, EXIF уже применён, исходный размер; `raw: bytes` для `ImageStorage`. Ширина и высота берутся из `shape`, отдельно не хранятся.
+- Декодирование в валидаторе (7.5) обязано совпадать с тестом паритета A: `ImageOps.exif_transpose(image).convert("RGB")` в Pillow. Иначе прогноз сервиса разойдётся с `submission.csv` на том же пакете. (B 16.09)
 - Это декодированное фото, а не вход модели. Вход модели (ресайз с паддингом до вертикального входа фиксированного размера, нормализация, форма (3, H, W)) делает `imaging/preprocessing.py` по параметрам из манифеста.
 - Реализовано 16.09 в `imaging/prepared_image.py`; решения про вычисляемый `sha256`, пиксели только для чтения и сравнение по идентичности подтверждены B 16.09:
   - `MediaType`: image/jpeg, image/png, image/webp — формат определяется по содержимому файла;
@@ -193,12 +200,25 @@
 - `LoadPct` — `xs:decimal`: NaN и бесконечности в нём непредставимы.
 - Шаблон `ShipmentId` — та же строка, что `SHIPMENT_ID_PATTERN`; тест сверяет их, когда появится XSD.
 - Элементы review и signals необязательные.
-- `DeclaredLoadPct` — процент из нормативного отчёта (Should, предложено, с A не согласовано).
+- `DeclaredLoadPct` — процент из нормативного отчёта (Should). A 16.09 попросил его в XSD вместе с отклонением.
+- Реализовано 16.09 (B, не в git):
+  - Файл `src/loadvision/api/xsd/loadvision-v1.xsd` — внутри пакета, чтобы `GET /api/v1/schema.xsd` отдавал его через `importlib.resources`. XSD 1.0: libxml2 другой версии не знает.
+  - Сообщения (глобальные элементы) и методы: `AssessmentRequest` → `Assessment` (POST оценки, GET оценки), `Shipment` (GET перевозки), `LabelRequest` → `Label` (PUT метки), `Models` и `Model` (GET моделей, POST активации), `Health`, `Error`. Should-методы (`training-jobs`, отчёт по недогрузу) добавятся новыми элементами: старые документы от этого не ломаются.
+  - От ML (A 16.09): `Signals` с атрибутами `uncertainty`, `oodScore`, `brightness`, `sharpness` — все необязательные, ≥ 0; `Review needed` с причинами `low_confidence`, `unusual_scene`, `too_dark`, `blurry`; в запросе необязательный `DeclaredLoadPct`, в ответе `Declared loadPct deviation`. `deviation` = оценка − нормативная, в п. п., от −100 до 100: меньше нуля — недогруз против отчёта. В базе отклонение не хранится, считается при сборке XML.
+  - Решения B (показать A): у `Image` в запросе нет атрибутов `mediaType` и `encoding` из примера плана A — формат определяется по байтам, base64 единственный, лишний атрибут мог бы разойтись с содержимым. В ответе `Image` несёт определённый сервисом `mediaType`. Метка относится к фото, а не к оценке (в `Label` есть `imageSha256`), поэтому видна во всех оценках этого фото: `ConfirmedLabel` в `Assessment`, `confirmedLoadPct` в истории перевозки. У `Current` и элементов истории один тип с атрибутом `id`. `Health` — только при готовности; без модели 503 и `Error MODEL_NOT_READY`. `requestId` — `[A-Za-z0-9._-]{1,128}`: чужой `X-Request-ID` в другом формате middleware заменит своим (задача 5.2).
+  - `LoadPct`: `xs:decimal` от 0 до 100, не больше одного знака (метки train — целые). Время — `xs:dateTime` только с `Z`, дробная часть до 6 знаков, как пишет `format_utc`.
+  - Шаблоны `ShipmentIdType` и `ModelVersionType` и перечисления `ErrorCodeType` (коды каталога с HTTP-статусом), `ReviewReasonType`, `ModelStatusType`, `MediaTypeType` сверяются с кодом тестом. Тексты `Message` и `Hint` в `error.xml` сверяются с каталогом.
+  - Ловушка: libxml2 проверяет `xs:base64Binary` нестрого — пропускает префикс `data:image/jpeg;base64,`. Строгое декодирование делает API (5.4) и отвечает `INVALID_ENCODING`.
+  - Какой код отдавать, если XSD не прошёл: ошибка на `ShipmentId` — `INVALID_SHIPMENT_ID`, на `Image` — `INVALID_ENCODING`, остальное — `INVALID_XML`. Сопоставление по пути ошибки из `error_log` lxml делает API (5.4).
+  - Примеры в `tests/fixtures/xml/` — по одному на каждое сообщение (тест требует), они же пойдут в README. В `assessment_request.xml` base64 условный: для API-теста 5.4 нужно настоящее фото с короткой стороной не меньше лимита из `configs/app.yaml`.
+  - 52 теста в `tests/contract/test_xsd.py`, 11 мутаций схемы, все пойманы.
 
 ### Первая миграция
 
 - `load_pct double precision` и `CHECK (load_pct BETWEEN 0 AND 100)`. Проверить тестом, что NaN не проходит CHECK: в Postgres NaN считается больше любого числа, ожидаем отказ.
 - Таблицы и ограничения — по плану A, см. `plan-a-spec.md`.
+- От A 16.09: в `assessments` добавить `brightness` и `sharpness`; колонку `needs_review` не заводить — флаг вычисляется из причин.
+- Для `DeclaredLoadPct` нужна колонка `declared_load_pct double precision NULL` с тем же CHECK диапазона; в домене у `Assessment` такого поля пока нет — добавить вместе с миграцией.
 
 ### Тесты (план)
 
@@ -214,6 +234,58 @@ tests/
 
 - С `--import-mode=importlib` пакет `tests.fakes` просто так не импортируется: нужен `pythonpath` в настройках pytest или фикстуры в `conftest.py`.
 - После каждого нового теста ломать реализацию и проверять, что падает ровно нужный тест.
+- Реализовано 16.09 (фейки и контракты портов):
+  - `tests/fakes/in_memory_db.py`: `InMemoryStore` и `InMemoryUnitOfWork` с репозиториями. Записи копятся в черновике и попадают в хранилище только при `commit`; выход без `commit` или с исключением их отбрасывает; вне блока `with` — `RuntimeError`.
+  - Фейк повторяет ограничения базы: дубль (перевозка, sha256) — `AssessmentAlreadyExistsError` при рабочем `UnitOfWork`; вторая активная версия модели — `ValueError`, как частичный UNIQUE-индекс; повторная регистрация и обновление незарегистрированной версии — `ValueError`.
+  - Изоляции параллельных транзакций в фейке нет: гонки проверяются на Postgres.
+  - `tests/fakes/predictor.py` (`FakePredictor`: заданные или вычисленные из хэша проценты, режим ошибки, запись батчей), `image_storage.py`, `clock.py` (`FixedClock`, `SequentialIds`).
+  - `tests/port_contracts/`: классы-контракты `UnitOfWorkContract`, `ImageStorageContract`, `LoadPredictorContract`. Реализации на Postgres и настоящий предиктор подключаются наследованием тестового класса — так фейк гарантированно ведёт себя как настоящая реализация.
+  - Контракт предиктора: пустой батч даёт пустой список; прогноз батчем совпадает с прогнозами по одному фото, в том числе при обратном порядке (допуск 1e-3 п.п.).
+  - Помощники импортируются как `tests.builders` и `tests.fakes…`: pytest нужен `pythonpath = ["."]`, ruff — `tests` в `known-first-party`.
+  - 14 мутаций фейков, каждая валит ровно свои тесты.
+  - Ловушка: в zsh переменная с несколькими путями не разбивается на аргументы — пути в командах писать явно.
+
+### Stage и TrainingRunner (согласовано с A 16.09)
+
+- Протокол как в плане A: `name`, `version`, `inputs(ctx) -> dict[str, str]`, `run(ctx) -> StageResult`, `check(ctx, result) -> None`; постусловия бросают `StageCheckError`.
+- `RunContext`: `run_id`, папка запуска `runs/<run_id>/`, разрешённый конфиг эксперимента, пути к `data/`, сид и `cache_dir` — кэш между запусками (эмбеддинги), не внутри `runs/<run_id>/`. Кэш эмбеддингов A делает внутри своего этапа, от runner нужен только путь. Предложение B: `runs/cache/` (уже в `.gitignore` через `runs/`).
+- `StageResult`: `artifacts` (имя → путь), `metrics` (имя → число), `counts` (имя → int), `cached: bool` — чтобы в `summary.json` было видно, что этап взят из кэша.
+- `TrainingRunner` входит в контракты сейчас, а не на день 4 (просьба A): один runner для CLI и воркера, чтобы они не состыковывались в последний момент. Must — последовательный запуск с постусловиями, папка запуска и `summary.json`; кэш по хэшу и `--from-stage` — Should (4.2).
+- Переименование (A 16.09, `0f3eb9e`): раннер этапов в `ml/pipeline/runner.py` теперь `PipelineRunner`. `TrainingRunner` — порт в `application/ports.py`: `run(TrainingRequest) -> TrainingOutcome`; `TrainingRequest` (`mode`: fast или full, `labels`: `LabeledImage` без повторов фото, `base_version`), `TrainingOutcome` (`run_id`, `status`, `package_path`, `gate_passed`, `gate_report`, `error_code`, `error_detail`; отклонённый gate кандидат — успешный запуск). Воркер и CLI зовут порт, реализация в `ml` собирает этапы и запускает `PipelineRunner`. Общий шаблон sha256 — `SHA256_HEX_PATTERN` в `domain/assessment.py`.
+- Реализовано 16.09 (не закоммичено; отличия от плана A показать A):
+  - `Stage`: `name` и `version` — read-only свойства, а не изменяемые атрибуты, как в плане A. Так протоколу подходят и атрибут класса, и поле frozen dataclass. `inputs` возвращает `Mapping[str, str]`, реализация может вернуть `dict`.
+  - `RunContext(run_id, runs_dir, cache_dir, data_dir, config, seed)`; `run_dir` = `runs_dir / run_id` — свойство, чтобы папка не разошлась с `run_id`. `run_id` соответствует `RUN_ID_PATTERN` (`[A-Za-z0-9][A-Za-z0-9._-]{0,99}`): имя папки без точки в начале и без разделителей пути. То, что `cache_dir` лежит вне папки запуска, только описано в docstring: сравнение путей без `resolve` ненадёжно.
+  - `StageResult`: поля по умолчанию пустые. NaN и бесконечность в `metrics` дают `ValueError` при создании, иначе `summary.json` не запишется: JSON пишется без NaN.
+  - `StageCheckError(detail)` — наследник `LoadvisionError` с кодом `STAGE_CHECK_FAILED` (`http_status` None, в API не уходит); подсказка берётся из каталога. Подкласс со своей сигнатурой переопределяет `__reduce__`, иначе ошибка не переживёт передачу между процессами.
+  - `PipelineRunner(clock, timer=perf_counter).run(stages, ctx) -> RunSummary` (до `0f3eb9e` назывался `TrainingRunner`). Этапы идут по порядку; `check` вызывается после каждого `run`, в том числе при `cached=True`. Ошибка этапа не пробрасывается: этап получает `failed`, остальные `not_run`, итог пишется в `summary.json`, код выхода решает вызывающий. Код ошибки: у `LoadvisionError` свой, у прочих исключений `INTERNAL_ERROR` с detail «Тип: сообщение». Имена этапов (`STAGE_NAME_PATTERN` `[a-z][a-z0-9_]{0,63}`, без повторов) проверяются до запуска: `ValueError`, папка не создаётся. `KeyboardInterrupt` не ловится, `summary.json` тогда не пишется.
+  - `summary.json`: `run_id`, `status`, `started_at`, `finished_at` (UTC с `Z`), `failed_stage`, `error_code`, `hint`, `stages[]` (`name`, `version`, `status`, `cached`, `duration_ms`, `counts`, `metrics`, `artifacts`, `error_code`, `error_detail`). Поле `rerun` появится вместе с `--from-stage` (4.2).
+  - `run.jsonl`: `run.started`; `stage.started`; `stage.finished` с `cached` и `duration_ms`; `stage.failed` с `error_code`, `detail`, `exc_type`, `traceback` (последние 5 кадров) и `duration_ms`; `run.finished` со `status`. У всех событий есть `ts`, `level`, `event`, `module`, `run_id`. `RunRecorder` пишет JSON-строки сам; structlog подключится позже и должен писать те же поля.
+  - `observability/events.py`: имена из плана A плюс `run.started` и `run.finished`.
+  - `domain/timestamps.format_utc` — единственное место формата времени. Время форматирует runner: `observability` не импортирует `domain`.
+  - 33 мутации, все пойманы. Тесты не ловят атомарность записи `summary.json` и число кадров трейсбека.
+  - Решено 16.09 (B): папка запуска никогда не переиспользуется. `RunRecorder` создаёт её через `mkdir` без `exist_ok`: существующая папка — `FileExistsError`, этапы не запускаются, старые записи не трогаются. Создание папки атомарно, поэтому два процесса с одним `run_id` не запишут в одну папку. Каждый запуск, включая перезапуск после сбоя, берёт новый id из `new_run_id(now)`: `run_YYYYMMDD_HHMMSS_xxxxxx`, время в UTC, 6 случайных hex. Поэтому `--from-stage` (4.2) — новый запуск, который берёт готовые этапы из кэша по хэшу входов, а не дописывает старую папку. Ссылку на прерванный запуск (`resumed_from`) добавить вместе с 4.2. `config.resolved.yaml` и `env.json` (4.3) пишет runner в созданную им папку: если CLI создаст папку заранее, runner откажется.
+
+### Манифест пакета модели (согласовано с A 16.09)
+
+- JSON-файл; схема — модель pydantic в `ml/packaging/manifest.py` (в `ml` pydantic разрешён), для README — JSON Schema.
+- Поля: `version` (формат `ModelVersionId`), `created_at`, `git_commit`, `data_hash`, `members`, `cv`, `ood`, `postprocess`, `folds`, `licenses`, `files` (путь → sha256, загрузчик проверяет целостность).
+- Препроцессинг — у каждого члена ансамбля, а не один на пакет: разным энкодерам нужен разный вход (DINOv2 patch14 — 518, SigLIP 2 и PE-Spatial — 512). Член: `backbone`, `runtime`, `weights`, `head`, `weight`, `preprocessing: {name, params}`; `name` — ключ реестра в `imaging/preprocessing.py`, `params` — числа.
+- `folds: {file, sha256}` — на каких фолдах считались метрики; без этого gate не сравнит версии честно.
+- `ood: {k, threshold, reference}`: `reference` — эмбеддинги train внутри пакета, до них считается расстояние.
+- `postprocess`: округление к кратным 5 и притяжение к 100 включаются флагами, только если OOF это подтверждает. Нужен ли там `clip` — вопрос К2.
+- Пакет v0: один член, `backbone: baseline_features`, `runtime: numpy`, голова — Ridge из `baseline/model.npz`, `preprocessing: {name: baseline_v0, params: {}}` (baseline считает признаки по картинке 32×32, а не по входу 3:4). Проверка: прогноз на 8 фото совпадает с baseline до 1e-6.
+- Реализовано 16.09 (B, не закоммичено; решения, помеченные «предложено», ждут A — вопрос К4):
+  - `ml/packaging/manifest.py`: модель pydantic `Manifest`. Неизвестные поля — ошибка (`extra="forbid"`), NaN и бесконечность запрещены, модели неизменяемы. Время пишется через `format_utc`.
+  - Поля: `schema_version` (строго 1, предложено), `version` (проверка через `ModelVersionId`), `created_at` (с часовым поясом), `git_commit` (40 hex, обязателен — предложено), `data_hash` (64 hex без префикса `sha256:` — предложено), `members` (не пусто), `cv`, `ood`, `postprocess`, `folds`, `licenses`, `files`.
+  - Член: `backbone` и `preprocessing.name` — ключи реестров `[a-z][a-z0-9_]{0,63}`; `runtime` — `numpy`, `onnx` или `torch`; `weights` обязателен для `onnx` и `torch`, для `numpy` может быть None; `head` обязателен (предложено; вопрос — fine-tune с головой внутри ONNX); `weight` в [0, 1], сумма весов 1 с допуском 1e-6; `preprocessing.params` — только числа, `true` и строки отклоняются.
+  - `cv` (`mae` ≥ 0, `within_10` в процентах 0–100 — предложено, `mae_by_range`) и `folds` (`file` — путь в репозитории, `sha256`) задаются только вместе: метрики без фолдов нельзя сравнить. У пакета v0 оба None: baseline мерился на своём holdout.
+  - `postprocess`: `round_to` (шаг, > 0) и `snap_100` (порог, от которого прогноз становится 100); по умолчанию выключены. Поля `clip` нет: клип в [0, 100] всегда (предложение К2). Смысл `snap_100` как порога — предложено.
+  - Пути в пакете: сегменты без точки в начале, без `..`, `\`, пустых сегментов и абсолютных путей; `manifest.json` в `files` нельзя. Каждый файл, на который ссылается манифест (`weights`, `head`, `ood.reference`, `licenses`), обязан быть в `files`.
+  - `ml/packaging/model_package.py`: `ModelPackage.load(root)` читает манифест и сверяет sha256 каждого файла из `files`; все проблемы с файлами — в одной ошибке. Файл вне пакета (симлинк наружу) — ошибка. Файлы, которых нет в `files`, игнорируются. `package.path(name)` отдаёт только перечисленные файлы. `write_package(root, manifest)` пишет манифест и сразу загружает пакет обратно; `hash_package_files(root)` строит `files` по папке.
+  - Ошибка — `ModelPackageError` с кодом `MODEL_PACKAGE_INVALID` (`http_status` None; сервис при битом пакете отвечает `MODEL_NOT_READY`). Текст ошибок pydantic сокращён до «поле: сообщение», без ссылок на документацию и без входных значений.
+  - JSON Schema для README: `Manifest.model_json_schema()`.
+  - 31 мутация, все пойманы.
+  - Не сделано (не зона 0.8): предиктор по пакету (3.2, 3.6), реестры backbone и preprocessing, сам пакет v0 (0.9, A).
 
 ## Запреты и ловушки
 

@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<Shipment xmlns="urn:loadvision:api:v1" id="RP-2026-000123">
+  <Current id="3f6c2a4e-7b1d-4c55-9a0e-5d2f8e41c7aa" loadPct="85.0" declaredLoadPct="70.0"
+           needsReview="true" confirmedLoadPct="90.0" modelVersion="2026-09-20.1"
+           createdAt="2026-09-20T10:15:03Z"/>
+  <History count="2">
+    <Assessment id="3f6c2a4e-7b1d-4c55-9a0e-5d2f8e41c7aa" loadPct="85.0" declaredLoadPct="70.0"
+                needsReview="true" confirmedLoadPct="90.0" modelVersion="2026-09-20.1"
+                createdAt="2026-09-20T10:15:03Z"/>
+    <Assessment id="a91b07d2-5c3e-4f1a-8b6d-2e9f0c7a4b13" loadPct="40.0"
+                modelVersion="2026-09-20.1" createdAt="2026-09-20T09:02:44Z"/>
+  </History>
+</Shipment>
