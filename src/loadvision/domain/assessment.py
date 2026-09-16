@@ -12,7 +12,11 @@ from loadvision.domain.model_version import ModelVersionId
 from loadvision.domain.shipment import ShipmentId
 from loadvision.domain.timestamps import ensure_aware
 
-_SHA256_HEX_RE: Final = re.compile("[0-9a-f]{64}")
+# Photo hashes travel through the API, the database and model packages, so one pattern
+# describes them everywhere.
+SHA256_HEX_PATTERN: Final = "[0-9a-f]{64}"
+
+_SHA256_HEX_RE: Final = re.compile(SHA256_HEX_PATTERN)
 
 
 @dataclass(frozen=True, slots=True)

@@ -1,6 +1,6 @@
 """Catalog of error codes shared by the API, the pipeline and logs."""
 
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from enum import StrEnum
 from types import MappingProxyType
@@ -23,6 +23,8 @@ class ErrorCode(StrEnum):
     MODEL_VERSION_STATUS_CONFLICT = "MODEL_VERSION_STATUS_CONFLICT"
     MODEL_NOT_READY = "MODEL_NOT_READY"
     MODEL_INFERENCE_FAILED = "MODEL_INFERENCE_FAILED"
+    STAGE_CHECK_FAILED = "STAGE_CHECK_FAILED"
+    MODEL_PACKAGE_INVALID = "MODEL_PACKAGE_INVALID"
     INTERNAL_ERROR = "INTERNAL_ERROR"
 
 
@@ -116,6 +118,17 @@ ERROR_CATALOG: Final[Mapping[ErrorCode, ErrorSpec]] = MappingProxyType(
             "Повторите запрос, повтор безопасен. "
             "Если ошибка не проходит, сообщите requestId из ответа.",
         ),
+        ErrorCode.STAGE_CHECK_FAILED: ErrorSpec(
+            None,
+            "Постусловие этапа пайплайна не выполнено.",
+            "Откройте summary.json и run.jsonl этого запуска: там этап и причина.",
+        ),
+        ErrorCode.MODEL_PACKAGE_INVALID: ErrorSpec(
+            None,
+            "Пакет модели повреждён или не соответствует схеме манифеста.",
+            "Скачайте пакет заново или пересоберите его. Какой файл или поле не прошли проверку, "
+            "написано в логе.",
+        ),
         ErrorCode.INTERNAL_ERROR: ErrorSpec(
             500,
             "Внутренняя ошибка сервиса.",
@@ -139,9 +152,10 @@ class LoadvisionError(Exception):
         self.code = code
         self.detail = detail
 
-    def __reduce__(self) -> tuple[type[Self], tuple[ErrorCode, str | None]]:
+    def __reduce__(self) -> tuple[Callable[..., Self], tuple[object, ...]]:
         # Default exception pickling calls the class with self.args, the formatted message,
-        # so an error sent back from a worker process would fail to unpickle.
+        # so an error sent back from a worker process would fail to unpickle. A subclass with
+        # other constructor arguments overrides this method.
         return (type(self), (self.code, self.detail))
 
     @property

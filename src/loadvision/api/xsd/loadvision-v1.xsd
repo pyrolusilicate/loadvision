@@ -1,0 +1,393 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Loadvision XML API v1. Formats that also live in code are repeated here on purpose, and
+  tests/contract/test_xsd.py checks that both copies match: ShipmentIdType, ModelVersionType,
+  ErrorCodeType, ReviewReasonType, ModelStatusType, MediaTypeType.
+  Limits (body size, megapixels, image sides) are not repeated here: they live in configs/app.yaml.
+-->
+<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema"
+           xmlns="urn:loadvision:api:v1"
+           targetNamespace="urn:loadvision:api:v1"
+           elementFormDefault="qualified"
+           version="1.0">
+
+  <xs:annotation>
+    <xs:documentation>
+      XML API Loadvision v1: оценка загрузки грузового отсека по фото.
+      Тела запросов и ответов: application/xml; charset=utf-8.
+      Ошибки любого метода приходят элементом Error.
+    </xs:documentation>
+  </xs:annotation>
+
+  <!-- Identifiers and formats -->
+
+  <xs:simpleType name="ShipmentIdType">
+    <xs:annotation>
+      <xs:documentation>Номер перевозки: латинские буквы, цифры, «_» и «-».</xs:documentation>
+    </xs:annotation>
+    <xs:restriction base="xs:string">
+      <xs:pattern value="[A-Za-z0-9_-]{1,64}"/>
+    </xs:restriction>
+  </xs:simpleType>
+
+  <xs:simpleType name="ModelVersionType">
+    <xs:restriction base="xs:string">
+      <xs:pattern value="[A-Za-z0-9][A-Za-z0-9._-]{0,63}"/>
+    </xs:restriction>
+  </xs:simpleType>
+
+  <xs:simpleType name="UuidType">
+    <xs:restriction base="xs:string">
+      <xs:pattern value="[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"/>
+    </xs:restriction>
+  </xs:simpleType>
+
+  <xs:simpleType name="Sha256Type">
+    <xs:restriction base="xs:string">
+      <xs:pattern value="[0-9a-f]{64}"/>
+    </xs:restriction>
+  </xs:simpleType>
+
+  <xs:simpleType name="RequestIdType">
+    <xs:annotation>
+      <xs:documentation>
+        Идентификатор запроса: значение заголовка X-Request-ID клиента или выданное сервисом.
+      </xs:documentation>
+    </xs:annotation>
+    <xs:restriction base="xs:string">
+      <xs:pattern value="[A-Za-z0-9._-]{1,128}"/>
+    </xs:restriction>
+  </xs:simpleType>
+
+  <xs:simpleType name="AuthorType">
+    <xs:restriction base="xs:string">
+      <xs:minLength value="1"/>
+      <xs:maxLength value="128"/>
+    </xs:restriction>
+  </xs:simpleType>
+
+  <xs:simpleType name="UtcDateTimeType">
+    <xs:annotation>
+      <xs:documentation>Время в UTC с суффиксом Z.</xs:documentation>
+    </xs:annotation>
+    <xs:restriction base="xs:dateTime">
+      <xs:pattern value="\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d{1,6})?Z"/>
+    </xs:restriction>
+  </xs:simpleType>
+
+  <xs:simpleType name="ImageDataType">
+    <xs:annotation>
+      <xs:documentation>
+        Байты файла фото в base64 без префикса «data:image/...;base64,». Поддерживаются JPEG,
+        PNG и WebP; формат определяется по содержимому файла.
+      </xs:documentation>
+    </xs:annotation>
+    <xs:restriction base="xs:base64Binary">
+      <xs:minLength value="1"/>
+    </xs:restriction>
+  </xs:simpleType>
+
+  <!-- Numbers -->
+
+  <xs:simpleType name="LoadPctType">
+    <xs:annotation>
+      <xs:documentation>Загрузка в процентах от 0 до 100, не больше одного знака после точки.</xs:documentation>
+    </xs:annotation>
+    <xs:restriction base="xs:decimal">
+      <xs:minInclusive value="0"/>
+      <xs:maxInclusive value="100"/>
+      <xs:fractionDigits value="1"/>
+    </xs:restriction>
+  </xs:simpleType>
+
+  <xs:simpleType name="LoadDeviationType">
+    <xs:annotation>
+      <xs:documentation>
+        Разница «оценка минус нормативная загрузка» в процентных пунктах: меньше нуля —
+        кузов загружен меньше, чем в нормативном отчёте.
+      </xs:documentation>
+    </xs:annotation>
+    <xs:restriction base="xs:decimal">
+      <xs:minInclusive value="-100"/>
+      <xs:maxInclusive value="100"/>
+      <xs:fractionDigits value="1"/>
+    </xs:restriction>
+  </xs:simpleType>
+
+  <xs:simpleType name="NonNegativeDecimalType">
+    <xs:restriction base="xs:decimal">
+      <xs:minInclusive value="0"/>
+    </xs:restriction>
+  </xs:simpleType>
+
+  <xs:simpleType name="PercentType">
+    <xs:restriction base="xs:decimal">
+      <xs:minInclusive value="0"/>
+      <xs:maxInclusive value="100"/>
+    </xs:restriction>
+  </xs:simpleType>
+
+  <!-- Enumerations -->
+
+  <xs:simpleType name="MediaTypeType">
+    <xs:restriction base="xs:string">
+      <xs:enumeration value="image/jpeg"/>
+      <xs:enumeration value="image/png"/>
+      <xs:enumeration value="image/webp"/>
+    </xs:restriction>
+  </xs:simpleType>
+
+  <xs:simpleType name="ReviewReasonType">
+    <xs:annotation>
+      <xs:documentation>
+        Причина ручной проверки: low_confidence — модель не уверена; unusual_scene — фото
+        не похоже на обучающие; too_dark — слишком тёмный кадр; blurry — кадр нерезкий.
+      </xs:documentation>
+    </xs:annotation>
+    <xs:restriction base="xs:string">
+      <xs:enumeration value="low_confidence"/>
+      <xs:enumeration value="unusual_scene"/>
+      <xs:enumeration value="too_dark"/>
+      <xs:enumeration value="blurry"/>
+    </xs:restriction>
+  </xs:simpleType>
+
+  <xs:simpleType name="ModelStatusType">
+    <xs:restriction base="xs:string">
+      <xs:enumeration value="candidate"/>
+      <xs:enumeration value="active"/>
+      <xs:enumeration value="rejected"/>
+      <xs:enumeration value="retired"/>
+    </xs:restriction>
+  </xs:simpleType>
+
+  <xs:simpleType name="ErrorCodeType">
+    <xs:restriction base="xs:string">
+      <xs:enumeration value="INVALID_CONTENT_TYPE"/>
+      <xs:enumeration value="INVALID_XML"/>
+      <xs:enumeration value="INVALID_SHIPMENT_ID"/>
+      <xs:enumeration value="INVALID_ENCODING"/>
+      <xs:enumeration value="PAYLOAD_TOO_LARGE"/>
+      <xs:enumeration value="UNSUPPORTED_FORMAT"/>
+      <xs:enumeration value="CORRUPTED_IMAGE"/>
+      <xs:enumeration value="SHIPMENT_NOT_FOUND"/>
+      <xs:enumeration value="ASSESSMENT_NOT_FOUND"/>
+      <xs:enumeration value="TRAINING_ALREADY_RUNNING"/>
+      <xs:enumeration value="MODEL_VERSION_STATUS_CONFLICT"/>
+      <xs:enumeration value="MODEL_NOT_READY"/>
+      <xs:enumeration value="MODEL_INFERENCE_FAILED"/>
+      <xs:enumeration value="INTERNAL_ERROR"/>
+    </xs:restriction>
+  </xs:simpleType>
+
+  <!-- POST /api/v1/assessments -->
+
+  <xs:element name="AssessmentRequest">
+    <xs:annotation>
+      <xs:documentation>
+        Оценить фото и привязать оценку к перевозке. Повтор того же фото в той же перевозке
+        возвращает сохранённую оценку с reused="true".
+      </xs:documentation>
+    </xs:annotation>
+    <xs:complexType>
+      <xs:sequence>
+        <xs:element name="ShipmentId" type="ShipmentIdType"/>
+        <xs:element name="Image" type="ImageDataType"/>
+        <xs:element name="DeclaredLoadPct" type="LoadPctType" minOccurs="0">
+          <xs:annotation>
+            <xs:documentation>Загрузка из нормативного отчёта, если она известна.</xs:documentation>
+          </xs:annotation>
+        </xs:element>
+      </xs:sequence>
+    </xs:complexType>
+  </xs:element>
+
+  <!-- POST /api/v1/assessments, GET /api/v1/assessments/{assessment_id} -->
+
+  <xs:element name="Assessment" type="AssessmentType"/>
+
+  <xs:complexType name="AssessmentType">
+    <xs:sequence>
+      <xs:element name="LoadPct" type="LoadPctType"/>
+      <xs:element name="Declared" type="DeclaredType" minOccurs="0"/>
+      <xs:element name="Review" type="ReviewType" minOccurs="0"/>
+      <xs:element name="Signals" type="SignalsType" minOccurs="0"/>
+      <xs:element name="ConfirmedLabel" type="ConfirmedLabelType" minOccurs="0"/>
+      <xs:element name="Image" type="ImageInfoType"/>
+      <xs:element name="Model" type="ModelRefType"/>
+      <xs:element name="ProcessingMs" type="xs:nonNegativeInteger"/>
+      <xs:element name="CreatedAt" type="UtcDateTimeType"/>
+    </xs:sequence>
+    <xs:attribute name="id" type="UuidType" use="required"/>
+    <xs:attribute name="shipmentId" type="ShipmentIdType" use="required"/>
+    <xs:attribute name="reused" type="xs:boolean">
+      <xs:annotation>
+        <xs:documentation>Только в ответе POST: true, если оценка взята из сохранённых.</xs:documentation>
+      </xs:annotation>
+    </xs:attribute>
+  </xs:complexType>
+
+  <xs:complexType name="DeclaredType">
+    <xs:attribute name="loadPct" type="LoadPctType" use="required"/>
+    <xs:attribute name="deviation" type="LoadDeviationType" use="required"/>
+  </xs:complexType>
+
+  <xs:complexType name="ReviewType">
+    <xs:annotation>
+      <xs:documentation>needed="true" тогда и только тогда, когда есть хотя бы одна причина.</xs:documentation>
+    </xs:annotation>
+    <xs:sequence>
+      <xs:element name="Reason" type="ReviewReasonType" minOccurs="0" maxOccurs="unbounded"/>
+    </xs:sequence>
+    <xs:attribute name="needed" type="xs:boolean" use="required"/>
+  </xs:complexType>
+
+  <xs:complexType name="SignalsType">
+    <xs:annotation>
+      <xs:documentation>
+        Сигналы доверия; сигнал, который модель не считает, отсутствует.
+        uncertainty — неуверенность в процентных пунктах; oodScore — непохожесть фото
+        на обучающие; brightness — яркость кадра; sharpness — резкость кадра.
+      </xs:documentation>
+    </xs:annotation>
+    <xs:attribute name="uncertainty" type="NonNegativeDecimalType"/>
+    <xs:attribute name="oodScore" type="NonNegativeDecimalType"/>
+    <xs:attribute name="brightness" type="NonNegativeDecimalType"/>
+    <xs:attribute name="sharpness" type="NonNegativeDecimalType"/>
+  </xs:complexType>
+
+  <xs:complexType name="ConfirmedLabelType">
+    <xs:annotation>
+      <xs:documentation>
+        Подтверждённая загрузка. Метка относится к фото (sha256), поэтому видна во всех
+        оценках этого фото.
+      </xs:documentation>
+    </xs:annotation>
+    <xs:attribute name="loadPct" type="LoadPctType" use="required"/>
+    <xs:attribute name="author" type="AuthorType"/>
+    <xs:attribute name="updatedAt" type="UtcDateTimeType" use="required"/>
+  </xs:complexType>
+
+  <xs:complexType name="ImageInfoType">
+    <xs:attribute name="sha256" type="Sha256Type" use="required"/>
+    <xs:attribute name="mediaType" type="MediaTypeType" use="required"/>
+    <xs:attribute name="width" type="xs:positiveInteger" use="required"/>
+    <xs:attribute name="height" type="xs:positiveInteger" use="required"/>
+  </xs:complexType>
+
+  <xs:complexType name="ModelRefType">
+    <xs:attribute name="version" type="ModelVersionType" use="required"/>
+  </xs:complexType>
+
+  <!-- GET /api/v1/shipments/{shipment_id} -->
+
+  <xs:element name="Shipment">
+    <xs:annotation>
+      <xs:documentation>
+        Перевозка: текущая оценка (последняя по времени) и история, новые первыми.
+      </xs:documentation>
+    </xs:annotation>
+    <xs:complexType>
+      <xs:sequence>
+        <xs:element name="Current" type="AssessmentSummaryType"/>
+        <xs:element name="History">
+          <xs:complexType>
+            <xs:sequence>
+              <xs:element name="Assessment" type="AssessmentSummaryType" maxOccurs="unbounded"/>
+            </xs:sequence>
+            <xs:attribute name="count" type="xs:positiveInteger" use="required"/>
+          </xs:complexType>
+        </xs:element>
+      </xs:sequence>
+      <xs:attribute name="id" type="ShipmentIdType" use="required"/>
+    </xs:complexType>
+  </xs:element>
+
+  <xs:complexType name="AssessmentSummaryType">
+    <xs:attribute name="id" type="UuidType" use="required"/>
+    <xs:attribute name="loadPct" type="LoadPctType" use="required"/>
+    <xs:attribute name="declaredLoadPct" type="LoadPctType"/>
+    <xs:attribute name="needsReview" type="xs:boolean"/>
+    <xs:attribute name="confirmedLoadPct" type="LoadPctType"/>
+    <xs:attribute name="modelVersion" type="ModelVersionType" use="required"/>
+    <xs:attribute name="createdAt" type="UtcDateTimeType" use="required"/>
+  </xs:complexType>
+
+  <!-- PUT /api/v1/assessments/{assessment_id}/label -->
+
+  <xs:element name="LabelRequest">
+    <xs:annotation>
+      <xs:documentation>Подтвердить загрузку на фото оценки. Повтор заменяет метку.</xs:documentation>
+    </xs:annotation>
+    <xs:complexType>
+      <xs:sequence>
+        <xs:element name="LoadPct" type="LoadPctType"/>
+        <xs:element name="Author" type="AuthorType" minOccurs="0"/>
+      </xs:sequence>
+    </xs:complexType>
+  </xs:element>
+
+  <xs:element name="Label">
+    <xs:complexType>
+      <xs:sequence>
+        <xs:element name="LoadPct" type="LoadPctType"/>
+        <xs:element name="Author" type="AuthorType" minOccurs="0"/>
+        <xs:element name="UpdatedAt" type="UtcDateTimeType"/>
+      </xs:sequence>
+      <xs:attribute name="assessmentId" type="UuidType" use="required"/>
+      <xs:attribute name="imageSha256" type="Sha256Type" use="required"/>
+    </xs:complexType>
+  </xs:element>
+
+  <!-- GET /api/v1/models, POST /api/v1/models/{version}/activate -->
+
+  <xs:element name="Models">
+    <xs:annotation>
+      <xs:documentation>Версии модели, новые первыми; активная — со status="active".</xs:documentation>
+    </xs:annotation>
+    <xs:complexType>
+      <xs:sequence>
+        <xs:element name="Model" type="ModelType" minOccurs="0" maxOccurs="unbounded"/>
+      </xs:sequence>
+    </xs:complexType>
+  </xs:element>
+
+  <xs:element name="Model" type="ModelType"/>
+
+  <xs:complexType name="ModelType">
+    <xs:attribute name="version" type="ModelVersionType" use="required"/>
+    <xs:attribute name="status" type="ModelStatusType" use="required"/>
+    <xs:attribute name="createdAt" type="UtcDateTimeType" use="required"/>
+    <xs:attribute name="activatedAt" type="UtcDateTimeType"/>
+    <xs:attribute name="cvMae" type="NonNegativeDecimalType"/>
+    <xs:attribute name="within10" type="PercentType"/>
+  </xs:complexType>
+
+  <!-- GET /health -->
+
+  <xs:element name="Health">
+    <xs:annotation>
+      <xs:documentation>
+        Сервис готов и модель загружена. Пока модель не загружена, ответ 503 с Error
+        code="MODEL_NOT_READY".
+      </xs:documentation>
+    </xs:annotation>
+    <xs:complexType>
+      <xs:attribute name="modelVersion" type="ModelVersionType" use="required"/>
+    </xs:complexType>
+  </xs:element>
+
+  <!-- Any method -->
+
+  <xs:element name="Error">
+    <xs:complexType>
+      <xs:sequence>
+        <xs:element name="Message" type="xs:string"/>
+        <xs:element name="Hint" type="xs:string"/>
+      </xs:sequence>
+      <xs:attribute name="code" type="ErrorCodeType" use="required"/>
+      <xs:attribute name="requestId" type="RequestIdType" use="required"/>
+    </xs:complexType>
+  </xs:element>
+
+</xs:schema>
