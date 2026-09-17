@@ -21,7 +21,9 @@ from loadvision.ml.training.embedding_cache import (
 DIM = 4
 _EXIF_ORIENTATION = 274
 _ROTATE_270 = 6
-SPEC = BackboneSpec(timm_name="fake", patch=8, height=32, width=24)
+SPEC = BackboneSpec(
+    timm_name="fake", patch=8, height=32, width=24, license="Toy-1.0", origin="a test"
+)
 PARAMS = {
     "height": 32,
     "width": 24,

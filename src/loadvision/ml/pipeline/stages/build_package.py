@@ -42,7 +42,10 @@ from loadvision.ml.training.postprocess_fit import fit_chain
 
 PACKAGE_DIR: Final = "package"
 
+LICENSES_DIR: Final = Path("licenses")
+
 _CHECKPOINT_FILE: Final = "model.safetensors"
+_NOTICE_FILE: Final = "NOTICE.md"
 
 # Averaging ten neighbours: one nearest photo is noisy, a hundred washes the score out.
 _OOD_NEIGHBOURS: Final = 10
@@ -66,6 +69,7 @@ class BuildPackage:
         package_version: Package version in the `ModelVersionId` format.
         now: Build time; the current time when omitted.
         folds_file: Canonical folds file, recorded next to the CV metrics.
+        licenses_dir: Folder holding one text per SPDX identifier the registry names.
         device: Torch device the encoders run on while fitting.
     """
 
@@ -73,6 +77,7 @@ class BuildPackage:
     chain: Chain = ()
     package_version: str = "v1"
     folds_file: Path = Path("configs/splits/folds.json")
+    licenses_dir: Path = LICENSES_DIR
     device: str = "cpu"
     now: datetime | None = None
     ood_percentile: float = 99.0
@@ -97,10 +102,11 @@ class BuildPackage:
         }
 
     def run(self, ctx: RunContext) -> StageResult:
-        """Writes `package/` with the heads, the curves and `manifest.json`.
+        """Writes `package/` with the heads, the curves, the licences and `manifest.json`.
 
         Raises:
-            FileNotFoundError: If the training stage left no out-of-fold predictions.
+            FileNotFoundError: If the training stage left no out-of-fold predictions, or a
+                checkpoint names a licence with no text in `licenses_dir`.
         """
         # Read first: a package without the out-of-fold predictions would carry no honest
         # metrics, and finding that out after loading four encoders wastes a minute.
@@ -111,11 +117,13 @@ class BuildPackage:
         root.mkdir(parents=True, exist_ok=True)
 
         members: list[Member] = []
+        loaded: list[Backbone] = []
         weight = 1.0 / len(self.members)
         weights: dict[str, Path] = {}
         pooled: tuple[int, str, NDArray[np.float64]] | None = None
         for index, spec in enumerate(self.members):
             backbone = load_backbone(spec.encoder, self.device)
+            loaded.append(backbone)
             features = embed_samples(
                 train, backbone, cache_dir=ctx.cache_dir / EMBEDDINGS_DIR, device=self.device
             ).astype(np.float64)
@@ -142,6 +150,7 @@ class BuildPackage:
 
         steps = self._fitted_steps(ctx, root, train, labels, raw)
         ood = self._ood(root, pooled)
+        licenses = self._licenses(root, loaded)
         manifest = Manifest.model_validate(
             {
                 "schema_version": 1,
@@ -151,6 +160,7 @@ class BuildPackage:
                 "data_hash": _data_hash(ctx),
                 "members": [member.model_dump(mode="json") for member in members],
                 "postprocess": [step.model_dump(mode="json") for step in steps],
+                "licenses": licenses,
                 **ood,
                 **self._cv(ctx),
                 "files": hash_package_files(root),
@@ -164,6 +174,7 @@ class BuildPackage:
                 "steps": len(steps),
                 "files": len(manifest.files),
                 "ood_reference": 0 if not ood else len(train),
+                "licenses": len(licenses),
             },
             metrics={"weight_sum": sum(member.weight for member in members)},
         )
@@ -215,6 +226,62 @@ class BuildPackage:
                 "reference": str(path.relative_to(root)),
             }
         }
+
+    def _licenses(self, root: Path, backbones: Sequence[Backbone]) -> list[str]:
+        """Copies the licence of every checkpoint into the package and writes the NOTICE.
+
+        The package carries the weights, so it has to carry their terms with them: Apache-2.0
+        asks for the licence text and the attribution to travel with any copy. A checkpoint
+        whose licence has no text here stops the build instead of shipping unlicensed weights.
+
+        Args:
+            root: Package folder.
+            backbones: Loaded encoders of the members, in member order.
+
+        Returns:
+            Package paths of the licence texts and the NOTICE, sorted.
+
+        Raises:
+            FileNotFoundError: If a licence named by the registry has no text in
+                `licenses_dir`.
+        """
+        checkpoints = {
+            backbone.spec.timm_name: backbone.spec
+            for backbone in sorted(backbones, key=lambda item: item.spec.timm_name)
+        }
+        folder = root / "licenses"
+        folder.mkdir(parents=True, exist_ok=True)
+        written: list[str] = []
+        for name in sorted({spec.license for spec in checkpoints.values()}):
+            source = self.licenses_dir / f"{name}.txt"
+            if not source.is_file():
+                raise FileNotFoundError(
+                    f"{source} is missing; a package may not ship weights under {name} "
+                    f"without their licence text"
+                )
+            shutil.copyfile(source, folder / f"{name}.txt")
+            written.append(f"licenses/{name}.txt")
+
+        lines = [
+            "# NOTICE",
+            "",
+            "Пакет несёт предобученные веса. Каждый чекпоинт остаётся под своей лицензией;",
+            "их тексты лежат рядом в этой же папке.",
+            "",
+        ]
+        for timm_name, spec in checkpoints.items():
+            lines += [
+                f"## {timm_name}",
+                "",
+                f"- происхождение: {spec.origin}",
+                f"- лицензия: {spec.license}, текст в `licenses/{spec.license}.txt`",
+                f"- источник: https://huggingface.co/timm/{timm_name}",
+                "- веса не изменялись",
+                "",
+            ]
+        (folder / _NOTICE_FILE).write_text("\n".join(lines), encoding="utf-8")
+        written.append(f"licenses/{_NOTICE_FILE}")
+        return sorted(written)
 
     def _fitted_steps(
         self,

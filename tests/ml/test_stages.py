@@ -32,7 +32,9 @@ from loadvision.ml.registry import BackboneSpec
 from loadvision.ml.training.embedding_cache import read_image
 
 DIM = 6
-SPEC = BackboneSpec(timm_name="fake", patch=8, height=32, width=24)
+SPEC = BackboneSpec(
+    timm_name="fake", patch=8, height=32, width=24, license="Toy-1.0", origin="a test"
+)
 PARAMS = {
     "height": 32,
     "width": 24,
@@ -62,6 +64,14 @@ class ToyEncoder(torch.nn.Module):
 
     def forward(self, batch: torch.Tensor) -> torch.Tensor:
         return self.forward_head(self.forward_features(batch))
+
+
+def fake_licenses(root: Path) -> Path:
+    """Writes the licence text the toy spec names, so a package can carry it."""
+    folder = root / "licenses"
+    folder.mkdir(parents=True, exist_ok=True)
+    (folder / "Toy-1.0.txt").write_text("Toy licence, for tests only.\n", encoding="utf-8")
+    return folder
 
 
 def fake_checkpoint(root: Path, timm_name: str) -> Path:
@@ -459,6 +469,7 @@ def test_build_package_writes_a_package_the_service_can_load(
         members=members(),
         chain=[("round_to", {"step": 5.0})],
         folds_file=Path(folds_file.name),
+        licenses_dir=fake_licenses(ctx.runs_dir),
     )
 
     result = stage.run(ctx)
@@ -483,7 +494,11 @@ def test_members_sharing_a_checkpoint_share_its_file(
     monkeypatch.setattr(build_package, "_place_checkpoint", fake_checkpoint)
     monkeypatch.chdir(folds_file.parent)
 
-    BuildPackage(members=members(), folds_file=Path(folds_file.name)).run(ctx)
+    BuildPackage(
+        members=members(),
+        folds_file=Path(folds_file.name),
+        licenses_dir=fake_licenses(ctx.runs_dir),
+    ).run(ctx)
 
     manifest = json.loads((ctx.run_dir / "package" / "manifest.json").read_text(encoding="utf-8"))
     # Both toy members name the same checkpoint, so the package carries one copy of it.
@@ -507,7 +522,12 @@ def test_the_package_answers_exactly_what_the_submission_says(
     monkeypatch.setattr(build_package, "load_backbone", toy_loader)
     monkeypatch.setattr(build_package, "_place_checkpoint", fake_checkpoint)
     monkeypatch.chdir(folds_file.parent)
-    stage = BuildPackage(members=members(), chain=chain, folds_file=Path(folds_file.name))
+    stage = BuildPackage(
+        members=members(),
+        chain=chain,
+        folds_file=Path(folds_file.name),
+        licenses_dir=fake_licenses(ctx.runs_dir),
+    )
 
     result = stage.run(ctx)
     stage.check(ctx, result)
@@ -523,6 +543,51 @@ def test_the_package_answers_exactly_what_the_submission_says(
     assert answered == pytest.approx(
         [submitted[sample.image_id] for sample in test_photos], abs=0.05
     )
+
+
+@pytest.mark.ml
+def test_the_package_carries_the_licence_of_every_checkpoint(
+    workspace: tuple[RunContext, Path], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    ctx, folds_file = workspace
+    run_upto(ctx, folds_file)
+    monkeypatch.setattr(build_package, "load_backbone", toy_loader)
+    monkeypatch.setattr(build_package, "_place_checkpoint", fake_checkpoint)
+    monkeypatch.chdir(folds_file.parent)
+
+    result = BuildPackage(
+        members=members(),
+        folds_file=Path(folds_file.name),
+        licenses_dir=fake_licenses(ctx.runs_dir),
+    ).run(ctx)
+
+    root = ctx.run_dir / "package"
+    manifest = json.loads((root / "manifest.json").read_text(encoding="utf-8"))
+    assert manifest["licenses"] == ["licenses/NOTICE.md", "licenses/Toy-1.0.txt"]
+    # Listed in `files` too, so the loader verifies the texts like every other package file.
+    assert set(manifest["licenses"]) <= set(manifest["files"])
+    notice = (root / "licenses" / "NOTICE.md").read_text(encoding="utf-8")
+    assert "fake" in notice and "Toy-1.0" in notice and "a test" in notice
+    assert result.counts["licenses"] == 2
+
+
+@pytest.mark.ml
+def test_a_checkpoint_without_its_licence_text_stops_the_build(
+    workspace: tuple[RunContext, Path], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Shipping weights whose terms we cannot name is worse than failing the run."""
+    ctx, folds_file = workspace
+    run_upto(ctx, folds_file)
+    monkeypatch.setattr(build_package, "load_backbone", toy_loader)
+    monkeypatch.setattr(build_package, "_place_checkpoint", fake_checkpoint)
+    monkeypatch.chdir(folds_file.parent)
+
+    with pytest.raises(FileNotFoundError, match=r"Toy-1\.0"):
+        BuildPackage(
+            members=members(),
+            folds_file=Path(folds_file.name),
+            licenses_dir=ctx.runs_dir / "empty",
+        ).run(ctx)
 
 
 @pytest.mark.ml

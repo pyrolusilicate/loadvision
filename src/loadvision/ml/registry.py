@@ -26,6 +26,10 @@ class BackboneSpec:
         preprocessing: Key in the preprocessing registry of `imaging/preprocessing.py`. It is
             part of the entry because the model package stores it per ensemble member, so
             training must be able to choose it the same way.
+        license: SPDX identifier of the checkpoint weights, naming a text in `licenses/`. It
+            has no default on purpose: a package ships the weights, so whoever adds an entry
+            has to look the licence up rather than inherit someone else's answer.
+        origin: Where the checkpoint comes from, for the NOTICE the package carries.
         pooling: How patch tokens become one vector. "pooled" is the encoder's own pooling and
             describes the scene as a whole; "grid" averages tokens inside a coarse grid, which
             keeps where the cargo is and how much floor it covers.
@@ -37,6 +41,8 @@ class BackboneSpec:
     patch: int
     height: int
     width: int
+    license: str
+    origin: str
     preprocessing: str = DEFAULT_PREPROCESSING
     pooling: Pooling = "pooled"
     grid_rows: int = 1
@@ -75,23 +81,50 @@ class BackboneSpec:
 BACKBONES: Final = MappingProxyType(
     {
         "dinov2_vitb14": BackboneSpec(
-            timm_name="vit_base_patch14_reg4_dinov2.lvd142m", patch=14, height=518, width=392
+            timm_name="vit_base_patch14_reg4_dinov2.lvd142m",
+            license="Apache-2.0",
+            origin="DINOv2, Meta AI Research",
+            patch=14,
+            height=518,
+            width=392,
         ),
         "dinov3_vitb16": BackboneSpec(
-            timm_name="vit_base_patch16_dinov3.lvd1689m", patch=16, height=512, width=384
+            timm_name="vit_base_patch16_dinov3.lvd1689m",
+            license="LicenseRef-DINOv3",
+            origin="DINOv3, Meta AI Research",
+            patch=16,
+            height=512,
+            width=384,
         ),
         # DINOv3 was pretrained at 256, so this entry keeps its native scale for comparison.
         "dinov3_vitb16_256": BackboneSpec(
-            timm_name="vit_base_patch16_dinov3.lvd1689m", patch=16, height=256, width=192
+            timm_name="vit_base_patch16_dinov3.lvd1689m",
+            license="LicenseRef-DINOv3",
+            origin="DINOv3, Meta AI Research",
+            patch=16,
+            height=256,
+            width=192,
         ),
         "pe_spatial_vitb16": BackboneSpec(
-            timm_name="vit_pe_spatial_base_patch16_512.fb", patch=16, height=512, width=384
+            timm_name="vit_pe_spatial_base_patch16_512.fb",
+            license="Apache-2.0",
+            origin="Perception Encoder, Meta AI Research",
+            patch=16,
+            height=512,
+            width=384,
         ),
         "siglip2_vitb16": BackboneSpec(
-            timm_name="vit_base_patch16_siglip_512.v2_webli", patch=16, height=512, width=384
+            timm_name="vit_base_patch16_siglip_512.v2_webli",
+            license="Apache-2.0",
+            origin="SigLIP 2, Google DeepMind",
+            patch=16,
+            height=512,
+            width=384,
         ),
         "siglip2_vitb16_grid4x3": BackboneSpec(
             timm_name="vit_base_patch16_siglip_512.v2_webli",
+            license="Apache-2.0",
+            origin="SigLIP 2, Google DeepMind",
             patch=16,
             height=512,
             width=384,
@@ -103,6 +136,8 @@ BACKBONES: Final = MappingProxyType(
         # a single scene vector cannot tell three boxes in the middle from a half-full body.
         "dinov3_vitb16_grid4x3": BackboneSpec(
             timm_name="vit_base_patch16_dinov3.lvd1689m",
+            license="LicenseRef-DINOv3",
+            origin="DINOv3, Meta AI Research",
             patch=16,
             height=512,
             width=384,
@@ -112,6 +147,8 @@ BACKBONES: Final = MappingProxyType(
         ),
         "pe_spatial_vitb16_grid2x2": BackboneSpec(
             timm_name="vit_pe_spatial_base_patch16_512.fb",
+            license="Apache-2.0",
+            origin="Perception Encoder, Meta AI Research",
             patch=16,
             height=512,
             width=384,
@@ -123,6 +160,8 @@ BACKBONES: Final = MappingProxyType(
         # proportions far from the box, so a wide band of the input is padding.
         "dinov3_vitb16_padmean": BackboneSpec(
             timm_name="vit_base_patch16_dinov3.lvd1689m",
+            license="LicenseRef-DINOv3",
+            origin="DINOv3, Meta AI Research",
             patch=16,
             height=512,
             width=384,
@@ -130,6 +169,8 @@ BACKBONES: Final = MappingProxyType(
         ),
         "pe_spatial_vitb16_padmean": BackboneSpec(
             timm_name="vit_pe_spatial_base_patch16_512.fb",
+            license="Apache-2.0",
+            origin="Perception Encoder, Meta AI Research",
             patch=16,
             height=512,
             width=384,
@@ -137,6 +178,8 @@ BACKBONES: Final = MappingProxyType(
         ),
         "pe_spatial_vitb16_grid4x3_padmean": BackboneSpec(
             timm_name="vit_pe_spatial_base_patch16_512.fb",
+            license="Apache-2.0",
+            origin="Perception Encoder, Meta AI Research",
             patch=16,
             height=512,
             width=384,
@@ -147,6 +190,8 @@ BACKBONES: Final = MappingProxyType(
         ),
         "pe_spatial_vitb16_grid4x3": BackboneSpec(
             timm_name="vit_pe_spatial_base_patch16_512.fb",
+            license="Apache-2.0",
+            origin="Perception Encoder, Meta AI Research",
             patch=16,
             height=512,
             width=384,
