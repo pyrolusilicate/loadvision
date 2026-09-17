@@ -2,7 +2,7 @@
 
 Задача 0.14. Владелец: A (ML). Версия 3 от 16.09.2026: спека приведена в соответствие с реализацией, список правок в конце.
 
-Реализация: `src/loadvision/ml/data/splits.py`, сборка `scripts/make_folds.py`, тесты `tests/ml/test_splits.py`.
+Реализация: `src/loadvision/ml/data/splits.py`, сборка `loadvision data folds`, тесты `tests/ml/test_splits.py`.
 
 Файл задаёт, на каких данных сравниваются все модели и как PromotionGate решает, что новая версия не хуже активной. Поэтому он общий контракт: меняется только по согласию обоих.
 
@@ -93,9 +93,9 @@ JSON, UTF-8, отсортированные ключи, отступ 2.
 ## Команды и тесты
 
 ```
-uv run python scripts/make_folds.py            # создать файл и напечатать отчёт
-uv run python scripts/make_folds.py --check    # только проверить существующий
-uv run python scripts/make_folds.py --seed 1 --out configs/splits/folds_seed1.json
+uv run loadvision data folds            # создать файл и напечатать отчёт
+uv run loadvision data folds --check    # только проверить существующий
+uv run loadvision data folds --seed 1 --out configs/splits/folds_seed1.json
 ```
 
 Команды `loadvision data split` пока нет: слой `cli/` - заглушка. Когда он появится, команда станет обёрткой над `build_folds` и `read_folds`, логика не переедет.
@@ -168,7 +168,7 @@ uv run python scripts/make_folds.py --seed 1 --out configs/splits/folds_seed1.js
 2. **Алгоритм первичного разбиения назван явно:** `sklearn.model_selection.StratifiedGroupKFold(n_splits=5, shuffle=True, random_state=seed)`. Раньше в спеке был описан только порядок дописывания (правило 3), а как строится первый файл - не сказано.
 3. **Правило 3 (дописывание) не реализовано.** Понадобится вместе с дообучением на дне 4. До тех пор `build_folds` только строит файл с нуля.
 4. **JSON Schema не проверяется библиотекой.** Это потребовало бы зависимости `jsonschema`. Инварианты 2 и 3 проверяются в `Folds.__post_init__` и падают при создании объекта, версия схемы - в `read_folds`, инвариант 1 - в `check_covers`, инварианты 4 и 5 - в `balance_report`. Схема ниже остаётся описанием формата.
-5. **Инвариант 6 защищён в скрипте:** `scripts/make_folds.py` читает существующий файл перед записью и отказывается писать, если хоть одно фото поменяло бы фолд. Сравнение с `git HEAD` отдельным тестом пока не сделано.
+5. **Инвариант 6 защищён в команде:** `loadvision data folds` читает существующий файл перед записью и отказывается писать, если хоть одно фото поменяло бы фолд. Сравнение с `git HEAD` отдельным тестом пока не сделано.
 6. **`created_at` пишется с точностью до секунды.**
 
 ### Результат первичного разбиения от 16.09
