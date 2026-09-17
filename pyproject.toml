@@ -154,6 +154,11 @@ dev = [
     "ruff>=0.16.7",
     "types-lxml>=2026.2.16",
 ]
+ml = [
+    "scikit-learn>=1.9.1",
+    "timm>=1.0.29",
+    "torch>=2.14.0",
+]
 
 [tool.uv]
 # Every dependency group installs by default, so pyright and import-linter see all imports.

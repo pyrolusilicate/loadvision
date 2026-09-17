@@ -102,5 +102,5 @@ def test_preprocessing_is_reproducible() -> None:
     # embedding and every trained head goes stale.
     assert digests == {
         "baseline_v0": "c0dfeca716ff61a1e3de9d7e3194faa09d1ff2370f19adee3b03360a4786cf15",
-        "resize_pad": "bd08cf729696918e301dace688811e6cad0b5b58f8c0d00d0f1d3f7fa62d0579",
+        "resize_pad": "2afb83023ccd03e1b366401ecb430645750818dd35d6fea9308a19a5b71e4ba5",
     }

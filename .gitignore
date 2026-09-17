@@ -15,11 +15,11 @@ htmlcov/
 .import_linter_cache/
 
 # Data, runs and artifacts are never committed
-data/
-runs/
-storage/
-mlruns/
-mlflow.db
+/data/
+/runs/
+/storage/
+/mlruns/
+/mlflow.db
 
 # Secrets
 .env
@@ -31,4 +31,4 @@ mlflow.db
 .zed/
 
 # Baseline
-baseline/
+/baseline/
