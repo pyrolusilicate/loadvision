@@ -28,7 +28,7 @@
 - A 16.09 в `feat/contracts-pipeline` (`0f3eb9e`, `cd40f1c`, слито B в `a4109fd`): препроцессинг `imaging/preprocessing.py` (реестр `resize_pad`, `baseline_v0`; нормализация — шесть чисел `mean_r`…`std_b` в `params`), `ml/inference/predictor.py` (`PackagePredictor(package)` реализует `LoadPredictor`, пока только runtime `numpy` с Ridge-головой), `ml/packaging/baseline_package.py` (`build_baseline_package`), порт `TrainingRunner` в `application/ports.py`, зависимость Pillow 12.3.0. B 16.09 проверил: `uv lock --check` чистый, `scripts/check.sh` зелёный (401 тест), паритет пакета v0 с `baseline/submission.csv` на 8 фото test до 1e-6 проходит (`pytest -m data tests/quality`).
 - B 16.09 поправил `PackagePredictor` (с согласия B, код A): при создании каждый член ансамбля прогоняется на пустом фото 8×6, так что неизвестный ключ препроцессинга, неверные параметры и голова под другое число признаков падают при загрузке пакета с `ModelPackageError` «member N: …», а не на первом запросе; у runtime `numpy` допустим только backbone `baseline_features`. `round_to` округляет половину вверх (`floor(x / step + 0.5) * step`): встроенный `round` отправлял половину к чётному (12.5 → 10, но 17.5 → 20).
 - Данные: `data/train` (716 фото, `train.csv`, `train_groups.csv`), `data/test` (307 фото, `test.csv`, `sample_submission.csv`).
-- Следующий шаг B: закоммитить приём фото; MR первой миграции с ревью A (общий контракт); затем `assess_photo` на фейках (7.2) и API (5.1–5.4).
+- Следующий шаг B: закоммитить `assess_photo`; MR `feat/db-schema` и `feat/photo-intake`; затем API (5.1–5.4: безопасный XML, middleware, `POST /assessments`).
 
 ## Команда и роли (решено 15.09)
 
@@ -233,6 +233,17 @@
 - Проверено на данных: все 1023 фото train и test проходят лимиты сервиса (крупнейший файл 1.62 МБ, короткая сторона от 511 до 1920 px). Тест `tests/quality/test_service_decoding.py` (маркер `data`): фото через `prepare_image` и `PackagePredictor` дают прогнозы `baseline/submission.csv` до 1e-6.
 - Отличие от 7.6: битые файлы не лежат в `tests/fixtures/images/`, а строятся в памяти в `tests/image_files.py` (градиент, чтобы поворот был виден; JPEG с EXIF-поворотом, CMYK, оттенки серого, RGBA и палитровый PNG, WebP, GIF, заголовок HEIC, PNG с заголовком огромного размера, обрезанные файлы). Настоящий HEIC Pillow не пишет, для распознавания хватает заголовка. «PNG с расширением .jpg» не нужен: в API нет имён файлов, формат только по байтам.
 - 12 мутаций валидатора: 10 пойманы; две выжили и показали мёртвый код — явный `image.load()` (поворот и конвертация и так декодируют все пиксели) и ограничение плагина Pillow `formats=[...]` (каждую из трёх сигнатур принимает ровно один плагин). Оба убраны.
+
+### Сценарий `assess_photo` (7.2; B 17.09, ветка `feat/photo-intake`)
+
+- `application/assess_photo.py`: `AssessPhoto(uow_factory, storage, limits, clock, new_id, timer)`, вызов `assess(AssessPhotoRequest(shipment_id, image, request_id), predictor) -> AssessPhotoResult(assessment, image, reused)`.
+- Предиктор передаётся в каждый вызов, а не в конструктор: вызывающий (API, позже `ActiveModel` 3.9) берёт один снимок активной модели, и в оценку записывается версия той модели, что считала. `MODEL_NOT_READY` — забота вызывающего, когда снимка нет.
+- Порядок: номер перевозки (`INVALID_SHIPMENT_ID`) → `prepare_image` → транзакция только на чтение: та же перевозка и то же фото → сохранённая оценка, `reused=True`; то же фото и та же версия модели в другой перевозке → прогноз берётся из той оценки, модель не вызывается → транзакция закрыта, модель считает вне её → файл в хранилище → вторая транзакция: перевозка, запись фото, оценка, commit.
+- Любая ошибка модели, в том числе не один прогноз на фото и сигналы, которые домен отклоняет (NaN, отрицательные), → `MODEL_INFERENCE_FAILED`; ничего не сохраняется.
+- Гонка: если параллельный запрос с тем же фото и перевозкой закоммитил первым (`AssessmentAlreadyExistsError`), возвращается его оценка с `reused=True`.
+- Пока не сделано: яркость и резкость (7.7) и политика ручной проверки — `brightness`, `sharpness` пустые, причин нет; `DeclaredLoadPct` (5.11) — в домене нет поля.
+- Фейк `InMemoryAssessmentRepository.add` теперь отказывает на повторном id, как первичный ключ: раньше повтор молча затирал строку и маскировал ошибку в тесте.
+- 13 мутаций: 12 пойманы; выжила перестановка проверки номера и фото — порядок важен только при двух ошибках сразу и контрактом не задан.
 
 ### Тесты (план)
 
