@@ -73,7 +73,7 @@ def _chain(config: Mapping[str, Any]) -> Chain:
             continue
         try:
             params = {str(key): float(value) for key, value in item.get("params", {}).items()}
-            steps.append((str(item["step"]), params))
+            steps.append((str(item["name"]), params))
         except (AttributeError, KeyError, TypeError, ValueError) as error:
-            raise ValueError(f"postprocess entry {item!r} needs 'step'") from error
+            raise ValueError(f"postprocess entry {item!r} needs 'name'") from error
     return steps

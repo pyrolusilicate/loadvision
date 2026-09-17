@@ -340,7 +340,7 @@ def test_build_pipeline_reads_a_config() -> None:
                 {"encoder": "dinov3_vitb16", "alpha": 200},
                 {"encoder": "pe_spatial_vitb16", "alpha": 50},
             ],
-            "postprocess": [{"step": "round_to", "params": {"step": 5}}, "clip"],
+            "postprocess": [{"name": "round_to", "params": {"step": 5}}, "clip"],
         }
     )
 
@@ -370,7 +370,7 @@ def test_build_pipeline_rejects_a_broken_config(config: dict) -> None:
 
 @pytest.mark.ml
 def test_build_pipeline_rejects_a_broken_postprocess_entry() -> None:
-    with pytest.raises(ValueError, match="needs 'step'"):
+    with pytest.raises(ValueError, match="needs 'name'"):
         build_pipeline(
-            {"members": [{"encoder": "x", "alpha": 1}], "postprocess": [{"name": "round_to"}]}
+            {"members": [{"encoder": "x", "alpha": 1}], "postprocess": [{"step": "round_to"}]}
         )

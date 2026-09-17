@@ -6,10 +6,17 @@ import torch
 from PIL import Image
 
 from loadvision.errors import ErrorCode, LoadvisionError
+from loadvision.imaging.prepared_image import PreparedImage
+from loadvision.imaging.validator import ImageLimits, prepare_image
 from loadvision.ml.data.manifest import Sample, load_split
 from loadvision.ml.models.backbones import Backbone
 from loadvision.ml.registry import BackboneSpec
-from loadvision.ml.training.embedding_cache import embed_samples, read_image
+from loadvision.ml.training import embedding_cache
+from loadvision.ml.training.embedding_cache import (
+    embed_samples,
+    preprocessing_fingerprint,
+    read_image,
+)
 
 DIM = 4
 _EXIF_ORIENTATION = 274
@@ -134,6 +141,23 @@ def test_cache_built_with_other_preprocessing_is_rejected(tmp_path: Path) -> Non
     )
     with pytest.raises(ValueError, match="other preprocessing"):
         embed_samples(samples, rescaled, cache_dir=cache_dir, device="cpu")
+
+
+@pytest.mark.ml
+def test_fingerprint_changes_when_decoding_changes(monkeypatch: pytest.MonkeyPatch) -> None:
+    backbone, _ = fake_backbone()
+    with_rotation = preprocessing_fingerprint(backbone.params)
+
+    def without_rotation(raw: bytes, limits: ImageLimits) -> PreparedImage:
+        prepared = prepare_image(raw, limits)
+        turned = np.ascontiguousarray(np.rot90(prepared.pixels))
+        return PreparedImage(raw=prepared.raw, media_type=prepared.media_type, pixels=turned)
+
+    monkeypatch.setattr(embedding_cache, "prepare_image", without_rotation)
+
+    # The shared validator decides how a photo becomes pixels. If it ever changes, the cached
+    # vectors describe other pictures, so the fingerprint must notice and reject the cache.
+    assert preprocessing_fingerprint(backbone.params) != with_rotation
 
 
 @pytest.mark.ml

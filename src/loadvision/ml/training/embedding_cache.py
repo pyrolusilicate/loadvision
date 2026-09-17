@@ -3,12 +3,14 @@
 import hashlib
 import logging
 from collections.abc import Sequence
+from io import BytesIO
 from pathlib import Path
 from typing import Any, Final
 
 import numpy as np
 import torch
 from numpy.typing import NDArray
+from PIL import Image
 
 from loadvision.imaging.prepared_image import MediaType, PreparedImage
 from loadvision.imaging.preprocessing import Params, preprocess
@@ -34,6 +36,10 @@ TRAINING_LIMITS: Final = ImageLimits(
 # so padding and scaling both take part in the fingerprint.
 _FINGERPRINT_SHAPE: Final = (37, 53, 3)
 _FINGERPRINT_PIXELS: Final = 37 * 53 * 3
+
+# Orientation 6 in the probe, so the fingerprint also covers how the decoder rotates a photo.
+_EXIF_ORIENTATION: Final = 274
+_ROTATE_270: Final = 6
 
 
 def embed_samples(
@@ -114,9 +120,10 @@ def read_image(path: Path, limits: ImageLimits = TRAINING_LIMITS) -> PreparedIma
 def preprocessing_fingerprint(params: Params) -> str:
     """Identifies the preprocessing a cache was built with.
 
-    The file name only carries the backbone, so a changed normalization, a changed input box or
-    an edit inside `resize_pad` would silently mix old and new vectors in one cache. Running the
-    preprocessing on a fixed synthetic photo catches all three.
+    The file name only carries the backbone, so a changed normalization, a changed input box,
+    an edit inside `resize_pad` or a change in how photos are decoded would silently mix old
+    and new vectors in one cache. Running one fixed synthetic photo through the whole path,
+    decoding included, catches all of them.
 
     Args:
         params: Preprocessing parameters of the backbone.
@@ -125,8 +132,16 @@ def preprocessing_fingerprint(params: Params) -> str:
         Lowercase hex SHA-256 of the preprocessed synthetic photo.
     """
     pixels = np.arange(_FINGERPRINT_PIXELS, dtype=np.uint8).reshape(_FINGERPRINT_SHAPE)
-    # raw bytes are only hashed into PreparedImage.sha256, which this fingerprint never uses.
-    probe = PreparedImage(raw=b"fingerprint", media_type=MediaType.JPEG, pixels=pixels)
+    image = Image.fromarray(pixels)
+    exif = image.getexif()
+    exif[_EXIF_ORIENTATION] = _ROTATE_270
+    encoded = BytesIO()
+    # Lossless WebP: it carries EXIF and decodes to the very same pixels on every machine, so
+    # the probe is deterministic and still notices a change in how photos are rotated.
+    image.save(encoded, format="WEBP", lossless=True, quality=100, exif=exif)
+    # The probe goes through decoding as well, so a change in the shared validator, EXIF
+    # handling included, invalidates the cache instead of quietly mixing old vectors in.
+    probe = prepare_image(encoded.getvalue(), TRAINING_LIMITS)
     return hashlib.sha256(preprocess(PREPROCESSING_NAME, probe, params).tobytes()).hexdigest()
 
 

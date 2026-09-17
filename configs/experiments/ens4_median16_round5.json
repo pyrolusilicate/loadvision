@@ -9,7 +9,7 @@
     {"encoder": "pe_spatial_vitb16_grid4x3", "alpha": 1000}
   ],
   "postprocess": [
-    {"step": "median_bins", "params": {"bins": 16}},
-    {"step": "round_to", "params": {"step": 5}}
+    {"name": "median_bins", "params": {"bins": 16}},
+    {"name": "round_to", "params": {"step": 5}}
   ]
 }

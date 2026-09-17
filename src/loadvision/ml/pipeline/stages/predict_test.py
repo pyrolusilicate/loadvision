@@ -14,9 +14,9 @@ from loadvision.ml.models.backbones import Backbone, load_backbone
 from loadvision.ml.pipeline.stage import RunContext, StageCheckError, StageResult
 from loadvision.ml.pipeline.stages.extract_embeddings import EMBEDDINGS_DIR
 from loadvision.ml.pipeline.stages.train_folds import OOF_FILE, Chain, Member
-from loadvision.ml.postprocess import fit_chain
 from loadvision.ml.training.embedding_cache import embed_samples
 from loadvision.ml.training.head_trainer import FittedHead
+from loadvision.ml.training.postprocess_fit import fit_chain
 
 SUBMISSION_FILE: Final = "submission.csv"
 

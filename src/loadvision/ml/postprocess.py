@@ -1,230 +1,188 @@
-"""Registry of postprocessing steps applied to raw predictions.
+"""Applying postprocessing steps to raw predictions, as a model package describes them.
 
-Every step has the same shape: it is fitted on predictions a model made for photos it had not
-seen, and afterwards it maps loads to loads. Steps compose into a chain, so a package can say
-"isotonic, then snap high, then round" without the service knowing what any of them does.
-
-Stateless steps ignore the labels; fitted steps learn their numbers from them. Both come back
-as the same kind of callable, so `fit_chain` treats them alike.
+A step is a name from this registry, its numeric parameters and, for steps that learned a
+shape, a curve of two arrays. Everything here is plain numpy on purpose: the service applies
+the chain and must not pull a training library into its image to do it. Fitting the steps
+lives in `ml.training.postprocess_fit`.
 """
 
 from collections.abc import Callable, Mapping, Sequence
+from pathlib import Path
 from typing import Any, Final
 
 import numpy as np
 from numpy.typing import NDArray
 
-from loadvision.ml.training.calibration import IsotonicCalibrator
-
 type Loads = NDArray[np.float64]
-type Fitted = Callable[[Loads], Loads]
-type Fitter = Callable[[Loads, Loads, Mapping[str, float]], Fitted]
+type Curve = tuple[NDArray[np.float64], NDArray[np.float64]]
+type Applier = Callable[[Loads], Loads]
+type Builder = Callable[[Mapping[str, float], Curve | None], Applier]
 
 MIN_LOAD: Final = 0.0
 MAX_LOAD: Final = 100.0
 
-# Candidate thresholds a snap step searches over, in percentage points.
-_SNAP_GRID: Final = np.arange(60.0, 100.0, 1.0)
-_EXPAND_GRID: Final = np.arange(1.0, 2.51, 0.02)
-_MIN_BIN_SIZE: Final = 5
+CURVE_KEYS: Final = ("knots_in", "knots_out")
 
 
-def _clip(values: Loads) -> Loads:
-    return np.clip(values, MIN_LOAD, MAX_LOAD)
+def clip(values: Loads) -> Loads:
+    """Keeps loads inside the allowed range."""
+    return np.clip(np.asarray(values, dtype=np.float64), MIN_LOAD, MAX_LOAD)
 
 
-def fit_clip(_predictions: Loads, _labels: Loads, _params: Mapping[str, float]) -> Fitted:
-    """Keeps predictions inside the allowed range."""
-    return _clip
+def _build_clip(_params: Mapping[str, float], _curve: Curve | None) -> Applier:
+    return clip
 
 
-def fit_round_to(_predictions: Loads, _labels: Loads, params: Mapping[str, float]) -> Fitted:
-    """Rounds to a step, because experts only ever write round numbers.
-
-    Args:
-        params: `step`, such as 5.
-    """
-    step = float(params.get("step", 5.0))
+def _build_round_to(params: Mapping[str, float], _curve: Curve | None) -> Applier:
+    step = _required(params, "step", default=5.0)
     if step <= 0:
         raise ValueError(f"round_to step must be positive, got {step}")
-    # A half always goes up, matching the service predictor. numpy sends a half to the even
-    # neighbour, which would turn 92.5 into 90 here and into 95 there.
-    return lambda values: _clip(np.floor(values / step + 0.5) * step)
+    # A half always goes up. numpy sends a half to the even neighbour, which would turn 92.5
+    # into 90 while a service rounding half up turns the same value into 95.
+    return lambda values: clip(np.floor(clip(values) / step + 0.5) * step)
 
 
-def fit_snap_high(predictions: Loads, labels: Loads, params: Mapping[str, float]) -> Fitted:
-    """Sends confident high predictions to exactly 100.
-
-    A fifth of the dataset is labelled exactly 100 and a regression practically never reaches
-    it, so a threshold is worth learning. It is searched on the photos given here, which during
-    evaluation are the training folds only.
-
-    Args:
-        predictions: Predictions the threshold is searched on.
-        labels: Reference loads for the same photos.
-        params: `threshold` to use as is; omitted means search for the best one.
-    """
-    if "threshold" in params:
-        threshold = float(params["threshold"])
-    else:
-        threshold = _best_threshold(
-            predictions,
-            labels,
-            _SNAP_GRID,
-            lambda values, edge: np.where(values >= edge, MAX_LOAD, values),
-        )
-    return lambda values: _clip(np.where(values >= threshold, MAX_LOAD, values))
+def _build_snap_high(params: Mapping[str, float], _curve: Curve | None) -> Applier:
+    threshold = _required(params, "threshold")
+    return lambda values: clip(np.where(clip(values) >= threshold, MAX_LOAD, clip(values)))
 
 
-def fit_snap_low(predictions: Loads, labels: Loads, params: Mapping[str, float]) -> Fitted:
-    """Sends confident low predictions to exactly 0.
-
-    Args:
-        predictions: Predictions the threshold is searched on.
-        labels: Reference loads for the same photos.
-        params: `threshold` to use as is; omitted means search for the best one.
-    """
-    grid = np.arange(0.0, 20.0, 0.5)
-    if "threshold" in params:
-        threshold = float(params["threshold"])
-    else:
-        threshold = _best_threshold(
-            predictions,
-            labels,
-            grid,
-            lambda values, edge: np.where(values <= edge, MIN_LOAD, values),
-        )
-    return lambda values: _clip(np.where(values <= threshold, MIN_LOAD, values))
+def _build_snap_low(params: Mapping[str, float], _curve: Curve | None) -> Applier:
+    threshold = _required(params, "threshold")
+    return lambda values: clip(np.where(clip(values) <= threshold, MIN_LOAD, clip(values)))
 
 
-def fit_linear_expand(predictions: Loads, labels: Loads, _params: Mapping[str, float]) -> Fitted:
-    """Pushes predictions away from their mean, undoing a hedging head with one number."""
-    centre = float(predictions.mean())
-    best = _best_threshold(
-        predictions, labels, _EXPAND_GRID, lambda values, k: centre + k * (values - centre)
-    )
-    return lambda values: _clip(centre + best * (values - centre))
+def _build_linear_expand(params: Mapping[str, float], _curve: Curve | None) -> Applier:
+    centre = _required(params, "centre")
+    factor = _required(params, "factor")
+    return lambda values: clip(centre + factor * (clip(values) - centre))
 
 
-def fit_isotonic(predictions: Loads, labels: Loads, _params: Mapping[str, float]) -> Fitted:
-    """Learns a monotone curve from raw prediction to corrected load."""
-    curve = IsotonicCalibrator.fit(predictions, labels)
-    return curve.apply
+def _build_curve(_params: Mapping[str, float], curve: Curve | None) -> Applier:
+    if curve is None:
+        raise ValueError("this step needs a curve; the package must carry its file")
+    knots_in, knots_out = curve
+    check_curve(knots_in, knots_out)
+    return lambda values: clip(np.interp(clip(values), knots_in, knots_out))
 
 
-def fit_median_bins(predictions: Loads, labels: Loads, params: Mapping[str, float]) -> Fitted:
-    """Maps each band of predictions to the median label of that band.
-
-    The metric is the absolute error, and the value that minimizes it is the median, not the
-    mean an isotonic fit produces.
-
-    Args:
-        predictions: Predictions the bands are built from.
-        labels: Reference loads for the same photos.
-        params: `bins`, the number of equally filled bands.
-    """
-    bins = int(params.get("bins", 16))
-    if bins < 2:
-        raise ValueError(f"median_bins needs at least two bins, got {bins}")
-    edges = np.quantile(predictions, np.linspace(0.0, 1.0, bins + 1))
-    which = np.digitize(predictions, edges[1:-1])
-    centres: list[float] = []
-    medians: list[float] = []
-    for index in range(bins):
-        inside = which == index
-        if int(inside.sum()) >= _MIN_BIN_SIZE:
-            centres.append(float(predictions[inside].mean()))
-            medians.append(float(np.median(labels[inside])))
-    if len(centres) < 2:
-        raise ValueError("median_bins found fewer than two usable bins")
-    knots_in = np.array(centres)
-    knots_out = np.maximum.accumulate(np.array(medians))
-    return lambda values: _clip(np.interp(values, knots_in, knots_out))
-
-
-POSTPROCESSORS: Final[Mapping[str, Fitter]] = {
-    "clip": fit_clip,
-    "round_to": fit_round_to,
-    "snap_high": fit_snap_high,
-    "snap_low": fit_snap_low,
-    "linear_expand": fit_linear_expand,
-    "isotonic": fit_isotonic,
-    "median_bins": fit_median_bins,
+# Steps that learned a monotone shape share one applier, interpolation between knots. What
+# differs is how the knots were found, and that belongs to the fitting side.
+APPLIERS: Final[Mapping[str, Builder]] = {
+    "clip": _build_clip,
+    "round_to": _build_round_to,
+    "snap_high": _build_snap_high,
+    "snap_low": _build_snap_low,
+    "linear_expand": _build_linear_expand,
+    "isotonic": _build_curve,
+    "median_bins": _build_curve,
 }
+
+# Steps whose shape is learned and stored in a file next to the head.
+CURVE_STEPS: Final = frozenset({"isotonic", "median_bins"})
 
 
 def names() -> tuple[str, ...]:
     """Registry keys of every postprocessing step, sorted."""
-    return tuple(sorted(POSTPROCESSORS))
+    return tuple(sorted(APPLIERS))
 
 
-def fit_step(
-    name: str, predictions: Loads, labels: Loads, params: Mapping[str, float] | None = None
-) -> Fitted:
-    """Fits one step by registry name.
+def make_step(
+    name: str, params: Mapping[str, float] | None = None, curve: Curve | None = None
+) -> Applier:
+    """Builds one step from what a manifest says about it.
 
     Args:
         name: Registry key.
-        predictions: Predictions for photos the model had not seen.
-        labels: Reference loads for the same photos.
-        params: Numeric parameters of the step.
+        params: Numeric parameters, including the ones learned during fitting.
+        curve: Learned curve, for steps that need one.
 
     Returns:
         Callable that maps loads to loads.
 
     Raises:
         KeyError: If the name is not in the registry.
-        ValueError: If the inputs disagree or a parameter is invalid.
+        ValueError: If a parameter or the curve is missing or invalid.
     """
-    if predictions.shape != labels.shape:
-        raise ValueError(f"shapes differ: {predictions.shape} and {labels.shape}")
-    return POSTPROCESSORS[name](predictions, labels, params or {})
+    return APPLIERS[name](params or {}, curve)
 
 
-def fit_chain(
-    steps: Sequence[tuple[str, Mapping[str, float]]] | Sequence[str],
-    predictions: Loads,
-    labels: Loads,
-) -> Fitted:
-    """Fits several steps in order, each on the output of the ones before it.
+def make_chain(steps: Sequence[tuple[str, Mapping[str, float], Curve | None]]) -> Applier:
+    """Builds a chain that applies its steps in order and clips the result.
 
     Args:
-        steps: Registry names, or pairs of name and parameters.
-        predictions: Predictions for photos the model had not seen.
-        labels: Reference loads for the same photos.
+        steps: Name, parameters and curve of every step, in manifest order.
 
     Returns:
-        Callable that applies the whole chain.
+        Callable that maps loads to loads.
 
     Raises:
         KeyError: If a name is not in the registry.
-        ValueError: If the inputs disagree or a parameter is invalid.
+        ValueError: If a parameter or a curve is missing or invalid.
     """
-    fitted: list[Fitted] = []
-    current = np.asarray(predictions, dtype=np.float64)
-    target = np.asarray(labels, dtype=np.float64)
-    for step in steps:
-        name, params = (step, {}) if isinstance(step, str) else step
-        transform = fit_step(name, current, target, params)
-        fitted.append(transform)
-        current = transform(current)
+    appliers = [make_step(name, params, curve) for name, params, curve in steps]
 
     def apply(values: Loads) -> Loads:
-        result = np.asarray(values, dtype=np.float64)
-        for transform in fitted:
-            result = transform(result)
+        result = clip(values)
+        for applier in appliers:
+            result = applier(result)
         return result
 
     return apply
 
 
-def _best_threshold(
-    predictions: Loads,
-    labels: Loads,
-    grid: NDArray[Any],
-    make: Callable[[Loads, float], Loads],
-) -> float:
-    errors = [
-        float(np.abs(labels - _clip(make(predictions, float(value)))).mean()) for value in grid
-    ]
-    return float(grid[int(np.argmin(errors))])
+def check_curve(knots_in: NDArray[Any], knots_out: NDArray[Any]) -> None:
+    """Validates a learned curve.
+
+    Args:
+        knots_in: Raw predictions the curve is defined at, ascending.
+        knots_out: Corrected loads, non-decreasing.
+
+    Raises:
+        ValueError: If the arrays disagree, hold fewer than two points, or are not sorted.
+    """
+    if knots_in.shape != knots_out.shape:
+        raise ValueError(f"curve knots disagree: {knots_in.shape} and {knots_out.shape}")
+    if knots_in.size < 2:
+        raise ValueError("a curve needs at least two points")
+    if np.any(np.diff(knots_in) < 0) or np.any(np.diff(knots_out) < 0):
+        raise ValueError("curve knots must be non-decreasing")
+
+
+def load_curve(path: Path) -> Curve:
+    """Reads a curve from the `.npz` file a package carries.
+
+    Two arrays and no pickle: the service loads the file without executing anything.
+
+    Args:
+        path: File inside a model package.
+
+    Returns:
+        The curve.
+
+    Raises:
+        ValueError: If a key is missing or the curve is invalid.
+    """
+    with np.load(path, allow_pickle=False) as stored:
+        missing = [key for key in CURVE_KEYS if key not in stored]
+        if missing:
+            raise ValueError(f"{path.name}: missing {', '.join(missing)}")
+        knots_in = np.asarray(stored["knots_in"], dtype=np.float64)
+        knots_out = np.asarray(stored["knots_out"], dtype=np.float64)
+    check_curve(knots_in, knots_out)
+    return knots_in, knots_out
+
+
+def save_curve(path: Path, curve: Curve) -> None:
+    """Writes a curve as the `.npz` file a package carries."""
+    knots_in, knots_out = curve
+    check_curve(knots_in, knots_out)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    np.savez(path, knots_in=knots_in, knots_out=knots_out)
+
+
+def _required(params: Mapping[str, float], name: str, default: float | None = None) -> float:
+    value = params.get(name, default)
+    if value is None:
+        raise ValueError(f"postprocessing parameter {name!r} is missing")
+    return float(value)

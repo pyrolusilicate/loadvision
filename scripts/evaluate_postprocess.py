@@ -25,9 +25,9 @@ from loadvision.ml.data.splits import read_folds
 from loadvision.ml.evaluation.cross_validation import out_of_fold
 from loadvision.ml.evaluation.metrics import summary
 from loadvision.ml.models.backbones import load_backbone
-from loadvision.ml.postprocess import fit_chain
 from loadvision.ml.training.embedding_cache import embed_samples
 from loadvision.ml.training.head_trainer import FittedHead
+from loadvision.ml.training.postprocess_fit import fit_chain
 
 CACHE_DIR: Final = Path("runs/cache/embeddings")
 FOLDS: Final = Path("configs/splits/folds.json")
