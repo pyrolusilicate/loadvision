@@ -14,6 +14,7 @@ from loadvision.cli.oof import (
     dataset_of,
     ensemble_predictions,
     members_of,
+    photo_facts,
 )
 from loadvision.cli.options import add_data_option, add_device_option
 from loadvision.cli.paths import (
@@ -190,10 +191,13 @@ def evaluate_postprocess(args: argparse.Namespace) -> int:
     base = np.abs(data.labels - np.clip(raw, 0.0, 100.0))
     commit = describe_commit()
 
+    # Условные шаги выбирают кривую по пропорциям кадра и без фактов работать отказываются.
+    facts = photo_facts(data.samples)
+
     rows: list[dict[str, Any]] = []
     with jsonl_sink(runs / OOF_POSTPROCESS_FILE) as write:
         for name, chain in CHAINS.items():
-            corrected = cross_fitted(chain, raw, data.labels, data.numbers)
+            corrected = cross_fitted(chain, raw, data.labels, data.numbers, facts)
             difference = base - np.abs(data.labels - corrected)
             row = {
                 "at": _now(),

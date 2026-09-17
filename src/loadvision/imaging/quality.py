@@ -14,6 +14,11 @@ from loadvision.imaging.prepared_image import PreparedImage
 
 THUMBNAIL: Final = 32
 
+# Пропорции пишутся в таблицу прогона текстом и читаются обратно, поэтому округление - часть
+# определения: условный шаг постобработки выбирает популяцию по границам 0.70 и 0.80, и полная
+# точность против четырёх знаков разводила бы фото на границе по разным кривым.
+ASPECT_DIGITS: Final = 4
+
 # The Laplacian needs a pixel on every side of the one it looks at.
 _MIN_SIDE: Final = 3
 
@@ -28,6 +33,18 @@ def brightness(image: PreparedImage) -> float:
         Mean brightness.
     """
     return float(_grey(image).mean())
+
+
+def aspect(image: PreparedImage) -> float:
+    """Proportions of a photo, width over height, rounded the way the run table stores them.
+
+    Args:
+        image: Decoded photo.
+
+    Returns:
+        Ratio of width to height.
+    """
+    return round(image.width / image.height, ASPECT_DIGITS)
 
 
 def sharpness(image: PreparedImage) -> float:
