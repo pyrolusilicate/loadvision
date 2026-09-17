@@ -1,29 +1,33 @@
-"""FastAPI application factory and composition root."""
+"""FastAPI application factory: routes, error handlers and middleware around ready services."""
 
 from fastapi import FastAPI
+from starlette.types import Lifespan
 
 from loadvision.api.errors import install_error_handlers
 from loadvision.api.middleware import RequestContextMiddleware
-from loadvision.api.routers import assessments, health, schema
+from loadvision.api.routers import assessments, health, labels, schema, shipments
 from loadvision.api.services import ApiServices
 
 
-def create_app(services: ApiServices) -> FastAPI:
+def create_app(services: ApiServices, lifespan: Lifespan[FastAPI] | None = None) -> FastAPI:
     """Builds the application around ready services.
 
-    Wiring with the real database, storage and model package lives in the composition root
-    that comes with the Postgres repositories (task 6.2); tests pass fakes here.
+    The service process wires the real database, storage and model package in `api/main.py`;
+    tests pass fakes here.
 
     Args:
         services: Use cases, the active model and HTTP settings.
+        lifespan: What runs when the application starts and stops.
 
     Returns:
         The application.
     """
-    app = FastAPI(title="Loadvision API", version="1")
+    app = FastAPI(title="Loadvision API", version="1", lifespan=lifespan)
     app.state.services = services
     install_error_handlers(app)
     app.include_router(assessments.router)
+    app.include_router(labels.router)
+    app.include_router(shipments.router)
     app.include_router(schema.router)
     app.include_router(health.router)
     app.add_middleware(

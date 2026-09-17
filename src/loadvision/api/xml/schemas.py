@@ -6,11 +6,15 @@ import re
 from dataclasses import dataclass
 from decimal import ROUND_HALF_UP, Decimal
 from typing import Final
+from uuid import UUID
 
 from lxml import etree
 
 from loadvision.api.xml.parser import NAMESPACE
-from loadvision.application.assess_photo import AssessPhotoResult
+from loadvision.application.get_shipment import LabeledAssessment, ShipmentHistory
+from loadvision.application.ports import ImageRecord
+from loadvision.domain.assessment import Assessment, LoadPercent
+from loadvision.domain.confirmed_label import ConfirmedLabel
 from loadvision.domain.model_version import ModelVersionId
 from loadvision.domain.timestamps import format_utc
 from loadvision.errors import ERROR_CATALOG, ErrorCode, LoadvisionError
@@ -52,6 +56,34 @@ def read_assessment_request(root: etree._Element) -> AssessmentRequestMessage:
     )
 
 
+@dataclass(frozen=True, slots=True)
+class LabelRequestMessage:
+    """Fields of `LabelRequest`.
+
+    Attributes:
+        load_pct: Confirmed load, or None if the request says `Unusable`.
+        author: Author as sent, or None if absent.
+    """
+
+    load_pct: LoadPercent | None
+    author: str | None
+
+
+def read_label_request(root: etree._Element) -> LabelRequestMessage:
+    """Reads a request that already passed the XSD, so it has either `LoadPct` or `Unusable`.
+
+    Args:
+        root: Root element `LabelRequest`.
+
+    Returns:
+        The request fields.
+    """
+    text = root.findtext(_name("LoadPct"))
+    # The XSD accepts "-0" as zero; adding 0.0 turns -0.0 into 0.0, which is written as "0.0".
+    load_pct = None if text is None else LoadPercent(float(text) + 0.0)
+    return LabelRequestMessage(load_pct=load_pct, author=root.findtext(_name("Author")))
+
+
 def decode_base64(text: str) -> bytes:
     """Decodes base64 strictly, skipping only spaces and line breaks.
 
@@ -67,16 +99,26 @@ def decode_base64(text: str) -> bytes:
         raise LoadvisionError(ErrorCode.INVALID_ENCODING, "photo is not valid base64") from error
 
 
-def assessment_document(result: AssessPhotoResult) -> etree._Element:
-    """Builds `Assessment` for a new or reused assessment."""
-    assessment = result.assessment
-    root = etree.Element(
-        _name("Assessment"),
-        nsmap={None: NAMESPACE},
-        id=str(assessment.id),
-        shipmentId=assessment.shipment_id.value,
-        reused=_boolean(result.reused),
-    )
+def assessment_document(
+    assessment: Assessment,
+    image: ImageRecord,
+    *,
+    label: ConfirmedLabel | None = None,
+    reused: bool | None = None,
+) -> etree._Element:
+    """Builds `Assessment`.
+
+    Args:
+        assessment: The assessment.
+        image: Stored metadata of the assessed photo.
+        label: Label of the photo, if any.
+        reused: For `POST`, whether the stored assessment was returned; None elsewhere, where
+            the attribute is not written.
+    """
+    attributes = {"id": str(assessment.id), "shipmentId": assessment.shipment_id.value}
+    if reused is not None:
+        attributes["reused"] = _boolean(reused)
+    root = etree.Element(_name("Assessment"), attributes, nsmap={None: NAMESPACE})
     etree.SubElement(root, _name("LoadPct")).text = format_decimal(
         assessment.load_pct.value, LOAD_PCT_PLACES
     )
@@ -99,17 +141,49 @@ def assessment_document(result: AssessPhotoResult) -> etree._Element:
     }
     if known:
         etree.SubElement(root, _name("Signals"), known)
+    if label is not None:
+        etree.SubElement(root, _name("ConfirmedLabel"), _label_attributes(label))
     etree.SubElement(
         root,
         _name("Image"),
-        sha256=result.image.sha256,
-        mediaType=result.image.media_type.value,
-        width=str(result.image.width),
-        height=str(result.image.height),
+        sha256=image.sha256,
+        mediaType=image.media_type.value,
+        width=str(image.width),
+        height=str(image.height),
     )
     etree.SubElement(root, _name("Model"), version=assessment.model_version.value)
     etree.SubElement(root, _name("ProcessingMs")).text = str(assessment.processing_ms)
     etree.SubElement(root, _name("CreatedAt")).text = format_utc(assessment.created_at)
+    return root
+
+
+def shipment_document(history: ShipmentHistory) -> etree._Element:
+    """Builds `Shipment` with the current assessment and the history, newest first."""
+    root = etree.Element(_name("Shipment"), nsmap={None: NAMESPACE}, id=history.shipment_id.value)
+    etree.SubElement(root, _name("Current"), _summary(history.current))
+    past = etree.SubElement(root, _name("History"), count=str(len(history.assessments)))
+    for item in history.assessments:
+        etree.SubElement(past, _name("Assessment"), _summary(item))
+    return root
+
+
+def label_document(label: ConfirmedLabel, assessment_id: UUID) -> etree._Element:
+    """Builds `Label` for the label stored through an assessment."""
+    root = etree.Element(
+        _name("Label"),
+        nsmap={None: NAMESPACE},
+        assessmentId=str(assessment_id),
+        imageSha256=label.image_sha256,
+    )
+    if label.load_pct is None:
+        etree.SubElement(root, _name("Unusable"))
+    else:
+        etree.SubElement(root, _name("LoadPct")).text = format_decimal(
+            label.load_pct.value, LOAD_PCT_PLACES
+        )
+    if label.author is not None:
+        etree.SubElement(root, _name("Author")).text = label.author
+    etree.SubElement(root, _name("UpdatedAt")).text = format_utc(label.updated_at)
     return root
 
 
@@ -144,6 +218,35 @@ def format_decimal(value: float, places: int) -> str:
     """
     quantum = Decimal(1).scaleb(-places)
     return format(Decimal(repr(value)).quantize(quantum, rounding=ROUND_HALF_UP), "f")
+
+
+def _summary(item: LabeledAssessment) -> dict[str, str]:
+    assessment = item.assessment
+    attributes = {
+        "id": str(assessment.id),
+        "loadPct": format_decimal(assessment.load_pct.value, LOAD_PCT_PLACES),
+        "modelVersion": assessment.model_version.value,
+        "createdAt": format_utc(assessment.created_at),
+    }
+    # The same rule as for `Review`: without a review policy, no reasons means "not checked".
+    if assessment.review_reasons:
+        attributes["needsReview"] = "true"
+    if item.label is not None and item.label.load_pct is not None:
+        attributes["confirmedLoadPct"] = format_decimal(item.label.load_pct.value, LOAD_PCT_PLACES)
+    if item.label is not None and item.label.unusable:
+        attributes["photoUnusable"] = "true"
+    return attributes
+
+
+def _label_attributes(label: ConfirmedLabel) -> dict[str, str]:
+    attributes = {"updatedAt": format_utc(label.updated_at)}
+    if label.load_pct is not None:
+        attributes["loadPct"] = format_decimal(label.load_pct.value, LOAD_PCT_PLACES)
+    else:
+        attributes["unusable"] = "true"
+    if label.author is not None:
+        attributes["author"] = label.author
+    return attributes
 
 
 def _name(local: str) -> str:
