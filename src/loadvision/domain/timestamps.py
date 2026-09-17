@@ -3,6 +3,15 @@
 from datetime import UTC, datetime
 
 
+def utc_now() -> datetime:
+    """Returns the current time in UTC.
+
+    Use cases take the clock as a parameter and never call this themselves: a test moves time
+    by passing its own clock. The real one is given to them where the service is assembled.
+    """
+    return datetime.now(UTC)
+
+
 def ensure_aware(value: datetime, field: str) -> None:
     """Rejects a timestamp without a UTC offset.
 

@@ -7,7 +7,6 @@ import functools
 import uuid
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
-from datetime import UTC, datetime
 from pathlib import Path
 
 from fastapi import FastAPI
@@ -22,6 +21,7 @@ from loadvision.application.load_served_model import LoadServedModel
 from loadvision.application.ports import UnitOfWorkFactory
 from loadvision.application.submit_label import SubmitLabel
 from loadvision.domain.model_version import ModelVersionId
+from loadvision.domain.timestamps import utc_now
 from loadvision.infrastructure.db.session import PostgresUnitOfWork, create_database_engine
 from loadvision.infrastructure.storage.local_storage import LocalImageStorage
 from loadvision.ml.inference.active_model import ActiveModel
@@ -108,8 +108,3 @@ def load_package(models_dir: Path, version: ModelVersionId) -> PackagePredictor:
         ModelPackageError: If the package is missing, invalid or not supported.
     """
     return PackagePredictor(ModelPackage.load(models_dir / version.value))
-
-
-def utc_now() -> datetime:
-    """Returns the current time in UTC."""
-    return datetime.now(UTC)
