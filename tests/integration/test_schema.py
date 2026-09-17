@@ -179,6 +179,26 @@ def test_downgrade_removes_the_schema_and_upgrade_restores_it(server_url: URL) -
         }
 
 
+def check_names(engine: Engine, table_name: str) -> set[str]:
+    return {
+        str(check["name"])
+        for check in inspect(engine).get_check_constraints(table_name)
+        if check["name"] is not None
+    }
+
+
+@pytest.mark.integration
+def test_each_revision_downgrades_to_the_previous_schema(server_url: URL) -> None:
+    with throwaway_database(server_url) as url, engine_for(url) as engine:
+        config = alembic_config(url)
+        command.upgrade(config, "head")
+        assert "ck_training_jobs_error_code_known" not in check_names(engine, "training_jobs")
+        command.downgrade(config, "0001")
+        assert "ck_training_jobs_error_code_known" in check_names(engine, "training_jobs")
+        command.upgrade(config, "head")
+        assert "ck_training_jobs_error_code_known" not in check_names(engine, "training_jobs")
+
+
 @pytest.mark.integration
 def test_every_table_has_a_row_builder() -> None:
     assert set(ROW_BUILDERS) == set(tables.metadata.tables)
@@ -280,11 +300,6 @@ def test_accepts_boundary_row(seeded: Connection, table_name: str, overrides: Ro
                 "error_code": "INTERNAL_ERROR",
             },
             "ck_training_jobs_error_when_failed",
-        ),
-        (
-            "training_jobs",
-            {"status": "failed", "started_at": T0, "finished_at": T0, "error_code": "OOPS"},
-            "ck_training_jobs_error_code_known",
         ),
         ("training_jobs", {"base_version": "v404"}, "fk_training_jobs_base_version"),
         ("training_jobs", {"result_version": "v404"}, "fk_training_jobs_result_version"),

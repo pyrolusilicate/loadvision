@@ -32,7 +32,6 @@ from loadvision.application.ports import TrainingMode
 from loadvision.domain.assessment import SHA256_HEX_PATTERN, ReviewReason
 from loadvision.domain.model_version import MODEL_VERSION_PATTERN, ModelVersionStatus
 from loadvision.domain.shipment import SHIPMENT_ID_PATTERN
-from loadvision.errors import ErrorCode
 from loadvision.imaging.prepared_image import MediaType
 
 # Fixed constraint names: migrations refer to them, and autogenerate stays deterministic.
@@ -204,7 +203,6 @@ training_jobs: Final = Table(
     _aware("finished_at", nullable=True),
     CheckConstraint(_one_of("mode", TrainingMode), name="mode_known"),
     CheckConstraint(_one_of("status", JOB_STATUSES), name="status_known"),
-    CheckConstraint(_one_of("error_code", ErrorCode), name="error_code_known"),
     CheckConstraint("(started_at IS NULL) = (status = 'queued')", name="started_unless_queued"),
     CheckConstraint(
         "(finished_at IS NOT NULL) = (status IN ('succeeded', 'failed'))",
