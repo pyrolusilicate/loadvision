@@ -1,0 +1,15 @@
+{
+  "name": "ens4_median16_round5",
+  "description": "Two pooled encoders and two 4x3 grids, ridge heads, median calibration then rounding to 5.",
+  "folds": "configs/splits/folds.json",
+  "members": [
+    {"encoder": "dinov3_vitb16", "alpha": 200},
+    {"encoder": "pe_spatial_vitb16", "alpha": 50},
+    {"encoder": "dinov3_vitb16_grid4x3", "alpha": 3000},
+    {"encoder": "pe_spatial_vitb16_grid4x3", "alpha": 1000}
+  ],
+  "postprocess": [
+    {"step": "median_bins", "params": {"bins": 16}},
+    {"step": "round_to", "params": {"step": 5}}
+  ]
+}
