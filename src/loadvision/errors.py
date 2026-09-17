@@ -19,6 +19,8 @@ class ErrorCode(StrEnum):
     CORRUPTED_IMAGE = "CORRUPTED_IMAGE"
     SHIPMENT_NOT_FOUND = "SHIPMENT_NOT_FOUND"
     ASSESSMENT_NOT_FOUND = "ASSESSMENT_NOT_FOUND"
+    ROUTE_NOT_FOUND = "ROUTE_NOT_FOUND"
+    METHOD_NOT_ALLOWED = "METHOD_NOT_ALLOWED"
     TRAINING_ALREADY_RUNNING = "TRAINING_ALREADY_RUNNING"
     MODEL_VERSION_STATUS_CONFLICT = "MODEL_VERSION_STATUS_CONFLICT"
     MODEL_NOT_READY = "MODEL_NOT_READY"
@@ -96,6 +98,17 @@ ERROR_CATALOG: Final[Mapping[ErrorCode, ErrorSpec]] = MappingProxyType(
             404,
             "Оценка с таким идентификатором не найдена.",
             "Возьмите идентификатор из ответа на оценку фото или из истории перевозки.",
+        ),
+        ErrorCode.ROUTE_NOT_FOUND: ErrorSpec(
+            404,
+            "Такого адреса в API нет.",
+            "Проверьте путь запроса и префикс /api/v1. Список методов приведён в документации API.",
+        ),
+        ErrorCode.METHOD_NOT_ALLOWED: ErrorSpec(
+            405,
+            "Этот HTTP-метод для адреса не поддерживается.",
+            "Проверьте метод запроса: например, фото на оценку отправляется через "
+            "POST /api/v1/assessments.",
         ),
         ErrorCode.TRAINING_ALREADY_RUNNING: ErrorSpec(
             409,
