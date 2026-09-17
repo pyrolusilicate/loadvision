@@ -3,15 +3,13 @@ import logging
 from dataclasses import dataclass
 from pathlib import Path
 
-import numpy as np
 import pytest
 
 from loadvision.application.ports import Prediction
 from loadvision.cli.main import main
 from loadvision.domain.assessment import LoadPercent
-from loadvision.ml.packaging.baseline_package import build_baseline_package
 from tests import image_files
-from tests.builders import T0
+from tests.model_packages import build_numpy_package
 from tests.settings_files import use_settings
 
 FEATURES = 233
@@ -28,29 +26,6 @@ class Workspace:
 
     def predict(self, *extra: str) -> int:
         return main(["predict", "submission", "--data", str(self.data_dir), *extra])
-
-
-def build_package(root: Path, *, load: float, version: str) -> Path:
-    """Writes a package whose head predicts `load` for every photo; returns its folder."""
-    baseline = root / "baseline"
-    baseline.mkdir(parents=True)
-    np.savez(
-        baseline / "model.npz",
-        mean=np.zeros(FEATURES),
-        scale=np.ones(FEATURES),
-        weights=np.zeros(FEATURES),
-        intercept=np.asarray(load),
-    )
-    package = root / "package"
-    build_baseline_package(
-        baseline,
-        package,
-        version=version,
-        git_commit="0" * 40,
-        data_hash="d" * 64,
-        created_at=T0,
-    )
-    return package
 
 
 def write_photos(split_dir: Path, image_ids: tuple[str, ...], header: str) -> None:
@@ -75,7 +50,7 @@ def workspace(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Workspace:
         model={"version": VERSION},
     )
     (tmp_path / "models").mkdir()
-    build_package(tmp_path / "served", load=LOAD, version=VERSION).rename(
+    build_numpy_package(tmp_path / "served", load=LOAD, version=VERSION).rename(
         tmp_path / "models" / VERSION
     )
     data_dir = tmp_path / "data"
@@ -130,7 +105,7 @@ def test_train_split_and_a_chosen_file(workspace: Workspace, tmp_path: Path) -> 
 def test_package_folder_wins_over_the_version_from_the_settings(
     workspace: Workspace, tmp_path: Path
 ) -> None:
-    other = build_package(tmp_path / "other", load=20.0, version="other-v1")
+    other = build_numpy_package(tmp_path / "other", load=20.0, version="other-v1")
     out = tmp_path / "answer.csv"
 
     assert workspace.predict("--package", str(other), "--out", str(out)) == 0
