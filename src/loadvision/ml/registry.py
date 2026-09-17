@@ -90,6 +90,15 @@ BACKBONES: Final = MappingProxyType(
         "siglip2_vitb16": BackboneSpec(
             timm_name="vit_base_patch16_siglip_512.v2_webli", patch=16, height=512, width=384
         ),
+        "siglip2_vitb16_grid4x3": BackboneSpec(
+            timm_name="vit_base_patch16_siglip_512.v2_webli",
+            patch=16,
+            height=512,
+            width=384,
+            pooling="grid",
+            grid_rows=4,
+            grid_cols=3,
+        ),
         # Grid variants keep where the cargo is: the label is the share of floor it covers, and
         # a single scene vector cannot tell three boxes in the middle from a half-full body.
         "dinov3_vitb16_grid4x3": BackboneSpec(

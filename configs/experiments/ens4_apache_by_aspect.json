@@ -1,0 +1,52 @@
+{
+  "name": "ens4_apache_by_aspect",
+  "description": "Same shape as ens4_median16_by_aspect with every weight under Apache-2.0: DINOv3 is replaced by PE-Spatial with neutral padding, a SigLIP 2 grid and DINOv2. Costs 0.08 MAE, which is noise on three seeds, and removes the trade-controls clause from the package.",
+  "version": "v2",
+  "folds": "configs/splits/folds.json",
+  "members": [
+    {
+      "encoder": "pe_spatial_vitb16",
+      "head": "ridge",
+      "params": {
+        "alpha": 50
+      }
+    },
+    {
+      "encoder": "pe_spatial_vitb16_grid4x3_padmean",
+      "head": "ridge",
+      "params": {
+        "alpha": 1000
+      }
+    },
+    {
+      "encoder": "siglip2_vitb16_grid4x3",
+      "head": "ridge",
+      "params": {
+        "alpha": 1000
+      }
+    },
+    {
+      "encoder": "dinov2_vitb14",
+      "head": "ridge",
+      "params": {
+        "alpha": 300
+      }
+    }
+  ],
+  "postprocess": [
+    {
+      "name": "median_bins_by_aspect",
+      "params": {
+        "bins": 16,
+        "low": 0.7,
+        "high": 0.8
+      }
+    },
+    {
+      "name": "round_to",
+      "params": {
+        "step": 5
+      }
+    }
+  ]
+}
