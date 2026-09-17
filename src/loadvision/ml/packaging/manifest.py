@@ -128,28 +128,31 @@ class OodConfig(_Schema):
     """Out-of-distribution score: distance to the nearest train embeddings.
 
     Attributes:
+        member: Index of the ensemble member whose embeddings the reference holds.
         k: Number of nearest train embeddings averaged into the score.
         threshold: Score above which a photo is flagged as an unusual scene.
         reference: File with the train embeddings.
     """
 
+    member: int = Field(ge=0)
     k: int = Field(ge=1)
     threshold: float = Field(ge=0)
     reference: PackagePath
 
 
-class Postprocess(_Schema):
-    """Adjustments of the ensemble output, each off unless OOF results support it.
-
-    Clipping to [0, 100] is not configurable: every prediction is clipped.
+class PostprocessStep(_Schema):
+    """One step of the chain applied to the ensemble output.
 
     Attributes:
-        round_to: Step to round predictions to, such as 5; None keeps them as they are.
-        snap_100: Predictions at or above this value become 100; None disables snapping.
+        name: Key in the postprocessing registry of `ml/postprocess.py`.
+        params: Numeric parameters, including the ones learned on out-of-fold predictions,
+            such as a snap threshold.
+        file: Learned curve of the step, such as a calibration; None for steps without one.
     """
 
-    round_to: float | None = Field(default=None, gt=0, le=100)
-    snap_100: float | None = Field(default=None, ge=0, le=100)
+    name: RegistryKey
+    params: dict[str, StrictInt | StrictFloat] = Field(default_factory=dict)
+    file: PackagePath | None = None
 
 
 class FoldsRef(_Schema):
@@ -176,7 +179,8 @@ class Manifest(_Schema):
         members: Models of the ensemble; their weights sum to 1.
         cv: CV metrics; None when the models were not evaluated on the shared folds.
         ood: Out-of-distribution score settings; None disables the score.
-        postprocess: Adjustments of the ensemble output.
+        postprocess: Steps applied to the ensemble output in list order; every prediction is
+            clipped to [0, 100] after them, so clipping is not a step.
         folds: Folds of the CV metrics; None when `cv` is None.
         licenses: License texts of the weights.
         files: SHA-256 of every package file except the manifest; the loader verifies them.
@@ -190,7 +194,7 @@ class Manifest(_Schema):
     members: tuple[Member, ...] = Field(min_length=1)
     cv: CvMetrics | None = None
     ood: OodConfig | None = None
-    postprocess: Postprocess = Field(default_factory=Postprocess)
+    postprocess: tuple[PostprocessStep, ...] = ()
     folds: FoldsRef | None = None
     licenses: tuple[PackagePath, ...] = ()
     files: dict[PackagePath, Sha256Hex]
@@ -202,6 +206,8 @@ class Manifest(_Schema):
             raise ValueError(f"member weights must sum to 1, got {total}")
         if (self.cv is None) != (self.folds is None):
             raise ValueError("cv and folds must be set together")
+        if self.ood is not None and self.ood.member >= len(self.members):
+            raise ValueError(f"ood.member {self.ood.member} is not a member index")
         unlisted = sorted(set(self.referenced_files()) - set(self.files))
         if unlisted:
             raise ValueError(f"files not listed in files: {', '.join(unlisted)}")
@@ -225,5 +231,6 @@ class Manifest(_Schema):
             paths.append(member.head)
         if self.ood is not None:
             paths.append(self.ood.reference)
+        paths.extend(step.file for step in self.postprocess if step.file is not None)
         paths.extend(self.licenses)
         return paths

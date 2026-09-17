@@ -30,7 +30,7 @@ def test_valid_manifest_is_parsed() -> None:
     assert manifest.created_at == T0
     assert manifest.members[0].runtime is Runtime.NUMPY
     assert (manifest.cv, manifest.ood, manifest.folds, manifest.licenses) == (None, None, None, ())
-    assert (manifest.postprocess.round_to, manifest.postprocess.snap_100) == (None, None)
+    assert manifest.postprocess == ()
 
 
 @pytest.mark.ml
@@ -45,6 +45,7 @@ def test_written_manifest_parses_back_with_utc_time() -> None:
 def test_full_manifest_is_parsed() -> None:
     files = {"m1/backbone.onnx": SHA_A, "m1/head.npz": SHA_A, "m2/backbone.onnx": SHA_A}
     files |= {"m2/head.npz": SHA_A, "ood/train.npy": SHA_A, "licenses/DINOv3.md": SHA_A}
+    files |= {"postprocess/0_median_bins.npz": SHA_A}
     data = manifest_data(
         members=[
             member_data(
@@ -64,8 +65,12 @@ def test_full_manifest_is_parsed() -> None:
             ),
         ],
         cv={"mae": 7.9, "within_10": 81.5, "mae_by_range": {"90-99": 9.1, "100": 3.2}},
-        ood={"k": 10, "threshold": 0.35, "reference": "ood/train.npy"},
-        postprocess={"round_to": 5, "snap_100": 97.5},
+        ood={"member": 0, "k": 10, "threshold": 0.35, "reference": "ood/train.npy"},
+        postprocess=[
+            {"name": "median_bins", "file": "postprocess/0_median_bins.npz"},
+            {"name": "snap_high", "params": {"threshold": 97.5}},
+            {"name": "round_to", "params": {"step": 5}},
+        ],
         folds={"file": "configs/splits/folds.json", "sha256": SHA_A},
         licenses=["licenses/DINOv3.md"],
         files=files,
@@ -77,9 +82,12 @@ def test_full_manifest_is_parsed() -> None:
         "m2/backbone.onnx",
         "m2/head.npz",
         "ood/train.npy",
+        "postprocess/0_median_bins.npz",
         "licenses/DINOv3.md",
     ]
     assert manifest.members[0].preprocessing.params == {"height": 512, "width": 384}
+    assert [step.name for step in manifest.postprocess] == ["median_bins", "snap_high", "round_to"]
+    assert manifest.postprocess[1].params == {"threshold": 97.5}
 
 
 @pytest.mark.ml
@@ -111,7 +119,7 @@ def test_rejects_malformed_top_level_field(field: str, value: object) -> None:
 @pytest.mark.ml
 @pytest.mark.parametrize(
     "extra",
-    [{"clip": True}, {"postprocess": {"round_to": 5, "clip": True}}],
+    [{"clip": True}, {"postprocess": [{"name": "round_to", "sha256": SHA_A}]}],
 )
 def test_rejects_unknown_fields(extra: dict[str, Any]) -> None:
     assert_rejected(manifest_data(**extra), "Extra inputs are not permitted")
@@ -191,7 +199,14 @@ def test_rejects_package_path_leaving_the_package(path: str) -> None:
             {"members": [member_data(runtime="onnx", weights="m1/backbone.onnx")]},
             "m1/backbone.onnx",
         ),
-        ({"ood": {"k": 10, "threshold": 0.3, "reference": "ood/train.npy"}}, "ood/train.npy"),
+        (
+            {"ood": {"member": 0, "k": 10, "threshold": 0.3, "reference": "ood/train.npy"}},
+            "ood/train.npy",
+        ),
+        (
+            {"postprocess": [{"name": "isotonic", "file": "postprocess/0_isotonic.npz"}]},
+            "postprocess/0_isotonic.npz",
+        ),
         ({"licenses": ["licenses/DINOv3.md"]}, "licenses/DINOv3.md"),
     ],
 )
@@ -222,9 +237,17 @@ def test_requires_cv_and_folds_together(overrides: dict[str, Any]) -> None:
         ({"cv": {"mae": 7.9, "within_10": 80, "mae_by_range": {"100": -3}}}, "mae_by_range"),
         ({"folds": {"file": "../folds.json", "sha256": SHA_A}}, "folds.file"),
         ({"folds": {"file": "configs/splits/folds.json", "sha256": "abc"}}, "folds.sha256"),
-        ({"ood": {"k": 0, "threshold": 0.3, "reference": "head.npz"}}, "ood.k"),
-        ({"postprocess": {"round_to": 0}}, "round_to"),
-        ({"postprocess": {"snap_100": 101}}, "snap_100"),
+        ({"ood": {"member": 0, "k": 0, "threshold": 0.3, "reference": "head.npz"}}, "ood.k"),
+        ({"ood": {"member": -1, "k": 5, "threshold": 0.3, "reference": "head.npz"}}, "ood.member"),
+        (
+            {"ood": {"member": 1, "k": 5, "threshold": 0.3, "reference": "head.npz"}},
+            "ood.member 1 is not a member index",
+        ),
+        ({"postprocess": {"round_to": 5}}, "postprocess"),
+        ({"postprocess": [{"name": "Median Bins"}]}, "postprocess.0.name"),
+        ({"postprocess": [{"name": "round_to", "params": {"step": "5"}}]}, "params"),
+        ({"postprocess": [{"name": "round_to", "params": {"up": True}}]}, "params"),
+        ({"postprocess": [{"name": "isotonic", "file": "../curve.npz"}]}, "postprocess.0.file"),
     ],
 )
 def test_rejects_malformed_sections(overrides: dict[str, Any], match: str) -> None:
