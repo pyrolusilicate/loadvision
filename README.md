@@ -47,6 +47,7 @@ git config core.hooksPath .githooks    # или just hooks
 ```bash
 uv run loadvision model build-baseline                       # пакет модели в storage/models/
 uv run loadvision train configs/experiments/<имя>.json       # весь пайплайн обучения
+uv run loadvision predict submission                         # прогноз пакетом модели
 uv run loadvision data folds --check                         # проверить configs/splits/folds.json
 uv run loadvision eval heads                                 # сравнение энкодеров и голов по OOF
 uv run loadvision eval errors                                # отчёт об ошибках в runs/eda/

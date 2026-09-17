@@ -99,6 +99,7 @@ curl -s http://localhost:8000/api/v1/schema.xsd            # схема, по к
 |---|---|---|---|
 | `model build-baseline` | пакет модели из решения организаторов | `storage/models/<версия>/` | `baseline/`, `data/`, git |
 | `train <config>` | весь пайплайн обучения одного эксперимента | `runs/run_<время>_<хвост>/` | `data/`, группа `ml` |
+| `predict submission` | прогноз пакетом модели по части датасета | `runs/submissions/<версия>-<часть>.csv` | пакет модели, `data/` |
 | `data folds [--check]` | собрать или проверить фолды | `configs/splits/folds.json` | `data/` |
 | `features probe [энкодеры]` | kNN-зонд по эмбеддингам, без обучения | `runs/probes/encoders.jsonl` | `data/`, `ml`, веса энкодеров |
 | `eval heads [энкодеры]` | перебор энкодеров и голов по OOF | `runs/oof/history.jsonl` | то же |
@@ -119,7 +120,14 @@ uv run loadvision train configs/experiments/ens4_median16_round5.json --device m
 uv run loadvision data folds --check
 uv run loadvision eval postprocess --member siglip2_vitb16:300 --member dinov2_vitb14:200
 uv run loadvision model build-baseline --version baseline-v0
+uv run loadvision predict submission                      # тестовая часть пакетом из настроек
+uv run loadvision predict submission --package runs/run_20260918_101500_ab12/package \
+  --device mps --out submission.csv
 ```
+
+`predict submission` берёт всё из манифеста пакета: энкодеры, головы и постобработку. Проверка
+на пакете baseline: 307 фото за 2,4 секунды на CPU, 8 мс на фото, числа совпали с
+`baseline/submission.csv` организаторов с точностью до округления.
 
 Записи `runs/*.jsonl` дописываются, а не перезаписываются: замеры копятся по дням, и старую
 строку всегда можно сравнить с новой.
@@ -163,7 +171,8 @@ docker compose logs -f api
 ```
 
 Образ собирается из `docker/api.Dockerfile`: сборка в образе uv, итоговый образ - `python-slim`
-плюс виртуальное окружение без группы `ml`, поэтому в нём нет torch и scikit-learn.
+плюс виртуальное окружение без группы `ml`, поэтому в нём нет torch и scikit-learn. Пакет модели
+на энкодерах в таком образе не поднимется: для него нужен образ с группой `ml`.
 
 Подключение к базе внутри compose идёт через переменные `PG*` при пустом `DATABASE_URL`: так
 пароль со знаком `@` или `/` не нужно экранировать внутри URL. Папка `./storage` подключена в
