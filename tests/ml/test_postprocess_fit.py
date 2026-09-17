@@ -159,3 +159,59 @@ def test_invalid_parameters_are_rejected(name: str, params: dict[str, float], me
 def test_isotonic_needs_more_than_one_distinct_prediction() -> None:
     with pytest.raises(ValueError, match="at least two distinct"):
         fit_step("isotonic", np.full(10, 50.0), np.arange(10, dtype=float))
+
+
+@pytest.mark.ml
+@pytest.mark.parametrize("name", ["isotonic_smooth", "median_bins_smooth"])
+def test_a_smoothed_curve_is_dense_and_never_goes_down(name: str) -> None:
+    predictions, labels = hedged()
+
+    step = fit_step(name, predictions, labels, {})
+
+    assert step.curves is not None
+    knots_in, knots_out = step.curves[0]
+    # A binned curve has as many knots as bins; a smoothed one is sampled densely so the
+    # straight lines the service draws between knots follow the spline.
+    assert knots_in.size == 101
+    assert np.all(np.diff(knots_in) > 0)
+    assert np.all(np.diff(knots_out) >= 0)
+    assert knots_out.min() >= 0.0 and knots_out.max() <= 100.0
+
+
+@pytest.mark.ml
+def test_smoothing_keeps_the_shape_the_binned_fit_found() -> None:
+    predictions, labels = hedged()
+    binned = fit_step("median_bins", predictions, labels, {})
+    smooth = fit_step("median_bins_smooth", predictions, labels, {})
+    assert binned.curves is not None and smooth.curves is not None
+
+    at = np.linspace(20.0, 80.0, 25)
+    binned_values = np.interp(at, *binned.curves[0])
+    smooth_values = np.interp(at, *smooth.curves[0])
+
+    # Same correction, drawn without the staircase: the two never disagree by much.
+    assert np.abs(binned_values - smooth_values).max() < 5.0
+
+
+@pytest.mark.ml
+def test_a_smoothed_step_still_undoes_the_pull_towards_the_middle() -> None:
+    predictions, labels = hedged()
+
+    step = fit_step("median_bins_smooth", predictions, labels, {})
+    corrected = make_chain([(step.name, step.params, step.curves)])(predictions, {})
+
+    before = float(np.abs(labels - predictions).mean())
+    after = float(np.abs(labels - corrected).mean())
+    assert after < before
+
+
+@pytest.mark.ml
+def test_the_conditional_smoothed_step_learns_a_curve_per_population() -> None:
+    predictions, labels = hedged()
+    facts = {"aspect": np.where(np.arange(labels.size) % 2 == 0, 0.75, 1.3)}
+
+    step = fit_step("median_bins_smooth_by_aspect", predictions, labels, {}, facts)
+
+    assert step.curves is not None
+    assert len(step.curves) == 2
+    assert (step.params["low"], step.params["high"]) == (0.70, 0.80)

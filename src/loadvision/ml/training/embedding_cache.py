@@ -15,6 +15,7 @@ from PIL import Image
 from loadvision.imaging.prepared_image import MediaType, PreparedImage
 from loadvision.imaging.preprocessing import Params, preprocess
 from loadvision.imaging.validator import ImageLimits, prepare_image
+from loadvision.imaging.views import IDENTITY
 from loadvision.ml.data.manifest import Sample
 from loadvision.ml.models.backbones import Backbone
 
@@ -66,7 +67,9 @@ def embed_samples(
         Float32 array of shape (len(samples), backbone.dim), in the order of `samples`.
     """
     cache_path = cache_dir / f"{backbone.name}.npz"
-    fingerprint = preprocessing_fingerprint(backbone.preprocessing, backbone.params)
+    fingerprint = preprocessing_fingerprint(
+        backbone.preprocessing, backbone.params, views=backbone.spec.views
+    )
     cached = _load_cache(cache_path, backbone.dim, fingerprint)
 
     missing = [sample for sample in samples if sample.sha256 not in cached]
@@ -89,11 +92,9 @@ def embed_samples(
 
 
 def _embed_batch(batch: Sequence[Sample], backbone: Backbone, device: str) -> NDArray[np.float32]:
-    inputs = np.stack(
-        [preprocess(backbone.preprocessing, read_image(s.path), backbone.params) for s in batch]
-    )
+    images = [read_image(sample.path) for sample in batch]
     with torch.inference_mode():
-        output = backbone.encode(torch.from_numpy(inputs).to(device))
+        output = backbone.embed(images, device)
     return output.float().cpu().numpy().astype(np.float32)
 
 
@@ -117,20 +118,21 @@ def read_image(path: Path, limits: ImageLimits = TRAINING_LIMITS) -> PreparedIma
     return prepare_image(path.read_bytes(), limits)
 
 
-def preprocessing_fingerprint(name: str, params: Params) -> str:
-    """Identifies the preprocessing a cache was built with.
+def preprocessing_fingerprint(name: str, params: Params, views: Sequence[str] = (IDENTITY,)) -> str:
+    """Identifies the preprocessing and the views a cache was built with.
 
     The file name only carries the backbone, so a changed normalization, a changed input box,
-    an edit inside `resize_pad` or a change in how photos are decoded would silently mix old
-    and new vectors in one cache. Running one fixed synthetic photo through the whole path,
-    decoding included, catches all of them.
+    an edit inside `resize_pad`, a change in how photos are decoded or a view added to the
+    entry would silently mix old and new vectors in one cache. Running one fixed synthetic
+    photo through the whole path, decoding included, catches all of them.
 
     Args:
         name: Key in the preprocessing registry.
         params: Parameters of that preprocessing.
+        views: Keys in the view registry the encoder averages over.
 
     Returns:
-        Lowercase hex SHA-256 of the preprocessed synthetic photo.
+        Lowercase hex SHA-256 of the preprocessed synthetic photo and the view names.
     """
     pixels = np.arange(_FINGERPRINT_PIXELS, dtype=np.uint8).reshape(_FINGERPRINT_SHAPE)
     image = Image.fromarray(pixels)
@@ -143,7 +145,9 @@ def preprocessing_fingerprint(name: str, params: Params) -> str:
     # The probe goes through decoding as well, so a change in the shared validator, EXIF
     # handling included, invalidates the cache instead of quietly mixing old vectors in.
     probe = prepare_image(encoded.getvalue(), TRAINING_LIMITS)
-    return hashlib.sha256(preprocess(name, probe, params).tobytes()).hexdigest()
+    digest = hashlib.sha256(preprocess(name, probe, params).tobytes())
+    digest.update(",".join(views).encode())
+    return digest.hexdigest()
 
 
 def _load_cache(path: Path, dim: int, fingerprint: str) -> dict[str, NDArray[np.float32]]:

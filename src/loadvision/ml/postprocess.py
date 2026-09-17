@@ -113,9 +113,11 @@ APPLIERS: Final[Mapping[str, Builder]] = {
     "snap_low": _build_snap_low,
     "linear_expand": _build_linear_expand,
     "isotonic": _build_curve,
+    "isotonic_smooth": _build_curve,
     "median_bins": _build_curve,
     "median_bins_smooth": _build_curve,
     "isotonic_by_aspect": _build_curve_by_aspect,
+    "isotonic_smooth_by_aspect": _build_curve_by_aspect,
     "median_bins_by_aspect": _build_curve_by_aspect,
     "median_bins_smooth_by_aspect": _build_curve_by_aspect,
 }
@@ -124,9 +126,11 @@ APPLIERS: Final[Mapping[str, Builder]] = {
 CURVE_STEPS: Final = frozenset(
     {
         "isotonic",
+        "isotonic_smooth",
         "median_bins",
         "median_bins_smooth",
         "isotonic_by_aspect",
+        "isotonic_smooth_by_aspect",
         "median_bins_by_aspect",
         "median_bins_smooth_by_aspect",
     }
@@ -134,7 +138,12 @@ CURVE_STEPS: Final = frozenset(
 
 # Steps that pick their curve by a fact of the photo rather than by the prediction alone.
 CONDITIONAL_STEPS: Final = frozenset(
-    {"isotonic_by_aspect", "median_bins_by_aspect", "median_bins_smooth_by_aspect"}
+    {
+        "isotonic_by_aspect",
+        "isotonic_smooth_by_aspect",
+        "median_bins_by_aspect",
+        "median_bins_smooth_by_aspect",
+    }
 )
 
 _ASPECT_GROUPS: Final = 2

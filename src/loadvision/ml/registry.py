@@ -4,6 +4,8 @@ from dataclasses import dataclass
 from types import MappingProxyType
 from typing import Final, Literal
 
+from loadvision.imaging.views import IDENTITY, VIEWS
+
 # A key names one pretrained checkpoint at one input size forever: it is written into a model
 # package manifest, and the service resolves the package by it long after the experiment.
 DEFAULT_BACKBONE: Final = "dinov2_vitb14"
@@ -35,6 +37,10 @@ class BackboneSpec:
             keeps where the cargo is and how much floor it covers.
         grid_rows: Rows of the grid, used by "grid" pooling.
         grid_cols: Columns of the grid, used by "grid" pooling.
+        views: Keys in the view registry of `imaging/views.py`. The encoder embeds every view
+            and averages the results, which is test-time augmentation. It is part of the entry
+            because the embedding it produces must be the same in training and in the service,
+            and because a different view list is a different candidate with its own cache.
     """
 
     timm_name: str
@@ -47,13 +53,18 @@ class BackboneSpec:
     pooling: Pooling = "pooled"
     grid_rows: int = 1
     grid_cols: int = 1
+    views: tuple[str, ...] = (IDENTITY,)
 
     def __post_init__(self) -> None:
         """Checks the box against the patch grid.
 
         Raises:
-            ValueError: If a side is not a positive multiple of `patch`.
+            ValueError: If a side is not a positive multiple of `patch`, a grid does not divide
+                the patch grid, or a view is not in the registry.
         """
+        unknown = sorted(set(self.views) - set(VIEWS))
+        if unknown or not self.views:
+            raise ValueError(f"{self.timm_name}: unknown views {unknown or 'none given'}")
         for side, value in (("height", self.height), ("width", self.width)):
             if value <= 0 or value % self.patch:
                 raise ValueError(
@@ -187,6 +198,31 @@ BACKBONES: Final = MappingProxyType(
             pooling="grid",
             grid_rows=4,
             grid_cols=3,
+        ),
+        # Same encoders that also look at the mirrored photo. The share of the floor taken by
+        # cargo does not change under a mirror, so the second look is free information; it
+        # costs a second run of the encoder, which is why it is a separate candidate.
+        "pe_spatial_vitb16_mirror": BackboneSpec(
+            timm_name="vit_pe_spatial_base_patch16_512.fb",
+            patch=16,
+            height=512,
+            width=384,
+            license="Apache-2.0",
+            origin="Perception Encoder, Meta AI Research",
+            views=("identity", "mirror"),
+        ),
+        "pe_spatial_vitb16_grid4x3_padmean_mirror": BackboneSpec(
+            timm_name="vit_pe_spatial_base_patch16_512.fb",
+            patch=16,
+            height=512,
+            width=384,
+            license="Apache-2.0",
+            origin="Perception Encoder, Meta AI Research",
+            preprocessing="resize_pad_mean",
+            pooling="grid",
+            grid_rows=4,
+            grid_cols=3,
+            views=("identity", "mirror"),
         ),
         "pe_spatial_vitb16_grid4x3": BackboneSpec(
             timm_name="vit_pe_spatial_base_patch16_512.fb",

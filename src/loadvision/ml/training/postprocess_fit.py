@@ -266,9 +266,11 @@ FITTERS: Final[Mapping[str, Fitter]] = {
     "snap_low": _fit_snap_low,
     "linear_expand": _fit_linear_expand,
     "isotonic": _fit_isotonic,
+    "isotonic_smooth": _smoothed(_fit_isotonic),
     "median_bins": _fit_median_bins,
     "median_bins_smooth": _smoothed(_fit_median_bins),
     "isotonic_by_aspect": _fit_by_aspect(_fit_isotonic),
+    "isotonic_smooth_by_aspect": _fit_by_aspect(_smoothed(_fit_isotonic)),
     "median_bins_by_aspect": _fit_by_aspect(_fit_median_bins),
     "median_bins_smooth_by_aspect": _fit_by_aspect(_smoothed(_fit_median_bins)),
 }

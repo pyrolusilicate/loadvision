@@ -244,7 +244,7 @@ class PackagePredictor:
         out-of-distribution score is the distance from that very embedding to the training ones.
         """
         values: dict[int, tuple[float, NDArray[np.float64] | None]] = {}
-        groups: dict[tuple[str, str], list[tuple[int, _LoadedMember]]] = {}
+        groups: dict[tuple[str, str, str], list[tuple[int, _LoadedMember]]] = {}
         for key, loaded in members.items():
             if loaded.encoder is None:
                 preprocessing = loaded.member.preprocessing
@@ -262,17 +262,25 @@ class PackagePredictor:
     ) -> dict[int, tuple[float, NDArray[np.float64] | None]]:
         import torch
 
-        first = sharing[0][1]
-        preprocessing = first.member.preprocessing
-        prepared = preprocess(preprocessing.name, image, preprocessing.params)
-        computed: dict[int, tuple[float, NDArray[np.float64] | None]] = {}
+        first = _backbone(sharing[0][1])
+        totals: dict[int, NDArray[np.float64]] = {}
         with torch.inference_mode():
-            # One run of the encoder for every member of the group; they differ only in how
-            # they pool its tokens.
-            tokens = _backbone(first).tokens(torch.from_numpy(prepared[None]).to(self._device))
-            for key, loaded in sharing:
-                embedding = _backbone(loaded).pool(tokens).float().cpu().numpy()[0]
-                computed[key] = (loaded.head.apply(embedding), embedding)
+            for view in first.views:
+                # One run of the encoder per view for the whole group; its members differ only
+                # in how they pool the tokens, and that is cheap next to the encoder itself.
+                tokens = first.tokens(first.prepare([image], view).to(self._device))
+                for key, loaded in sharing:
+                    backbone = _backbone(loaded)
+                    pooled = backbone.pool(tokens)
+                    if view.mirrored:
+                        pooled = backbone.unmirror(pooled)
+                    vector = pooled.float().cpu().numpy()[0].astype(np.float64)
+                    totals[key] = vector if key not in totals else totals[key] + vector
+        views = len(first.views)
+        computed: dict[int, tuple[float, NDArray[np.float64] | None]] = {}
+        for key, loaded in sharing:
+            embedding = totals[key] / views
+            computed[key] = (loaded.head.apply(embedding), embedding)
         return computed
 
     def _predict_one(self, image: PreparedImage) -> Prediction:
@@ -312,12 +320,13 @@ def _backbone(loaded: _LoadedMember) -> Any:
     return loaded.encoder
 
 
-def _group_key(loaded: _LoadedMember) -> tuple[str, str]:
-    """What members must share to run the encoder once: the checkpoint and the exact input."""
+def _group_key(loaded: _LoadedMember) -> tuple[str, str, str]:
+    """What members must share to run the encoder once: the checkpoint, the input, the views."""
     backbone = _backbone(loaded)
     preprocessing = loaded.member.preprocessing
     numbers = ",".join(f"{key}={value:g}" for key, value in sorted(preprocessing.params.items()))
     return (
         f"{backbone.spec.timm_name}:{backbone.spec.height}x{backbone.spec.width}",
         f"{preprocessing.name}({numbers})",
+        ",".join(backbone.spec.views),
     )
