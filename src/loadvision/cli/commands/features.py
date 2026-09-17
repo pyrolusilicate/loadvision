@@ -98,7 +98,9 @@ def _probe(name: str, args: argparse.Namespace, commit: str, runs: Path) -> dict
         "input": f"{spec.height}x{spec.width}",
         "patch": spec.patch,
         "dim": backbone.dim,
-        "preprocessing": preprocessing_fingerprint(backbone.params)[:_FINGERPRINT_SHOWN],
+        "preprocessing": preprocessing_fingerprint(
+            backbone.preprocessing, backbone.params, views=backbone.spec.views
+        )[:_FINGERPRINT_SHOWN],
         "photos": len(train),
         "device": args.device,
         **knn_mae(vectors, train, NEIGHBOURS),

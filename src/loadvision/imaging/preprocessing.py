@@ -27,6 +27,8 @@ _BASELINE_HIST_BINS: Final = 8
 
 _CHANNELS: Final = ("r", "g", "b")
 
+_MAX_CHANNEL: Final = 255
+
 
 def _require(params: Params, name: str) -> float:
     try:
@@ -71,6 +73,35 @@ def resize_pad(image: PreparedImage, params: Params) -> ModelInput:
         LoadvisionError: With code `MODEL_PACKAGE_INVALID` if a parameter is missing, a side is
             not a positive integer or a standard deviation is not positive.
     """
+    return _letterbox(image, params, fill=None)
+
+
+def resize_pad_mean(image: PreparedImage, params: Params) -> ModelInput:
+    """Fits a photo into the box and fills the rest with the encoder's mean colour.
+
+    Same as `resize_pad` except for what the free space holds. Black padding becomes about
+    -2.1 after normalization, a value no real photo of a cargo bay produces, and half of the
+    dataset has proportions far enough from the box to leave a wide band of it. The mean colour
+    normalizes to exactly zero, which is the neutral input for a pretrained encoder.
+
+    Args:
+        image: Decoded photo.
+        params: Same as `resize_pad`.
+
+    Returns:
+        Float32 array of shape (3, height, width) in channel-first order.
+
+    Raises:
+        LoadvisionError: With code `MODEL_PACKAGE_INVALID` if a parameter is missing, a side is
+            not a positive integer or a standard deviation is not positive.
+    """
+    mean = _channel_triple(params, "mean")
+    return _letterbox(image, params, fill=np.round(mean * _MAX_CHANNEL).astype(np.uint8))
+
+
+def _letterbox(
+    image: PreparedImage, params: Params, *, fill: NDArray[np.uint8] | None
+) -> ModelInput:
     height = _side(params, "height")
     width = _side(params, "width")
     mean = _channel_triple(params, "mean")
@@ -85,12 +116,15 @@ def resize_pad(image: PreparedImage, params: Params) -> ModelInput:
         # bilinear, since it must reproduce the organizers' reference code byte for byte.
         Image.Resampling.BICUBIC,
     )
-    canvas = np.zeros((height, width, 3), np.uint8)
+    if fill is None:
+        canvas = np.zeros((height, width, 3), np.uint8)
+    else:
+        canvas = np.broadcast_to(fill, (height, width, 3)).copy()
     top = (height - resized.height) // 2
     left = (width - resized.width) // 2
     canvas[top : top + resized.height, left : left + resized.width] = np.asarray(resized)
 
-    normalized = (canvas.astype(np.float32) / 255 - mean) / std
+    normalized = (canvas.astype(np.float32) / _MAX_CHANNEL - mean) / std
     return np.ascontiguousarray(normalized.transpose(2, 0, 1))
 
 
@@ -139,6 +173,7 @@ def baseline_v0(image: PreparedImage, params: Params) -> ModelInput:
 
 _REGISTRY: Final[Mapping[str, Preprocessor]] = {
     "resize_pad": resize_pad,
+    "resize_pad_mean": resize_pad_mean,
     "baseline_v0": baseline_v0,
 }
 

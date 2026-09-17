@@ -6,7 +6,7 @@ from typing import Final
 import numpy as np
 from numpy.typing import NDArray
 
-from loadvision.ml.postprocess import fit_chain
+from loadvision.ml.training.postprocess_fit import fit_chain
 
 type Chain = Sequence[tuple[str, Mapping[str, float]]]
 

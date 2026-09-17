@@ -29,7 +29,7 @@ RELATIVE_PATH_PATTERN: Final = r"[A-Za-z0-9_-][A-Za-z0-9._-]*(/[A-Za-z0-9_-][A-Z
 # Keys of the backbone and preprocessing registries.
 REGISTRY_KEY_PATTERN: Final = "[a-z][a-z0-9_]{0,63}"
 
-# fit_ensemble writes weights as floats, so their sum is 1 only up to rounding.
+# Member weights are floats, so their sum is 1 only up to rounding.
 _WEIGHT_SUM_TOLERANCE: Final = 1e-6
 
 _RELATIVE_PATH_RE: Final = re.compile(RELATIVE_PATH_PATTERN)

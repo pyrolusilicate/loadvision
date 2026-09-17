@@ -11,7 +11,12 @@ from loadvision.ml.packaging.model_package import file_sha256
 
 Split = Literal["train", "test"]
 
-IMAGE_SUFFIX: Final = ".jpg"
+# The organizers ship JPEG, but a photo confirmed through the service keeps the format it was
+# uploaded in. Globbing one suffix would make a stored PNG invisible here while the csv still
+# names it, so every format the service accepts is read.
+IMAGE_SUFFIXES: Final = (".jpg", ".jpeg", ".png", ".webp")
+
+IMAGE_SUFFIX: Final = IMAGE_SUFFIXES[0]
 
 _LABEL_COLUMN: Final = "load_pct"
 _ID_COLUMN: Final = "image_id"
@@ -64,8 +69,9 @@ def load_split(data_dir: Path, split: Split) -> list[Sample]:
 
     Raises:
         FileNotFoundError: If a csv or the images folder is missing.
-        ValueError: If a csv has unexpected columns or duplicate ids, if the csv and the images
-            folder disagree, if a training photo has no group, or if a label is out of range.
+        ValueError: If a csv has unexpected columns or duplicate ids, if one id is on disk in
+            two formats, if the csv and the images folder disagree, if a training photo has no
+            group, or if a label is out of range.
     """
     split_dir = data_dir / split
     images_dir = split_dir / "images"
@@ -74,7 +80,7 @@ def load_split(data_dir: Path, split: Split) -> list[Sample]:
 
     labels = _read_labels(split_dir / f"{split}.csv", split)
     groups = _read_groups(split_dir / "train_groups.csv") if split == "train" else {}
-    files = {path.stem: path for path in images_dir.glob(f"*{IMAGE_SUFFIX}")}
+    files = _photo_files(images_dir)
 
     _check_ids_match(labels.keys(), files.keys(), images_dir)
     if split == "train":
@@ -91,6 +97,17 @@ def load_split(data_dir: Path, split: Split) -> list[Sample]:
         )
         for image_id in sorted(labels)
     ]
+
+
+def _photo_files(images_dir: Path) -> dict[str, Path]:
+    files: dict[str, Path] = {}
+    for suffix in IMAGE_SUFFIXES:
+        for path in images_dir.glob(f"*{suffix}"):
+            seen = files.get(path.stem)
+            if seen is not None:
+                raise ValueError(f"{path.stem} is on disk twice: {seen.name} and {path.name}")
+            files[path.stem] = path
+    return files
 
 
 def _read_table(path: Path, columns: tuple[str, ...]) -> list[dict[str, str]]:

@@ -1,7 +1,7 @@
 """Stage that fills the embedding cache for every encoder of an experiment."""
 
 from collections.abc import Callable, Mapping, Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Final
 
 import numpy as np
@@ -31,7 +31,6 @@ class ExtractEmbeddings:
     encoders: Sequence[str]
     device: str = "cpu"
     load: Callable[[str, str], Backbone] = load_backbone
-    _dims: dict[str, int] = field(default_factory=dict[str, int], compare=False)
 
     @property
     def name(self) -> str:
@@ -61,7 +60,6 @@ class ExtractEmbeddings:
             vectors = embed_samples(
                 [*train, *test], backbone, cache_dir=cache_dir, device=self.device
             )
-            self._dims[encoder] = backbone.dim
             counts[f"dim_{encoder}"] = backbone.dim
             metrics[f"norm_{encoder}"] = float(np.linalg.norm(vectors, axis=1).mean())
             artifacts[encoder] = cache_dir / f"{encoder}.npz"
@@ -90,8 +88,8 @@ class ExtractEmbeddings:
                 raise StageCheckError(
                     f"{self.name}: {encoder} is missing {len(missing)} photos of {len(hashes)}"
                 )
-            expected = self._dims.get(encoder)
-            if expected is not None and vectors.shape[1] != expected:
+            expected = result.counts[f"dim_{encoder}"]
+            if vectors.shape[1] != expected:
                 raise StageCheckError(
                     f"{self.name}: {encoder} vectors are {vectors.shape[1]} wide, "
                     f"expected {expected}"

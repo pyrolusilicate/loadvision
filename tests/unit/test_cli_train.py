@@ -179,11 +179,12 @@ def test_missing_config_is_reported(tmp_path: Path, caplog: pytest.LogCaptureFix
 
 
 @pytest.mark.unit
-def test_config_without_members_is_refused(
+def test_config_with_an_empty_members_list_is_refused(
     tmp_path: Path, caplog: pytest.LogCaptureFixture
 ) -> None:
+    """Leaving the key out asks for the shipped ensemble; emptying it asks for nobody."""
     config = tmp_path / "experiment.json"
-    config.write_text("{}", encoding="utf-8")
+    config.write_text('{"members": []}', encoding="utf-8")
 
     assert run(config) == 1
 

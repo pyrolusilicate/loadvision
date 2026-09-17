@@ -14,19 +14,33 @@ from PIL import Image
 
 from loadvision.imaging.prepared_image import MediaType, PreparedImage
 from loadvision.imaging.preprocessing import Params, preprocess
+from loadvision.imaging.validator import ImageLimits, prepare_image
+from loadvision.imaging.views import IDENTITY
 from loadvision.ml.data.manifest import Sample
-from loadvision.ml.models.backbones import PREPROCESSING_NAME, Backbone
+from loadvision.ml.models.backbones import Backbone
 
 logger = logging.getLogger(__name__)
 
 DEFAULT_BATCH_SIZE: Final = 8
 
-_MEDIA_TYPES: Final = {"JPEG": MediaType.JPEG, "PNG": MediaType.PNG, "WEBP": MediaType.WEBP}
+# Training reads photos the service already accepted, so it does not police uploads again;
+# it only needs the same bytes-to-pixels function, EXIF rotation included. The generous caps
+# keep the decompression-bomb guard without rejecting anything the service would take.
+TRAINING_LIMITS: Final = ImageLimits(
+    max_bytes=512 * 1024 * 1024,
+    max_pixels=500_000_000,
+    min_side=1,
+    media_types=frozenset(MediaType),
+)
 
 # Any fixed non-uniform photo works; these sides are coprime with every patch size we use,
 # so padding and scaling both take part in the fingerprint.
 _FINGERPRINT_SHAPE: Final = (37, 53, 3)
 _FINGERPRINT_PIXELS: Final = 37 * 53 * 3
+
+# Orientation 6 in the probe, so the fingerprint also covers how the decoder rotates a photo.
+_EXIF_ORIENTATION: Final = 274
+_ROTATE_270: Final = 6
 
 
 def embed_samples(
@@ -53,7 +67,9 @@ def embed_samples(
         Float32 array of shape (len(samples), backbone.dim), in the order of `samples`.
     """
     cache_path = cache_dir / f"{backbone.name}.npz"
-    fingerprint = preprocessing_fingerprint(backbone.params)
+    fingerprint = preprocessing_fingerprint(
+        backbone.preprocessing, backbone.params, views=backbone.spec.views
+    )
     cached = _load_cache(cache_path, backbone.dim, fingerprint)
 
     missing = [sample for sample in samples if sample.sha256 not in cached]
@@ -76,52 +92,62 @@ def embed_samples(
 
 
 def _embed_batch(batch: Sequence[Sample], backbone: Backbone, device: str) -> NDArray[np.float32]:
-    inputs = np.stack(
-        [preprocess(PREPROCESSING_NAME, read_image(s.path), backbone.params) for s in batch]
-    )
+    images = [read_image(sample.path) for sample in batch]
     with torch.inference_mode():
-        output = backbone.encode(torch.from_numpy(inputs).to(device))
+        output = backbone.embed(images, device)
     return output.float().cpu().numpy().astype(np.float32)
 
 
-def read_image(path: Path) -> PreparedImage:
-    """Decodes a dataset photo the same way the service decodes an uploaded one.
+def read_image(path: Path, limits: ImageLimits = TRAINING_LIMITS) -> PreparedImage:
+    """Decodes a dataset photo with the function the service uses on an uploaded one.
+
+    Delegating instead of decoding here is the point: two decoders drift, and a photo that the
+    service rotates by EXIF while training does not would get one cache entry under one file
+    hash and two different pictures behind it.
 
     Args:
         path: Photo on disk.
+        limits: Size and format limits; training passes generous ones.
 
     Returns:
         Decoded photo.
 
     Raises:
-        ValueError: If the file is not one of the supported formats.
+        LoadvisionError: With the same codes `prepare_image` reports for a rejected photo.
     """
-    raw = path.read_bytes()
-    with Image.open(BytesIO(raw)) as image:
-        media_type = _MEDIA_TYPES.get(image.format or "")
-        if media_type is None:
-            raise ValueError(f"{path}: unsupported image format {image.format!r}")
-        pixels = np.asarray(image.convert("RGB"), np.uint8)
-    return PreparedImage(raw=raw, media_type=media_type, pixels=pixels)
+    return prepare_image(path.read_bytes(), limits)
 
 
-def preprocessing_fingerprint(params: Params) -> str:
-    """Identifies the preprocessing a cache was built with.
+def preprocessing_fingerprint(name: str, params: Params, views: Sequence[str] = (IDENTITY,)) -> str:
+    """Identifies the preprocessing and the views a cache was built with.
 
-    The file name only carries the backbone, so a changed normalization, a changed input box or
-    an edit inside `resize_pad` would silently mix old and new vectors in one cache. Running the
-    preprocessing on a fixed synthetic photo catches all three.
+    The file name only carries the backbone, so a changed normalization, a changed input box,
+    an edit inside `resize_pad`, a change in how photos are decoded or a view added to the
+    entry would silently mix old and new vectors in one cache. Running one fixed synthetic
+    photo through the whole path, decoding included, catches all of them.
 
     Args:
-        params: Preprocessing parameters of the backbone.
+        name: Key in the preprocessing registry.
+        params: Parameters of that preprocessing.
+        views: Keys in the view registry the encoder averages over.
 
     Returns:
-        Lowercase hex SHA-256 of the preprocessed synthetic photo.
+        Lowercase hex SHA-256 of the preprocessed synthetic photo and the view names.
     """
     pixels = np.arange(_FINGERPRINT_PIXELS, dtype=np.uint8).reshape(_FINGERPRINT_SHAPE)
-    # raw bytes are only hashed into PreparedImage.sha256, which this fingerprint never uses.
-    probe = PreparedImage(raw=b"fingerprint", media_type=MediaType.JPEG, pixels=pixels)
-    return hashlib.sha256(preprocess(PREPROCESSING_NAME, probe, params).tobytes()).hexdigest()
+    image = Image.fromarray(pixels)
+    exif = image.getexif()
+    exif[_EXIF_ORIENTATION] = _ROTATE_270
+    encoded = BytesIO()
+    # Lossless WebP: it carries EXIF and decodes to the very same pixels on every machine, so
+    # the probe is deterministic and still notices a change in how photos are rotated.
+    image.save(encoded, format="WEBP", lossless=True, quality=100, exif=exif)
+    # The probe goes through decoding as well, so a change in the shared validator, EXIF
+    # handling included, invalidates the cache instead of quietly mixing old vectors in.
+    probe = prepare_image(encoded.getvalue(), TRAINING_LIMITS)
+    digest = hashlib.sha256(preprocess(name, probe, params).tobytes())
+    digest.update(",".join(views).encode())
+    return digest.hexdigest()
 
 
 def _load_cache(path: Path, dim: int, fingerprint: str) -> dict[str, NDArray[np.float32]]:

@@ -43,13 +43,14 @@ class ScriptedStage:
     name: str
     log: list[str] = field(default_factory=list[str])
     result: StageResult = field(default_factory=StageResult)
+    stage_inputs: dict[str, str] = field(default_factory=dict[str, str])
     run_error: Exception | None = None
     check_error: Exception | None = None
     version: str = "1"
     checked: list[StageResult] = field(default_factory=list[StageResult])
 
     def inputs(self, ctx: RunContext) -> dict[str, str]:
-        return {}
+        return self.stage_inputs
 
     def run(self, ctx: RunContext) -> StageResult:
         self.log.append(f"{self.name}.run")
@@ -171,6 +172,7 @@ def test_summary_file_matches_returned_summary(ctx: RunContext) -> None:
     stages = [
         ScriptedStage(
             "split",
+            stage_inputs={"seed": "0"},
             result=StageResult(
                 artifacts={"folds": Path("runs/run-1/folds.json")},
                 metrics={"bin_share_gap": 0.02},
@@ -198,6 +200,7 @@ def test_summary_file_matches_returned_summary(ctx: RunContext) -> None:
                 "name": "split",
                 "version": "1",
                 "status": "succeeded",
+                "inputs": {"seed": "0"},
                 "cached": True,
                 "duration_ms": 250,
                 "counts": {"rows": 1200},
@@ -210,6 +213,7 @@ def test_summary_file_matches_returned_summary(ctx: RunContext) -> None:
                 "name": "train",
                 "version": "1",
                 "status": "failed",
+                "inputs": {},
                 "cached": False,
                 "duration_ms": 250,
                 "counts": {},
@@ -222,6 +226,7 @@ def test_summary_file_matches_returned_summary(ctx: RunContext) -> None:
                 "name": "evaluate",
                 "version": "1",
                 "status": "not_run",
+                "inputs": {},
                 "cached": False,
                 "duration_ms": None,
                 "counts": {},

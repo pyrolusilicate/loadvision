@@ -2,7 +2,8 @@ import numpy as np
 import pytest
 
 from loadvision.ml.evaluation.postprocess_search import CHAINS, cross_fitted
-from loadvision.ml.postprocess import POSTPROCESSORS, fit_chain
+from loadvision.ml.postprocess import APPLIERS
+from loadvision.ml.training.postprocess_fit import fit_chain
 
 FOLDS = [0, 0, 0, 1, 1, 1]
 
@@ -10,7 +11,7 @@ FOLDS = [0, 0, 0, 1, 1, 1]
 @pytest.mark.ml
 def test_every_candidate_chain_names_known_steps() -> None:
     steps = {step for chain in CHAINS.values() for step, _ in chain}
-    assert steps <= set(POSTPROCESSORS)
+    assert steps <= set(APPLIERS)
 
 
 @pytest.mark.ml

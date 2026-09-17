@@ -4,13 +4,18 @@ import hashlib
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Self
+from typing import Final, Self
 
 from pydantic import ValidationError
 
 from loadvision.domain.model_version import ModelVersionId
 from loadvision.errors import ErrorCode, LoadvisionError
 from loadvision.ml.packaging.manifest import MANIFEST_FILE, Manifest
+
+# Out-of-fold predictions of the very models in the package, copied in at build time. The
+# promotion gate compares a candidate with the active version on the rows they share, and
+# refitting the active one to get them back would not be out-of-fold any more.
+PACKAGE_OOF: Final = "metrics/oof.csv"
 
 
 class ModelPackageError(LoadvisionError):

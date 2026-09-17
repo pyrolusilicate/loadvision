@@ -128,7 +128,11 @@ class Stage(Protocol):
         ...
 
     def inputs(self, ctx: RunContext) -> Mapping[str, str]:
-        """Returns what the result depends on, for the cache key: file hashes, config values."""
+        """Returns what the result depends on: file hashes, config values, parameters.
+
+        The runner writes it into `summary.json`, so two runs with the same metrics can be
+        told apart by what went into them.
+        """
         ...
 
     def run(self, ctx: RunContext) -> StageResult:
