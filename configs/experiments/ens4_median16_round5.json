@@ -3,13 +3,47 @@
   "description": "Two pooled encoders and two 4x3 grids, ridge heads, median calibration then rounding to 5.",
   "folds": "configs/splits/folds.json",
   "members": [
-    {"encoder": "dinov3_vitb16", "alpha": 200},
-    {"encoder": "pe_spatial_vitb16", "alpha": 50},
-    {"encoder": "dinov3_vitb16_grid4x3", "alpha": 3000},
-    {"encoder": "pe_spatial_vitb16_grid4x3", "alpha": 1000}
+    {
+      "encoder": "dinov3_vitb16",
+      "head": "ridge",
+      "params": {
+        "alpha": 200
+      }
+    },
+    {
+      "encoder": "pe_spatial_vitb16",
+      "head": "ridge",
+      "params": {
+        "alpha": 50
+      }
+    },
+    {
+      "encoder": "dinov3_vitb16_grid4x3",
+      "head": "ridge",
+      "params": {
+        "alpha": 3000
+      }
+    },
+    {
+      "encoder": "pe_spatial_vitb16_grid4x3",
+      "head": "ridge",
+      "params": {
+        "alpha": 1000
+      }
+    }
   ],
   "postprocess": [
-    {"step": "median_bins", "params": {"bins": 16}},
-    {"step": "round_to", "params": {"step": 5}}
+    {
+      "name": "median_bins",
+      "params": {
+        "bins": 16
+      }
+    },
+    {
+      "name": "round_to",
+      "params": {
+        "step": 5
+      }
+    }
   ]
 }

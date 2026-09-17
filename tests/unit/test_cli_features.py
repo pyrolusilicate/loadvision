@@ -9,6 +9,7 @@ import pytest
 from loadvision.cli.main import main
 from loadvision.cli.paths import PROBES_FILE
 from loadvision.ml.data.manifest import Sample
+from loadvision.ml.registry import BACKBONES
 from tests.ml.test_dataset_manifest import write_split
 from tests.settings_files import use_settings
 
@@ -16,9 +17,22 @@ ENCODER = "siglip2_vitb16"
 
 
 class FakeBackbone:
+    """Stands in for a loaded encoder, with the fields the cache fingerprint reads."""
+
     name = ENCODER
     dim = 2
-    params: ClassVar[dict[str, object]] = {"height": 384, "width": 512}
+    preprocessing = BACKBONES[ENCODER].preprocessing
+    spec = BACKBONES[ENCODER]
+    params: ClassVar[dict[str, object]] = {
+        "height": 384,
+        "width": 512,
+        "mean_r": 0.5,
+        "mean_g": 0.5,
+        "mean_b": 0.5,
+        "std_r": 0.5,
+        "std_g": 0.5,
+        "std_b": 0.5,
+    }
 
 
 @pytest.fixture
@@ -47,7 +61,8 @@ def workspace(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> tuple[Path, Pa
     )
     monkeypatch.setattr("loadvision.cli.commands.features.embed_samples", embed_samples)
     monkeypatch.setattr(
-        "loadvision.cli.commands.features.preprocessing_fingerprint", lambda params: "f" * 16
+        "loadvision.cli.commands.features.preprocessing_fingerprint",
+        lambda name, params, views=(): "f" * 16,
     )
     return runs, data_dir, caches
 

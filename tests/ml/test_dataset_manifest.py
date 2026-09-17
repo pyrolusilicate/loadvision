@@ -4,6 +4,7 @@ from pathlib import Path
 import pytest
 
 from loadvision.ml.data.manifest import Sample, load_split
+from tests import image_files
 
 DATA_DIR = Path("data")
 
@@ -16,7 +17,12 @@ def write_split(
     groups: list[tuple[str, str]] | None = None,
     images: list[str] | None = None,
 ) -> Path:
-    """Builds a tiny dataset on disk; image bytes are arbitrary, the manifest only hashes them."""
+    """Builds a tiny dataset on disk with real, decodable photos.
+
+    The bytes used to be arbitrary, because reading the split only hashed them. The manifest
+    stage now decodes every photo to record its size, proportions and brightness, so a fake
+    file fails there instead; each photo gets its own size, which keeps their hashes distinct.
+    """
     split_dir = root / split
     images_dir = split_dir / "images"
     images_dir.mkdir(parents=True)
@@ -29,8 +35,8 @@ def write_split(
         group_lines = ["image_id,group_id"] + [f"{a},{b}" for a, b in groups]
         (split_dir / "train_groups.csv").write_text("\n".join(group_lines) + "\n", encoding="utf-8")
 
-    for image_id in images if images is not None else [row[0] for row in rows]:
-        (images_dir / f"{image_id}.jpg").write_bytes(image_id.encode())
+    for index, image_id in enumerate(images if images is not None else [row[0] for row in rows]):
+        (images_dir / f"{image_id}.jpg").write_bytes(image_files.jpeg(40 + index, 30 + index))
     return root
 
 
@@ -48,8 +54,9 @@ def test_loads_train_split_sorted_with_labels_groups_and_hashes(tmp_path: Path) 
     assert [s.image_id for s in samples] == ["img_a", "img_b"]
     assert [s.label for s in samples] == [0.0, 100.0]
     assert {s.group_id for s in samples} == {"grp_1"}
-    assert samples[0].sha256 == hashlib.sha256(b"img_a").hexdigest()
-    assert samples[0].path == tmp_path / "train" / "images" / "img_a.jpg"
+    photo = tmp_path / "train" / "images" / "img_a.jpg"
+    assert samples[0].sha256 == hashlib.sha256(photo.read_bytes()).hexdigest()
+    assert samples[0].path == photo
 
 
 @pytest.mark.ml
@@ -58,11 +65,12 @@ def test_test_split_has_no_labels_and_no_groups(tmp_path: Path) -> None:
 
     samples = load_split(tmp_path, "test")
 
+    photo = tmp_path / "test" / "images" / "img_a.jpg"
     assert samples == [
         Sample(
             image_id="img_a",
-            path=tmp_path / "test" / "images" / "img_a.jpg",
-            sha256=hashlib.sha256(b"img_a").hexdigest(),
+            path=photo,
+            sha256=hashlib.sha256(photo.read_bytes()).hexdigest(),
             label=None,
             group_id=None,
         )

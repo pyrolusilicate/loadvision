@@ -3,8 +3,8 @@
 import re
 import time
 import traceback
-from collections.abc import Callable, Sequence
-from dataclasses import dataclass
+from collections.abc import Callable, Mapping, Sequence
+from dataclasses import dataclass, field
 from datetime import datetime
 from enum import StrEnum
 from typing import Final
@@ -45,6 +45,7 @@ class StageOutcome:
         version: Stage version.
         status: Whether the stage succeeded, failed or did not run after an earlier failure.
         result: Result of a succeeded stage.
+        inputs: What the stage said its result depends on; empty for a stage that did not run.
         duration_ms: Time spent in `run` and `check`; None for a stage that did not run.
         error_code: Catalog code of the failure.
         error_detail: Failure context for logs.
@@ -54,6 +55,7 @@ class StageOutcome:
     version: str
     status: StageStatus
     result: StageResult | None = None
+    inputs: Mapping[str, str] = field(default_factory=dict[str, str])
     duration_ms: int | None = None
     error_code: ErrorCode | None = None
     error_detail: str | None = None
@@ -65,6 +67,7 @@ class StageOutcome:
             "name": self.name,
             "version": self.version,
             "status": self.status.value,
+            "inputs": dict(self.inputs),
             "cached": result.cached,
             "duration_ms": self.duration_ms,
             "counts": dict(result.counts),
@@ -198,7 +201,9 @@ class PipelineRunner:
             stage=stage.name,
         )
         started = self._timer()
+        inputs: Mapping[str, str] = {}
         try:
+            inputs = stage.inputs(ctx)
             result = stage.run(ctx)
             stage.check(ctx, result)
         except Exception as error:
@@ -221,6 +226,7 @@ class PipelineRunner:
                 name=stage.name,
                 version=stage.version,
                 status=StageStatus.FAILED,
+                inputs=inputs,
                 duration_ms=duration_ms,
                 error_code=code,
                 error_detail=detail,
@@ -241,6 +247,7 @@ class PipelineRunner:
             version=stage.version,
             status=StageStatus.SUCCEEDED,
             result=result,
+            inputs=inputs,
             duration_ms=duration_ms,
         )
 
