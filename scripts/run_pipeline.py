@@ -38,10 +38,19 @@ def main() -> int:
     parser.add_argument("--cache-dir", type=Path, default=DEFAULT_CACHE)
     parser.add_argument("--data", type=Path, default=DEFAULT_DATA)
     parser.add_argument("--seed", type=int, default=DEFAULT_SEED)
+    parser.add_argument(
+        "--folds",
+        type=Path,
+        default=None,
+        help="folds file to use instead of the one named by the config; for measuring how "
+        "much a metric moves when only the split changes",
+    )
     args = parser.parse_args()
     logging.basicConfig(level=logging.INFO, format="%(message)s")
 
     config = json.loads(args.config.read_text(encoding="utf-8"))
+    if args.folds is not None:
+        config["folds"] = str(args.folds)
     now = datetime.now(UTC)
     ctx = RunContext(
         run_id=new_run_id(now),
