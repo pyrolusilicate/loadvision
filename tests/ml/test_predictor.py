@@ -84,21 +84,13 @@ def test_predictions_stay_within_the_range(tmp_path: Path, intercept: float) -> 
 
 
 @pytest.mark.ml
-@pytest.mark.parametrize(
-    ("intercept", "expected"),
-    [(12.5, 15.0), (17.5, 20.0), (12.4, 10.0), (2.4, 0.0), (99.0, 100.0)],
-)
-def test_round_to_sends_halves_up(tmp_path: Path, intercept: float, expected: float) -> None:
-    package = build_ensemble(tmp_path, [intercept], [1.0], postprocess={"round_to": 5})
-    [prediction] = PackagePredictor(package).predict([make_image()])
-    assert prediction.load_pct.value == pytest.approx(expected)
-
-
-@pytest.mark.ml
-def test_postprocess_rounds_and_snaps(tmp_path: Path) -> None:
-    package = build_ensemble(tmp_path, [97.0], [1.0], postprocess={"round_to": 5, "snap_100": 95})
-    [prediction] = PackagePredictor(package).predict([make_image()])
-    assert prediction.load_pct.value == pytest.approx(100.0)
+def test_package_with_postprocessing_steps_is_refused_until_the_chain_is_applied(
+    tmp_path: Path,
+) -> None:
+    postprocess = [{"name": "round_to", "params": {"step": 5}}]
+    package = build_ensemble(tmp_path, [97.0], [1.0], postprocess=postprocess)
+    with pytest.raises(ModelPackageError, match="steps are not applied yet: round_to"):
+        PackagePredictor(package)
 
 
 @pytest.mark.ml
