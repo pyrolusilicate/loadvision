@@ -30,6 +30,7 @@ from sqlalchemy.dialects.postgresql import ARRAY, JSONB
 
 from loadvision.application.ports import TrainingMode
 from loadvision.domain.assessment import SHA256_HEX_PATTERN, ReviewReason
+from loadvision.domain.confirmed_label import LabelSource
 from loadvision.domain.model_version import MODEL_VERSION_PATTERN, ModelVersionStatus
 from loadvision.domain.shipment import SHIPMENT_ID_PATTERN
 from loadvision.imaging.prepared_image import MediaType
@@ -43,9 +44,7 @@ NAMING_CONVENTION: Final = {
     "ck": "ck_%(table_name)s_%(constraint_name)s",
 }
 
-# Values without a domain type yet; they move to the domain with ConfirmedLabel and
-# TrainingJob (task 7.1).
-LABEL_SOURCES: Final = ("api", "ui", "import")
+# Values without a domain type yet; they move to the domain with TrainingJob (task 7.1).
 JOB_STATUSES: Final = ("queued", "running", "succeeded", "failed")
 
 metadata: Final = MetaData(naming_convention=NAMING_CONVENTION)
@@ -177,13 +176,16 @@ confirmed_labels: Final = Table(
     metadata,
     # One label per photo: a repeated confirmation replaces it.
     Column("image_sha256", Text, ForeignKey(images.c.sha256), primary_key=True),
-    Column("load_pct", Double, nullable=False),
+    # NULL for a photo judged unusable; `unusable` says so explicitly for readers of the table.
+    Column("load_pct", Double),
+    Column("unusable", Boolean, nullable=False),
     Column("source", Text, nullable=False),
     Column("author", Text),
     _aware("created_at"),
     _aware("updated_at"),
     CheckConstraint(_percent("load_pct"), name="load_pct_range"),
-    CheckConstraint(_one_of("source", LABEL_SOURCES), name="source_known"),
+    CheckConstraint("(load_pct IS NULL) = unusable", name="load_pct_unless_unusable"),
+    CheckConstraint(_one_of("source", LabelSource), name="source_known"),
     CheckConstraint("updated_at >= created_at", name="updated_after_created"),
 )
 

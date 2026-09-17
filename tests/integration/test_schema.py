@@ -68,6 +68,7 @@ def label_row(**overrides: Any) -> Row:
     row: Row = {
         "image_sha256": SHA_A,
         "load_pct": 60.0,
+        "unusable": False,
         "source": "api",
         "created_at": T0,
         "updated_at": T0,
@@ -193,10 +194,23 @@ def test_each_revision_downgrades_to_the_previous_schema(server_url: URL) -> Non
         config = alembic_config(url)
         command.upgrade(config, "head")
         assert "ck_training_jobs_error_code_known" not in check_names(engine, "training_jobs")
+        assert "ck_confirmed_labels_load_pct_unless_unusable" in check_names(
+            engine, "confirmed_labels"
+        )
+        command.downgrade(config, "0002")
+        assert "ck_confirmed_labels_load_pct_unless_unusable" not in check_names(
+            engine, "confirmed_labels"
+        )
+        assert "unusable" not in {
+            c["name"] for c in inspect(engine).get_columns("confirmed_labels")
+        }
         command.downgrade(config, "0001")
         assert "ck_training_jobs_error_code_known" in check_names(engine, "training_jobs")
         command.upgrade(config, "head")
         assert "ck_training_jobs_error_code_known" not in check_names(engine, "training_jobs")
+        assert "ck_confirmed_labels_load_pct_unless_unusable" in check_names(
+            engine, "confirmed_labels"
+        )
 
 
 @pytest.mark.integration
@@ -222,6 +236,7 @@ def test_accepts_a_valid_row(seeded: Connection, table_name: str) -> None:
             {"uncertainty": 0.0, "ood_score": 0.12, "brightness": 0.31, "sharpness": 0.78},
         ),
         ("model_versions", {"status": "active", "activated_at": T0}),
+        ("confirmed_labels", {"load_pct": None, "unusable": True}),
         ("training_jobs", {"status": "running", "started_at": T0}),
         ("training_jobs", {"status": "succeeded", "started_at": T0, "finished_at": T0}),
         (
@@ -271,6 +286,16 @@ def test_accepts_boundary_row(seeded: Connection, table_name: str, overrides: Ro
         ("assessments", {"model_version": "v404"}, "fk_assessments_model_version"),
         ("confirmed_labels", {"load_pct": 100.5}, "ck_confirmed_labels_load_pct_range"),
         ("confirmed_labels", {"source": "email"}, "ck_confirmed_labels_source_known"),
+        (
+            "confirmed_labels",
+            {"load_pct": None},
+            "ck_confirmed_labels_load_pct_unless_unusable",
+        ),
+        (
+            "confirmed_labels",
+            {"unusable": True},
+            "ck_confirmed_labels_load_pct_unless_unusable",
+        ),
         (
             "confirmed_labels",
             {"updated_at": T0 - timedelta(seconds=1)},
