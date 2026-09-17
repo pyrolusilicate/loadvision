@@ -1,5 +1,10 @@
-"""Fitting the linear head that turns an embedding into a load percent."""
+"""Fitting the head that turns an embedding into a load percent.
 
+Heads live in a registry, like encoders and postprocessing steps: an experiment names one and
+passes its numbers, and adding another kind is a row here rather than an edit in the stages.
+"""
+
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Final, Self
@@ -12,6 +17,9 @@ from sklearn.linear_model import Ridge
 HEAD_KEYS: Final = ("mean", "scale", "weights", "intercept")
 
 DEFAULT_ALPHA: Final = 1.0
+
+# The only head so far; an experiment names another one as soon as the registry grows.
+DEFAULT_HEAD: Final = "ridge"
 
 # A feature that never varies would divide by zero when standardized; one keeps it at zero.
 _MIN_SCALE: Final = 1e-12
@@ -105,3 +113,44 @@ class FittedHead:
             weights=np.asarray(model.coef_, dtype=np.float64).ravel(),
             intercept=float(model.intercept_),
         )
+
+
+type HeadFitter = Callable[[NDArray[Any], NDArray[Any], Mapping[str, float]], FittedHead]
+
+
+def _fit_ridge(
+    features: NDArray[Any], labels: NDArray[Any], params: Mapping[str, float]
+) -> FittedHead:
+    return FittedHead.fit(features, labels, alpha=float(params.get("alpha", DEFAULT_ALPHA)))
+
+
+HEADS: Final[Mapping[str, HeadFitter]] = {"ridge": _fit_ridge}
+
+
+def names() -> tuple[str, ...]:
+    """Registry keys of every head, sorted."""
+    return tuple(sorted(HEADS))
+
+
+def fit_head(
+    name: str,
+    features: NDArray[Any],
+    labels: NDArray[Any],
+    params: Mapping[str, float] | None = None,
+) -> FittedHead:
+    """Fits a head by registry name.
+
+    Args:
+        name: Registry key.
+        features: Embeddings of shape (photos, features).
+        labels: Reference loads, one per photo.
+        params: Numeric parameters of the head, such as the ridge penalty.
+
+    Returns:
+        The fitted head.
+
+    Raises:
+        KeyError: If the name is not in the registry.
+        ValueError: If the shapes disagree or a parameter is invalid.
+    """
+    return HEADS[name](features, labels, params or {})

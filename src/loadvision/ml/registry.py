@@ -8,6 +8,9 @@ from typing import Final, Literal
 # package manifest, and the service resolves the package by it long after the experiment.
 DEFAULT_BACKBONE: Final = "dinov2_vitb14"
 
+# Letterboxing into the encoder box; `imaging/preprocessing.py` holds the alternatives.
+DEFAULT_PREPROCESSING: Final = "resize_pad"
+
 type Pooling = Literal["pooled", "grid"]
 
 
@@ -20,6 +23,9 @@ class BackboneSpec:
         patch: Side of one patch in pixels; the box must be a whole number of patches.
         height: Height of the input box in pixels.
         width: Width of the input box in pixels.
+        preprocessing: Key in the preprocessing registry of `imaging/preprocessing.py`. It is
+            part of the entry because the model package stores it per ensemble member, so
+            training must be able to choose it the same way.
         pooling: How patch tokens become one vector. "pooled" is the encoder's own pooling and
             describes the scene as a whole; "grid" averages tokens inside a coarse grid, which
             keeps where the cargo is and how much floor it covers.
@@ -31,6 +37,7 @@ class BackboneSpec:
     patch: int
     height: int
     width: int
+    preprocessing: str = DEFAULT_PREPROCESSING
     pooling: Pooling = "pooled"
     grid_rows: int = 1
     grid_cols: int = 1

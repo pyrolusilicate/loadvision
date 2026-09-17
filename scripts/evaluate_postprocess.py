@@ -26,7 +26,7 @@ from loadvision.ml.evaluation.cross_validation import out_of_fold
 from loadvision.ml.evaluation.metrics import summary
 from loadvision.ml.models.backbones import load_backbone
 from loadvision.ml.training.embedding_cache import embed_samples
-from loadvision.ml.training.head_trainer import FittedHead
+from loadvision.ml.training.head_trainer import DEFAULT_HEAD, fit_head
 from loadvision.ml.training.postprocess_fit import fit_chain
 
 CACHE_DIR: Final = Path("runs/cache/embeddings")
@@ -89,7 +89,7 @@ def ensemble_oof(members: Sequence[str], device: str, data_dir: Path) -> tuple[A
             features,
             labels,
             numbers,
-            lambda a, b, value=penalty: FittedHead.fit(a, b, alpha=value).predict,
+            lambda a, b, value=penalty: fit_head(DEFAULT_HEAD, a, b, {"alpha": value}).predict,
         )
         logger.info("%s: oof mae %.3f", member, result.metrics["mae"])
         parts.append(result.predictions)

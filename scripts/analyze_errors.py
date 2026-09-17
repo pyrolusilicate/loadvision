@@ -28,7 +28,7 @@ from loadvision.ml.evaluation.cross_validation import out_of_fold
 from loadvision.ml.evaluation.metrics import summary
 from loadvision.ml.models.backbones import load_backbone
 from loadvision.ml.training.embedding_cache import embed_samples
-from loadvision.ml.training.head_trainer import FittedHead
+from loadvision.ml.training.head_trainer import DEFAULT_HEAD, fit_head
 
 CACHE_DIR: Final = Path("runs/cache/embeddings")
 FOLDS: Final = Path("configs/splits/folds.json")
@@ -137,7 +137,7 @@ def ensemble_oof(
             features,
             labels,
             numbers,
-            lambda a, b, penalty=alpha: FittedHead.fit(a, b, alpha=penalty).predict,
+            lambda a, b, penalty=alpha: fit_head(DEFAULT_HEAD, a, b, {"alpha": penalty}).predict,
         )
         logger.info("%s alpha=%g: oof mae %.3f", encoder, alpha, result.metrics["mae"])
         parts.append(result.predictions)

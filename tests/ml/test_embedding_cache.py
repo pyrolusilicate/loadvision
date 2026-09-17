@@ -49,7 +49,17 @@ class CountingEncoder(torch.nn.Module):
 
 def fake_backbone() -> tuple[Backbone, CountingEncoder]:
     encoder = CountingEncoder()
-    return Backbone(name="fake", module=encoder, params=PARAMS, dim=DIM, spec=SPEC), encoder
+    return (
+        Backbone(
+            name="fake",
+            module=encoder,
+            preprocessing=SPEC.preprocessing,
+            params=PARAMS,
+            dim=DIM,
+            spec=SPEC,
+        ),
+        encoder,
+    )
 
 
 def make_photo(directory: Path, image_id: str, color: tuple[int, int, int]) -> Sample:
@@ -124,7 +134,14 @@ def test_cache_of_another_backbone_size_is_rejected(tmp_path: Path) -> None:
     cache_dir = tmp_path / "cache"
     embed_samples(samples, backbone, cache_dir=cache_dir, device="cpu")
 
-    wider = Backbone(name="fake", module=backbone.module, params=PARAMS, dim=DIM + 1, spec=SPEC)
+    wider = Backbone(
+        name="fake",
+        module=backbone.module,
+        preprocessing=SPEC.preprocessing,
+        params=PARAMS,
+        dim=DIM + 1,
+        spec=SPEC,
+    )
     with pytest.raises(ValueError, match="does not match the backbone"):
         embed_samples(samples, wider, cache_dir=cache_dir, device="cpu")
 
@@ -137,7 +154,12 @@ def test_cache_built_with_other_preprocessing_is_rejected(tmp_path: Path) -> Non
     embed_samples(samples, backbone, cache_dir=cache_dir, device="cpu")
 
     rescaled = Backbone(
-        name="fake", module=encoder, params={**PARAMS, "mean_r": 0.25}, dim=DIM, spec=SPEC
+        name="fake",
+        module=encoder,
+        preprocessing=SPEC.preprocessing,
+        params={**PARAMS, "mean_r": 0.25},
+        dim=DIM,
+        spec=SPEC,
     )
     with pytest.raises(ValueError, match="other preprocessing"):
         embed_samples(samples, rescaled, cache_dir=cache_dir, device="cpu")
@@ -146,7 +168,7 @@ def test_cache_built_with_other_preprocessing_is_rejected(tmp_path: Path) -> Non
 @pytest.mark.ml
 def test_fingerprint_changes_when_decoding_changes(monkeypatch: pytest.MonkeyPatch) -> None:
     backbone, _ = fake_backbone()
-    with_rotation = preprocessing_fingerprint(backbone.params)
+    with_rotation = preprocessing_fingerprint(backbone.preprocessing, backbone.params)
 
     def without_rotation(raw: bytes, limits: ImageLimits) -> PreparedImage:
         prepared = prepare_image(raw, limits)
@@ -157,7 +179,7 @@ def test_fingerprint_changes_when_decoding_changes(monkeypatch: pytest.MonkeyPat
 
     # The shared validator decides how a photo becomes pixels. If it ever changes, the cached
     # vectors describe other pictures, so the fingerprint must notice and reject the cache.
-    assert preprocessing_fingerprint(backbone.params) != with_rotation
+    assert preprocessing_fingerprint(backbone.preprocessing, backbone.params) != with_rotation
 
 
 @pytest.mark.ml

@@ -16,7 +16,7 @@ from loadvision.imaging.prepared_image import MediaType, PreparedImage
 from loadvision.imaging.preprocessing import Params, preprocess
 from loadvision.imaging.validator import ImageLimits, prepare_image
 from loadvision.ml.data.manifest import Sample
-from loadvision.ml.models.backbones import PREPROCESSING_NAME, Backbone
+from loadvision.ml.models.backbones import Backbone
 
 logger = logging.getLogger(__name__)
 
@@ -66,7 +66,7 @@ def embed_samples(
         Float32 array of shape (len(samples), backbone.dim), in the order of `samples`.
     """
     cache_path = cache_dir / f"{backbone.name}.npz"
-    fingerprint = preprocessing_fingerprint(backbone.params)
+    fingerprint = preprocessing_fingerprint(backbone.preprocessing, backbone.params)
     cached = _load_cache(cache_path, backbone.dim, fingerprint)
 
     missing = [sample for sample in samples if sample.sha256 not in cached]
@@ -90,7 +90,7 @@ def embed_samples(
 
 def _embed_batch(batch: Sequence[Sample], backbone: Backbone, device: str) -> NDArray[np.float32]:
     inputs = np.stack(
-        [preprocess(PREPROCESSING_NAME, read_image(s.path), backbone.params) for s in batch]
+        [preprocess(backbone.preprocessing, read_image(s.path), backbone.params) for s in batch]
     )
     with torch.inference_mode():
         output = backbone.encode(torch.from_numpy(inputs).to(device))
@@ -117,7 +117,7 @@ def read_image(path: Path, limits: ImageLimits = TRAINING_LIMITS) -> PreparedIma
     return prepare_image(path.read_bytes(), limits)
 
 
-def preprocessing_fingerprint(params: Params) -> str:
+def preprocessing_fingerprint(name: str, params: Params) -> str:
     """Identifies the preprocessing a cache was built with.
 
     The file name only carries the backbone, so a changed normalization, a changed input box,
@@ -126,7 +126,8 @@ def preprocessing_fingerprint(params: Params) -> str:
     decoding included, catches all of them.
 
     Args:
-        params: Preprocessing parameters of the backbone.
+        name: Key in the preprocessing registry.
+        params: Parameters of that preprocessing.
 
     Returns:
         Lowercase hex SHA-256 of the preprocessed synthetic photo.
@@ -142,7 +143,7 @@ def preprocessing_fingerprint(params: Params) -> str:
     # The probe goes through decoding as well, so a change in the shared validator, EXIF
     # handling included, invalidates the cache instead of quietly mixing old vectors in.
     probe = prepare_image(encoded.getvalue(), TRAINING_LIMITS)
-    return hashlib.sha256(preprocess(PREPROCESSING_NAME, probe, params).tobytes()).hexdigest()
+    return hashlib.sha256(preprocess(name, probe, params).tobytes()).hexdigest()
 
 
 def _load_cache(path: Path, dim: int, fingerprint: str) -> dict[str, NDArray[np.float32]]:

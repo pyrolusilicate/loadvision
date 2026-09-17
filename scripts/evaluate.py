@@ -29,7 +29,7 @@ from loadvision.ml.evaluation.cross_validation import Predictor, out_of_fold
 from loadvision.ml.models.backbones import load_backbone
 from loadvision.ml.registry import BACKBONES
 from loadvision.ml.training.embedding_cache import embed_samples
-from loadvision.ml.training.head_trainer import FittedHead
+from loadvision.ml.training.head_trainer import DEFAULT_HEAD, fit_head
 
 OUTPUT: Final = Path("runs/oof/history.jsonl")
 CACHE_DIR: Final = Path("runs/cache/embeddings")
@@ -40,7 +40,7 @@ logger = logging.getLogger("evaluate")
 
 def ridge_head(alpha: float) -> Callable[[NDArray[Any], NDArray[np.float64]], Predictor]:
     def fit(features: NDArray[Any], labels: NDArray[np.float64]) -> Predictor:
-        return FittedHead.fit(features, labels, alpha=alpha).predict
+        return fit_head(DEFAULT_HEAD, features, labels, {"alpha": alpha}).predict
 
     return fit
 

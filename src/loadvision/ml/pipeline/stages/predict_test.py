@@ -15,7 +15,7 @@ from loadvision.ml.pipeline.stage import RunContext, StageCheckError, StageResul
 from loadvision.ml.pipeline.stages.extract_embeddings import EMBEDDINGS_DIR
 from loadvision.ml.pipeline.stages.train_folds import OOF_FILE, Chain, Member
 from loadvision.ml.training.embedding_cache import embed_samples
-from loadvision.ml.training.head_trainer import FittedHead
+from loadvision.ml.training.head_trainer import fit_head
 from loadvision.ml.training.postprocess_fit import fit_chain
 
 SUBMISSION_FILE: Final = "submission.csv"
@@ -60,7 +60,7 @@ class PredictTest:
     def inputs(self, ctx: RunContext) -> Mapping[str, str]:
         """What the result depends on."""
         return {
-            "members": ";".join(f"{name}:{alpha:g}" for name, alpha in self.members),
+            "members": ";".join(member.describe() for member in self.members),
             "chain": ";".join(name for name, _ in self.chain),
             "oof": str(ctx.run_dir / OOF_FILE),
         }
@@ -77,15 +77,15 @@ class PredictTest:
         cache_dir = ctx.cache_dir / EMBEDDINGS_DIR
 
         parts: list[NDArray[np.float64]] = []
-        for encoder, alpha in self.members:
-            backbone = self.load(encoder, self.device)
+        for member in self.members:
+            backbone = self.load(member.encoder, self.device)
             train_features = embed_samples(
                 train, backbone, cache_dir=cache_dir, device=self.device
             ).astype(np.float64)
             test_features = embed_samples(
                 test, backbone, cache_dir=cache_dir, device=self.device
             ).astype(np.float64)
-            head = FittedHead.fit(train_features, labels, alpha=alpha)
+            head = fit_head(member.head, train_features, labels, member.params)
             parts.append(head.predict(test_features))
 
         predictions = np.clip(np.mean(parts, axis=0), _MIN_LOAD, _MAX_LOAD)

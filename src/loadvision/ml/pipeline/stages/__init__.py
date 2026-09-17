@@ -10,6 +10,7 @@ from loadvision.ml.pipeline.stages.evaluate import Evaluate
 from loadvision.ml.pipeline.stages.extract_embeddings import ExtractEmbeddings
 from loadvision.ml.pipeline.stages.predict_test import PredictTest
 from loadvision.ml.pipeline.stages.train_folds import Chain, Member, TrainFolds
+from loadvision.ml.training.head_trainer import DEFAULT_HEAD
 
 __all__ = [
     "BuildManifest",
@@ -42,7 +43,7 @@ def build_pipeline(config: Mapping[str, Any], *, device: str = "cpu") -> list[St
     members = _members(config)
     chain = _chain(config)
     folds_file = Path(str(config.get("folds", DEFAULT_FOLDS)))
-    encoders = sorted({encoder for encoder, _ in members})
+    encoders = sorted({member.encoder for member in members})
     return [
         BuildManifest(),
         ExtractEmbeddings(encoders=encoders, device=device),
@@ -59,9 +60,18 @@ def _members(config: Mapping[str, Any]) -> Sequence[Member]:
     members: list[Member] = []
     for item in raw:
         try:
-            members.append((str(item["encoder"]), float(item["alpha"])))
-        except (KeyError, TypeError, ValueError) as error:
-            raise ValueError(f"member {item!r} needs 'encoder' and numeric 'alpha'") from error
+            params = {str(key): float(value) for key, value in item.get("params", {}).items()}
+            members.append(
+                Member(
+                    encoder=str(item["encoder"]),
+                    head=str(item.get("head", DEFAULT_HEAD)),
+                    params=params,
+                )
+            )
+        except (AttributeError, KeyError, TypeError, ValueError) as error:
+            raise ValueError(
+                f"member {item!r} needs 'encoder' and, optionally, 'head' and numeric 'params'"
+            ) from error
     return members
 
 

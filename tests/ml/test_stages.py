@@ -22,6 +22,7 @@ from loadvision.ml.pipeline.stages import (
     TrainFolds,
     build_pipeline,
 )
+from loadvision.ml.pipeline.stages.train_folds import Member
 from loadvision.ml.registry import BackboneSpec
 
 DIM = 6
@@ -48,7 +49,14 @@ class ToyEncoder(torch.nn.Module):
 
 
 def toy_loader(name: str, _device: str) -> Backbone:
-    return Backbone(name=name, module=ToyEncoder(), params=PARAMS, dim=DIM, spec=SPEC)
+    return Backbone(
+        name=name,
+        module=ToyEncoder(),
+        preprocessing=SPEC.preprocessing,
+        params=PARAMS,
+        dim=DIM,
+        spec=SPEC,
+    )
 
 
 def make_dataset(root: Path, train_photos: int = 84, test_photos: int = 12) -> Path:
@@ -110,8 +118,11 @@ def workspace(tmp_path: Path) -> tuple[RunContext, Path]:
     return ctx, folds_file
 
 
-def members() -> Sequence[tuple[str, float]]:
-    return [("toy_a", 1.0), ("toy_b", 10.0)]
+def members() -> Sequence[Member]:
+    return [
+        Member(encoder="toy_a", params={"alpha": 1.0}),
+        Member(encoder="toy_b", params={"alpha": 10.0}),
+    ]
 
 
 def run_upto(ctx: RunContext, folds_file: Path, chain: Sequence[tuple[str, dict]] = ()) -> None:
@@ -337,8 +348,8 @@ def test_build_pipeline_reads_a_config() -> None:
     stages = build_pipeline(
         {
             "members": [
-                {"encoder": "dinov3_vitb16", "alpha": 200},
-                {"encoder": "pe_spatial_vitb16", "alpha": 50},
+                {"encoder": "dinov3_vitb16", "head": "ridge", "params": {"alpha": 200}},
+                {"encoder": "pe_spatial_vitb16", "params": {"alpha": 50}},
             ],
             "postprocess": [{"name": "round_to", "params": {"step": 5}}, "clip"],
         }
@@ -359,8 +370,8 @@ def test_build_pipeline_reads_a_config() -> None:
     [
         {},
         {"members": []},
-        {"members": [{"encoder": "x"}]},
-        {"members": [{"encoder": "x", "alpha": "many"}]},
+        {"members": [{"head": "ridge"}]},
+        {"members": [{"encoder": "x", "params": {"alpha": "many"}}]},
     ],
 )
 def test_build_pipeline_rejects_a_broken_config(config: dict) -> None:
@@ -371,6 +382,4 @@ def test_build_pipeline_rejects_a_broken_config(config: dict) -> None:
 @pytest.mark.ml
 def test_build_pipeline_rejects_a_broken_postprocess_entry() -> None:
     with pytest.raises(ValueError, match="needs 'name'"):
-        build_pipeline(
-            {"members": [{"encoder": "x", "alpha": 1}], "postprocess": [{"step": "round_to"}]}
-        )
+        build_pipeline({"members": [{"encoder": "x"}], "postprocess": [{"step": "round_to"}]})

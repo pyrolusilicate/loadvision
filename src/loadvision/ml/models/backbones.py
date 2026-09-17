@@ -11,8 +11,6 @@ from timm.data.config import resolve_model_data_config
 from loadvision.imaging.preprocessing import Params
 from loadvision.ml.registry import BACKBONES, BackboneSpec
 
-PREPROCESSING_NAME: Final = "resize_pad"
-
 _CHANNELS: Final = ("r", "g", "b")
 
 
@@ -23,14 +21,16 @@ class Backbone:
     Attributes:
         name: Registry key; goes into the model package manifest as `Member.backbone`.
         module: Encoder in eval mode on the requested device, without a classification head.
-        params: Preprocessing parameters for `PREPROCESSING_NAME`, taken from the checkpoint,
-            so training and the service normalize a photo exactly the same way.
+        preprocessing: Key in the preprocessing registry, from the registry entry.
+        params: Parameters of that preprocessing, taken from the checkpoint, so training and
+            the service normalize a photo exactly the same way.
         dim: Length of one embedding vector.
         spec: Registry entry the encoder was built from.
     """
 
     name: str
     module: torch.nn.Module
+    preprocessing: str
     params: Params
     dim: int
     spec: BackboneSpec
@@ -93,4 +93,11 @@ def load_backbone(name: str, device: str) -> Backbone:
 
     width = cast(int, module.num_features)
     dim = width if spec.pooling == "pooled" else width * spec.grid_rows * spec.grid_cols
-    return Backbone(name=name, module=module, params=params, dim=dim, spec=spec)
+    return Backbone(
+        name=name,
+        module=module,
+        preprocessing=spec.preprocessing,
+        params=params,
+        dim=dim,
+        spec=spec,
+    )

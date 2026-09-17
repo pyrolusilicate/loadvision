@@ -2,7 +2,7 @@
 
 import csv
 from collections.abc import Callable, Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Final
 
@@ -17,7 +17,7 @@ from loadvision.ml.packaging.model_package import file_sha256
 from loadvision.ml.pipeline.stage import RunContext, StageCheckError, StageResult
 from loadvision.ml.pipeline.stages.extract_embeddings import EMBEDDINGS_DIR
 from loadvision.ml.training.embedding_cache import embed_samples
-from loadvision.ml.training.head_trainer import FittedHead
+from loadvision.ml.training.head_trainer import DEFAULT_HEAD, fit_head
 from loadvision.ml.training.postprocess_fit import fit_chain
 
 OOF_FILE: Final = "oof.csv"
@@ -26,8 +26,30 @@ _COLUMNS: Final = ("image_id", "fold", "label", "raw", "predicted")
 _MIN_LOAD: Final = 0.0
 _MAX_LOAD: Final = 100.0
 
-type Member = tuple[str, float]
 type Chain = Sequence[tuple[str, Mapping[str, float]]]
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class Member:
+    """One ensemble member: an encoder from the registry and a head from its own.
+
+    Both are named, not wired in, so trying another head or another preprocessing is a line in
+    an experiment config instead of an edit inside a stage.
+
+    Attributes:
+        encoder: Key in `ml.registry.BACKBONES`.
+        head: Key in the head registry of `ml.training.head_trainer`.
+        params: Numeric parameters of the head, such as the ridge penalty.
+    """
+
+    encoder: str
+    head: str = DEFAULT_HEAD
+    params: Mapping[str, float] = field(default_factory=dict[str, float])
+
+    def describe(self) -> str:
+        """Short text for the cache key and for logs."""
+        numbers = ",".join(f"{key}={value:g}" for key, value in sorted(self.params.items()))
+        return f"{self.encoder}:{self.head}({numbers})"
 
 
 @dataclass(frozen=True, slots=True)
@@ -66,7 +88,7 @@ class TrainFolds:
     def inputs(self, ctx: RunContext) -> Mapping[str, str]:
         """What the result depends on."""
         return {
-            "members": ";".join(f"{name}:{alpha:g}" for name, alpha in self.members),
+            "members": ";".join(member.describe() for member in self.members),
             "chain": ";".join(name for name, _ in self.chain),
             "folds": file_sha256(self.folds_file) if self.folds_file.is_file() else "missing",
             "seed": str(ctx.seed),
@@ -82,8 +104,8 @@ class TrainFolds:
 
         parts: list[NDArray[np.float64]] = []
         metrics: dict[str, float] = {}
-        for encoder, alpha in self.members:
-            backbone = self.load(encoder, self.device)
+        for member in self.members:
+            backbone = self.load(member.encoder, self.device)
             features = embed_samples(
                 samples, backbone, cache_dir=ctx.cache_dir / EMBEDDINGS_DIR, device=self.device
             ).astype(np.float64)
@@ -91,9 +113,9 @@ class TrainFolds:
                 features,
                 labels,
                 numbers,
-                lambda a, b, penalty=alpha: FittedHead.fit(a, b, alpha=penalty).predict,
+                lambda a, b, spec=member: fit_head(spec.head, a, b, spec.params).predict,
             )
-            metrics[f"mae_{encoder}"] = result.metrics["mae"]
+            metrics[f"mae_{member.encoder}"] = result.metrics["mae"]
             parts.append(result.predictions)
 
         raw = np.clip(np.mean(parts, axis=0), _MIN_LOAD, _MAX_LOAD)
