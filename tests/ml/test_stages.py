@@ -139,11 +139,17 @@ def test_build_manifest_writes_every_photo(workspace: tuple[RunContext, Path]) -
     result = stage.run(ctx)
     stage.check(ctx, result)
 
-    assert result.counts == {"train": 84, "test": 12}
+    assert result.counts["train"] == 84
+    assert result.counts["test"] == 12
     with (ctx.run_dir / "manifest.csv").open(newline="", encoding="utf-8") as file:
         rows = list(csv.DictReader(file))
     assert len(rows) == 96
     assert {row["split"] for row in rows} == {"train", "test"}
+    # The slice columns are what the report groups photos by; they must be filled for every
+    # photo, labelled or not.
+    assert all(row["width"] and row["height"] and row["aspect"] for row in rows)
+    assert all(0.0 <= float(row["brightness"]) <= 255.0 for row in rows)
+    assert {row["aspect"] for row in rows} == {f"{40 / 30:.4f}"}
 
 
 @pytest.mark.ml
@@ -383,3 +389,32 @@ def test_build_pipeline_rejects_a_broken_config(config: dict) -> None:
 def test_build_pipeline_rejects_a_broken_postprocess_entry() -> None:
     with pytest.raises(ValueError, match="needs 'name'"):
         build_pipeline({"members": [{"encoder": "x"}], "postprocess": [{"step": "round_to"}]})
+
+
+@pytest.mark.ml
+def test_evaluate_reports_every_scenario_it_finds(workspace: tuple[RunContext, Path]) -> None:
+    ctx, folds_file = workspace
+    run_upto(ctx, folds_file)
+
+    result = Evaluate().run(ctx)
+    Evaluate().check(ctx, result)
+
+    cases = json.loads((ctx.run_dir / "cases.json").read_text(encoding="utf-8"))
+    # The synthetic dataset walks the whole range, so the load scenarios are all present.
+    assert {"empty", "low", "middle", "high", "full"} <= set(cases)
+    for name, case in cases.items():
+        assert case["photos"] > 0, name
+        assert case["description"], name
+        assert 0.0 <= case["within_10"] <= 1.0, name
+        assert len(case["worst"]) <= Evaluate().examples_kept, name
+    assert any(key.startswith("mae_case_") for key in result.metrics)
+
+
+@pytest.mark.ml
+def test_evaluate_needs_the_manifest_for_scenarios(workspace: tuple[RunContext, Path]) -> None:
+    ctx, folds_file = workspace
+    run_upto(ctx, folds_file)
+    (ctx.run_dir / "manifest.csv").unlink()
+
+    with pytest.raises(FileNotFoundError, match="build_manifest did not run"):
+        Evaluate().run(ctx)
