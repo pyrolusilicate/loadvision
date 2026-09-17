@@ -7,13 +7,13 @@ from pathlib import Path
 from typing import Final
 
 from loadvision.cli.errors import CommandError
+from loadvision.cli.options import add_data_option
 from loadvision.cli.provenance import dataset_hash, git_commit
 from loadvision.domain.model_version import ModelVersionId
 from loadvision.ml.packaging.baseline_package import build_baseline_package
 from loadvision.settings import load_settings
 
 DEFAULT_BASELINE_DIR: Final = Path("baseline")
-DEFAULT_DATA_DIR: Final = Path("data")
 
 _logger = logging.getLogger(__name__)
 
@@ -41,12 +41,7 @@ def add_commands(groups: "argparse._SubParsersAction[argparse.ArgumentParser]") 
         default=DEFAULT_BASELINE_DIR,
         help="folder with the organizers' model.npz (default: %(default)s)",
     )
-    build.add_argument(
-        "--data",
-        type=Path,
-        default=DEFAULT_DATA_DIR,
-        help="dataset root with train/ and test/, recorded by hash (default: %(default)s)",
-    )
+    add_data_option(build)
     build.add_argument("--version", help="package version (default: model.version from settings)")
     build.set_defaults(run=build_baseline)
 

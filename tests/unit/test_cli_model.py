@@ -5,14 +5,13 @@ from pathlib import Path
 
 import numpy as np
 import pytest
-import yaml
 
 from loadvision.cli.main import main
 from loadvision.imaging.prepared_image import MediaType, PreparedImage
 from loadvision.ml.inference.predictor import PackagePredictor
 from loadvision.ml.packaging.model_package import ModelPackage
-from loadvision.settings import CONFIG_PATH_ENV, DEFAULT_CONFIG_PATH
 from tests.ml.test_dataset_manifest import write_split
+from tests.settings_files import use_settings
 
 FEATURES = 233
 INITIAL_VERSION = "baseline-v0"
@@ -40,15 +39,12 @@ class Workspace:
 
 @pytest.fixture
 def workspace(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Workspace:
-    settings = yaml.safe_load(DEFAULT_CONFIG_PATH.read_text(encoding="utf-8"))
-    settings["storage"] = {
-        "images_dir": str(tmp_path / "images"),
-        "models_dir": str(tmp_path / "models"),
-    }
-    settings["model"] = {"version": INITIAL_VERSION}
-    config = tmp_path / "app.yaml"
-    config.write_text(yaml.safe_dump(settings), encoding="utf-8")
-    monkeypatch.setenv(CONFIG_PATH_ENV, str(config))
+    use_settings(
+        tmp_path,
+        monkeypatch,
+        storage={"images_dir": str(tmp_path / "images"), "models_dir": str(tmp_path / "models")},
+        model={"version": INITIAL_VERSION},
+    )
 
     baseline_dir = tmp_path / "baseline"
     baseline_dir.mkdir()
