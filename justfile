@@ -26,5 +26,13 @@ hooks:
 db-up:
     docker compose up -d postgres
 
+# Apply migrations to the database from .env
+db-migrate:
+    uv run --env-file .env alembic upgrade head
+
+# Tests against the local Postgres; each run creates and drops its own databases
+integration *args:
+    uv run --env-file .env pytest -m integration {{args}}
+
 db-down:
     docker compose down
