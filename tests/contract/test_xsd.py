@@ -4,6 +4,7 @@ from pathlib import Path
 import pytest
 from lxml import etree
 
+from loadvision.api.middleware import REQUEST_ID_PATTERN
 from loadvision.domain.assessment import ReviewReason
 from loadvision.domain.model_version import MODEL_VERSION_PATTERN, ModelVersionStatus
 from loadvision.domain.shipment import SHIPMENT_ID_PATTERN
@@ -77,7 +78,11 @@ def test_every_message_has_an_example(schema_root: etree._Element) -> None:
 @pytest.mark.contract
 @pytest.mark.parametrize(
     ("type_name", "pattern"),
-    [("ShipmentIdType", SHIPMENT_ID_PATTERN), ("ModelVersionType", MODEL_VERSION_PATTERN)],
+    [
+        ("ShipmentIdType", SHIPMENT_ID_PATTERN),
+        ("ModelVersionType", MODEL_VERSION_PATTERN),
+        ("RequestIdType", REQUEST_ID_PATTERN),
+    ],
 )
 def test_pattern_is_the_one_in_code(
     schema_root: etree._Element, type_name: str, pattern: str
