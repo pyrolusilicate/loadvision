@@ -19,3 +19,6 @@ logging:
 
 runs:
   dir: runs
+
+model:
+  version: baseline-v0
