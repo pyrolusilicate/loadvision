@@ -106,10 +106,12 @@ class RunsSettings(_Section):
 
 
 class ModelSettings(_Section):
-    """Model the service answers with.
+    """Model the service starts with.
 
     Attributes:
-        version: Package version; the package is the folder of that name in the models folder.
+        version: Version the service activates while the database has no active version; once
+            one is active, the database decides. The package is the folder of that name in the
+            models folder.
     """
 
     version: str = Field(min_length=1)
@@ -124,11 +126,6 @@ class Settings(_Section):
     logging: LoggingSettings
     runs: RunsSettings
     model: ModelSettings
-
-    @property
-    def model_dir(self) -> Path:
-        """Folder of the model package the service loads."""
-        return self.storage.models_dir / self.model.version
 
 
 def load_settings(path: Path | None = None) -> Settings:

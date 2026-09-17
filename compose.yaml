@@ -13,5 +13,48 @@ services:
       timeout: 3s
       retries: 10
 
+  # Applies migrations and exits; the API starts only after it succeeds.
+  migrate:
+    image: loadvision-api
+    build: &api-build
+      context: .
+      dockerfile: docker/api.Dockerfile
+    command: ["alembic", "upgrade", "head"]
+    environment: &database
+      # An empty URL makes psycopg take the connection from the PG* variables, so a password
+      # with characters such as "@" or "/" needs no escaping inside a URL.
+      DATABASE_URL: postgresql+psycopg://
+      PGHOST: postgres
+      PGUSER: ${POSTGRES_USER}
+      PGPASSWORD: ${POSTGRES_PASSWORD}
+      PGDATABASE: ${POSTGRES_DB}
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  api:
+    image: loadvision-api
+    build: *api-build
+    environment: *database
+    ports:
+      - "8000:8000"
+    volumes:
+      # Photos and model packages stay on the host; a package is storage/models/<version>/.
+      - ./storage:/app/storage
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    healthcheck:
+      # /health answers 200 only once the model has loaded.
+      test:
+        - CMD
+        - python
+        - -c
+        - import urllib.request; urllib.request.urlopen('http://localhost:8000/health', timeout=3)
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 60s
+
 volumes:
   pgdata:
