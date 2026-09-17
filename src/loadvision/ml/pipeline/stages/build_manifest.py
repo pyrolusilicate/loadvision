@@ -6,11 +6,10 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Final
 
-import numpy as np
-from PIL import Image
-
+from loadvision.imaging.quality import brightness
 from loadvision.ml.data.manifest import Sample, load_split
 from loadvision.ml.pipeline.stage import RunContext, StageCheckError, StageResult
+from loadvision.ml.training.embedding_cache import read_image
 
 MANIFEST_FILE: Final = "manifest.csv"
 
@@ -26,9 +25,6 @@ _COLUMNS: Final[tuple[str, ...]] = (
     "brightness",
 )
 
-# Brightness is read from a small thumbnail: the average of a photo does not need every pixel,
-# and the stage already opens each file anyway.
-_THUMBNAIL: Final = (32, 32)
 # A photo darker than this is a night shot with no light in the body; a sixth of the dataset.
 _DARK: Final = 60.0
 
@@ -103,9 +99,10 @@ class BuildManifest:
 
 
 def _describe(sample: Sample, split: str) -> dict[str, str]:
-    with Image.open(sample.path) as image:
-        width, height = image.size
-        grey = np.asarray(image.convert("L").resize(_THUMBNAIL), dtype=np.float64)
+    # The very function the service uses on an uploaded photo: two definitions of brightness
+    # would put the report and the review policy on different numbers.
+    decoded = read_image(sample.path)
+    width, height = decoded.width, decoded.height
     return {
         "image_id": sample.image_id,
         "split": split,
@@ -115,7 +112,7 @@ def _describe(sample: Sample, split: str) -> dict[str, str]:
         "width": str(width),
         "height": str(height),
         "aspect": f"{width / height:.4f}",
-        "brightness": f"{grey.mean():.2f}",
+        "brightness": f"{brightness(decoded):.2f}",
     }
 
 

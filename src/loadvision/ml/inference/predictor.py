@@ -14,6 +14,7 @@ from loadvision.domain.model_version import ModelVersionId
 from loadvision.errors import LoadvisionError
 from loadvision.imaging.prepared_image import MediaType, PreparedImage
 from loadvision.imaging.preprocessing import preprocess
+from loadvision.ml.inference.ood import OodReference
 from loadvision.ml.packaging.baseline_package import BASELINE_BACKBONE
 from loadvision.ml.packaging.manifest import Member, Runtime
 from loadvision.ml.packaging.model_package import ModelPackage, ModelPackageError
@@ -147,6 +148,7 @@ class PackagePredictor:
             for member in package.manifest.members
         )
         self._postprocess = self._load_postprocess(package)
+        self._ood = self._load_ood(package)
         self._check_on_blank_photo()
 
     def _load_encoder(self, member: Member) -> object | None:
@@ -166,6 +168,16 @@ class PackagePredictor:
             return load_backbone(member.backbone, self._device)
         except KeyError as error:
             raise ModelPackageError(f"unknown backbone {member.backbone!r}") from error
+
+    def _load_ood(self, package: ModelPackage) -> OodReference | None:
+        config = package.manifest.ood
+        if config is None:
+            return None
+        backbone = self._members[config.member].member.backbone
+        try:
+            return OodReference.load(package.path(config.reference), backbone)
+        except (OSError, ValueError) as error:
+            raise ModelPackageError(f"ood reference: {error}") from error
 
     @staticmethod
     def _load_postprocess(package: ModelPackage) -> Applier | None:
@@ -216,19 +228,23 @@ class PackagePredictor:
         return [self._predict_one(image) for image in images]
 
     def _member_value(self, loaded: _LoadedMember, image: PreparedImage) -> float:
-        return self._features({id(loaded): loaded}, image)[id(loaded)]
+        return self._features({id(loaded): loaded}, image)[id(loaded)][0]
 
     def _features(
         self, members: dict[int, _LoadedMember], image: PreparedImage
-    ) -> dict[int, float]:
-        """Predicts every member for one photo, running each encoder at most once."""
-        values: dict[int, float] = {}
+    ) -> dict[int, tuple[float, NDArray[np.float64] | None]]:
+        """Predicts every member for one photo, running each encoder at most once.
+
+        Returns the value of every member and, for members with an encoder, its embedding: the
+        out-of-distribution score is the distance from that very embedding to the training ones.
+        """
+        values: dict[int, tuple[float, NDArray[np.float64] | None]] = {}
         groups: dict[tuple[str, str], list[tuple[int, _LoadedMember]]] = {}
         for key, loaded in members.items():
             if loaded.encoder is None:
                 preprocessing = loaded.member.preprocessing
                 prepared = preprocess(preprocessing.name, image, preprocessing.params)
-                values[key] = loaded.head.apply(prepared)
+                values[key] = (loaded.head.apply(prepared), None)
                 continue
             groups.setdefault(_group_key(loaded), []).append((key, loaded))
 
@@ -238,25 +254,26 @@ class PackagePredictor:
 
     def _torch_group(
         self, sharing: list[tuple[int, _LoadedMember]], image: PreparedImage
-    ) -> dict[int, float]:
+    ) -> dict[int, tuple[float, NDArray[np.float64] | None]]:
         import torch
 
         first = sharing[0][1]
         preprocessing = first.member.preprocessing
         prepared = preprocess(preprocessing.name, image, preprocessing.params)
+        computed: dict[int, tuple[float, NDArray[np.float64] | None]] = {}
         with torch.inference_mode():
             # One run of the encoder for every member of the group; they differ only in how
             # they pool its tokens.
             tokens = _backbone(first).tokens(torch.from_numpy(prepared[None]).to(self._device))
-            return {
-                key: loaded.head.apply(_backbone(loaded).pool(tokens).float().cpu().numpy()[0])
-                for key, loaded in sharing
-            }
+            for key, loaded in sharing:
+                embedding = _backbone(loaded).pool(tokens).float().cpu().numpy()[0]
+                computed[key] = (loaded.head.apply(embedding), embedding)
+        return computed
 
     def _predict_one(self, image: PreparedImage) -> Prediction:
-        by_key = {index: loaded for index, loaded in enumerate(self._members)}
+        by_key = dict(enumerate(self._members))
         computed = self._features(by_key, image)
-        values = [computed[index] for index in range(len(self._members))]
+        values = [computed[index][0] for index in range(len(self._members))]
         average = sum(
             value * loaded.member.weight
             for value, loaded in zip(values, self._members, strict=True)
@@ -271,7 +288,19 @@ class PackagePredictor:
         return Prediction(
             load_pct=LoadPercent(_clip(corrected)),
             uncertainty=spread,
+            ood_score=self._ood_score(computed),
         )
+
+    def _ood_score(
+        self, computed: dict[int, tuple[float, NDArray[np.float64] | None]]
+    ) -> float | None:
+        config = self._package.manifest.ood
+        if config is None or self._ood is None:
+            return None
+        embedding = computed[config.member][1]
+        if embedding is None:
+            return None
+        return self._ood.score(embedding, config.k)
 
 
 def _backbone(loaded: _LoadedMember) -> Any:

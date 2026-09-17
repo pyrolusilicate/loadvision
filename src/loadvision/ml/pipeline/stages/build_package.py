@@ -15,6 +15,7 @@ from numpy.typing import NDArray
 from loadvision.domain.timestamps import format_utc
 from loadvision.ml.data.manifest import load_split
 from loadvision.ml.evaluation.metrics import mae_by_range, summary
+from loadvision.ml.inference.ood import OodReference
 from loadvision.ml.models.backbones import Backbone, load_backbone
 from loadvision.ml.packaging.manifest import (
     CvMetrics,
@@ -43,6 +44,9 @@ PACKAGE_DIR: Final = "package"
 
 _CHECKPOINT_FILE: Final = "model.safetensors"
 
+# Averaging ten neighbours: one nearest photo is noisy, a hundred washes the score out.
+_OOD_NEIGHBOURS: Final = 10
+
 _PERCENT: Final = 100.0
 
 
@@ -57,6 +61,8 @@ class BuildPackage:
     Attributes:
         members: Encoder and head of every ensemble member.
         chain: Postprocessing steps, fitted on the out-of-fold predictions.
+        ood_percentile: Where the unusual-scene threshold sits in the distribution of training
+            scores; 99 means one training photo in a hundred would be flagged.
         package_version: Package version in the `ModelVersionId` format.
         now: Build time; the current time when omitted.
         folds_file: Canonical folds file, recorded next to the CV metrics.
@@ -69,6 +75,7 @@ class BuildPackage:
     folds_file: Path = Path("configs/splits/folds.json")
     device: str = "cpu"
     now: datetime | None = None
+    ood_percentile: float = 99.0
 
     @property
     def name(self) -> str:
@@ -106,6 +113,7 @@ class BuildPackage:
         members: list[Member] = []
         weight = 1.0 / len(self.members)
         weights: dict[str, Path] = {}
+        pooled: tuple[int, str, NDArray[np.float64]] | None = None
         for index, spec in enumerate(self.members):
             backbone = load_backbone(spec.encoder, self.device)
             features = embed_samples(
@@ -119,6 +127,10 @@ class BuildPackage:
                 root, backbone.spec.timm_name
             )
             weights[backbone.spec.timm_name] = checkpoint
+            if pooled is None and backbone.spec.pooling == "pooled":
+                # The reference holds the embeddings of one ordinary member: a grid member
+                # would store twelve times the numbers for the same answer.
+                pooled = (index, spec.encoder, features)
             members.append(
                 _member(
                     backbone,
@@ -129,6 +141,7 @@ class BuildPackage:
             )
 
         steps = self._fitted_steps(ctx, root, train, labels, raw)
+        ood = self._ood(root, pooled)
         manifest = Manifest.model_validate(
             {
                 "schema_version": 1,
@@ -138,6 +151,7 @@ class BuildPackage:
                 "data_hash": _data_hash(ctx),
                 "members": [member.model_dump(mode="json") for member in members],
                 "postprocess": [step.model_dump(mode="json") for step in steps],
+                **ood,
                 **self._cv(ctx),
                 "files": hash_package_files(root),
             }
@@ -145,7 +159,12 @@ class BuildPackage:
         write_package(root, manifest)
         return StageResult(
             artifacts={"package": root, "manifest": root / "manifest.json"},
-            counts={"members": len(members), "steps": len(steps), "files": len(manifest.files)},
+            counts={
+                "members": len(members),
+                "steps": len(steps),
+                "files": len(manifest.files),
+                "ood_reference": 0 if not ood else len(train),
+            },
             metrics={"weight_sum": sum(member.weight for member in members)},
         )
 
@@ -170,6 +189,32 @@ class BuildPackage:
         values = [prediction.load_pct.value for prediction in predictor.predict(photos)]
         if not values or not all(0.0 <= value <= _PERCENT for value in values):
             raise StageCheckError(f"{self.name}: package predicted {values}")
+
+    def _ood(
+        self, root: Path, pooled: tuple[int, str, NDArray[np.float64]] | None
+    ) -> dict[str, Any]:
+        """Writes the training embeddings a photo is compared against, with their threshold.
+
+        The threshold is a percentile of the training scores themselves, so the service flags
+        the scenes that are unusual for this very model rather than for a number someone chose.
+        """
+        if pooled is None:
+            return {}
+        index, backbone, embeddings = pooled
+        reference = OodReference.build(backbone, embeddings)
+        path = root / "ood" / "reference.npz"
+        reference.save(path)
+        scores = np.array(
+            [reference.score(row, _OOD_NEIGHBOURS) for row in embeddings], dtype=np.float64
+        )
+        return {
+            "ood": {
+                "member": index,
+                "k": _OOD_NEIGHBOURS,
+                "threshold": float(np.percentile(scores, self.ood_percentile)),
+                "reference": str(path.relative_to(root)),
+            }
+        }
 
     def _fitted_steps(
         self,
