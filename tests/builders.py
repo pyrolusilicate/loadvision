@@ -8,6 +8,7 @@ import numpy as np
 
 from loadvision.application.ports import ImageRecord
 from loadvision.domain.assessment import Assessment, LoadPercent
+from loadvision.domain.confirmed_label import ConfirmedLabel, LabelSource
 from loadvision.domain.model_version import ModelVersion, ModelVersionId, ModelVersionStatus
 from loadvision.domain.shipment import Shipment, ShipmentId
 from loadvision.imaging.prepared_image import MediaType, PreparedImage
@@ -53,4 +54,21 @@ def make_model_version(
         status=status,
         created_at=created_at,
         activated_at=activated_at,
+    )
+
+
+def make_label(
+    raw: bytes = b"photo-a",
+    load_pct: float | None = 60.0,
+    *,
+    source: LabelSource = LabelSource.API,
+    author: str | None = "operator-17",
+    at: datetime = T0,
+) -> ConfirmedLabel:
+    return ConfirmedLabel.first(
+        image_sha256=make_image(raw).sha256,
+        load_pct=None if load_pct is None else LoadPercent(load_pct),
+        source=source,
+        author=author,
+        at=at,
     )
