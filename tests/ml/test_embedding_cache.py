@@ -5,12 +5,15 @@ import pytest
 import torch
 from PIL import Image
 
+from loadvision.errors import ErrorCode, LoadvisionError
 from loadvision.ml.data.manifest import Sample, load_split
 from loadvision.ml.models.backbones import Backbone
 from loadvision.ml.registry import BackboneSpec
 from loadvision.ml.training.embedding_cache import embed_samples, read_image
 
 DIM = 4
+_EXIF_ORIENTATION = 274
+_ROTATE_270 = 6
 SPEC = BackboneSpec(timm_name="fake", patch=8, height=32, width=24)
 PARAMS = {
     "height": 32,
@@ -138,8 +141,26 @@ def test_unsupported_image_format_is_rejected(tmp_path: Path) -> None:
     path = tmp_path / "photo.gif"
     Image.new("RGB", (10, 10), (0, 0, 0)).save(path)
 
-    with pytest.raises(ValueError, match="unsupported image format"):
+    # Training decodes through the service validator, so it reports the service error code.
+    with pytest.raises(LoadvisionError) as failure:
         read_image(path)
+    assert failure.value.code is ErrorCode.UNSUPPORTED_FORMAT
+
+
+@pytest.mark.ml
+def test_read_image_applies_the_exif_rotation_like_the_service(tmp_path: Path) -> None:
+    path = tmp_path / "rotated.jpg"
+    stored = Image.new("RGB", (40, 20), (0, 0, 0))
+    stored.paste((255, 0, 0), (0, 0, 20, 20))
+    exif = stored.getexif()
+    exif[_EXIF_ORIENTATION] = _ROTATE_270
+    stored.save(path, exif=exif)
+
+    prepared = read_image(path)
+
+    # Orientation 6 means the stored pixels are turned, so an upright photo has the sides
+    # swapped. Training must see exactly what the service sees.
+    assert (prepared.height, prepared.width) == (40, 20)
 
 
 @pytest.mark.data

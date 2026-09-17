@@ -3,17 +3,16 @@
 import hashlib
 import logging
 from collections.abc import Sequence
-from io import BytesIO
 from pathlib import Path
 from typing import Any, Final
 
 import numpy as np
 import torch
 from numpy.typing import NDArray
-from PIL import Image
 
 from loadvision.imaging.prepared_image import MediaType, PreparedImage
 from loadvision.imaging.preprocessing import Params, preprocess
+from loadvision.imaging.validator import ImageLimits, prepare_image
 from loadvision.ml.data.manifest import Sample
 from loadvision.ml.models.backbones import PREPROCESSING_NAME, Backbone
 
@@ -21,7 +20,15 @@ logger = logging.getLogger(__name__)
 
 DEFAULT_BATCH_SIZE: Final = 8
 
-_MEDIA_TYPES: Final = {"JPEG": MediaType.JPEG, "PNG": MediaType.PNG, "WEBP": MediaType.WEBP}
+# Training reads photos the service already accepted, so it does not police uploads again;
+# it only needs the same bytes-to-pixels function, EXIF rotation included. The generous caps
+# keep the decompression-bomb guard without rejecting anything the service would take.
+TRAINING_LIMITS: Final = ImageLimits(
+    max_bytes=512 * 1024 * 1024,
+    max_pixels=500_000_000,
+    min_side=1,
+    media_types=frozenset(MediaType),
+)
 
 # Any fixed non-uniform photo works; these sides are coprime with every patch size we use,
 # so padding and scaling both take part in the fingerprint.
@@ -84,25 +91,24 @@ def _embed_batch(batch: Sequence[Sample], backbone: Backbone, device: str) -> ND
     return output.float().cpu().numpy().astype(np.float32)
 
 
-def read_image(path: Path) -> PreparedImage:
-    """Decodes a dataset photo the same way the service decodes an uploaded one.
+def read_image(path: Path, limits: ImageLimits = TRAINING_LIMITS) -> PreparedImage:
+    """Decodes a dataset photo with the function the service uses on an uploaded one.
+
+    Delegating instead of decoding here is the point: two decoders drift, and a photo that the
+    service rotates by EXIF while training does not would get one cache entry under one file
+    hash and two different pictures behind it.
 
     Args:
         path: Photo on disk.
+        limits: Size and format limits; training passes generous ones.
 
     Returns:
         Decoded photo.
 
     Raises:
-        ValueError: If the file is not one of the supported formats.
+        LoadvisionError: With the same codes `prepare_image` reports for a rejected photo.
     """
-    raw = path.read_bytes()
-    with Image.open(BytesIO(raw)) as image:
-        media_type = _MEDIA_TYPES.get(image.format or "")
-        if media_type is None:
-            raise ValueError(f"{path}: unsupported image format {image.format!r}")
-        pixels = np.asarray(image.convert("RGB"), np.uint8)
-    return PreparedImage(raw=raw, media_type=media_type, pixels=pixels)
+    return prepare_image(path.read_bytes(), limits)
 
 
 def preprocessing_fingerprint(params: Params) -> str:

@@ -47,7 +47,9 @@ def fit_round_to(_predictions: Loads, _labels: Loads, params: Mapping[str, float
     step = float(params.get("step", 5.0))
     if step <= 0:
         raise ValueError(f"round_to step must be positive, got {step}")
-    return lambda values: _clip(np.round(values / step) * step)
+    # A half always goes up, matching the service predictor. numpy sends a half to the even
+    # neighbour, which would turn 92.5 into 90 here and into 95 there.
+    return lambda values: _clip(np.floor(values / step + 0.5) * step)
 
 
 def fit_snap_high(predictions: Loads, labels: Loads, params: Mapping[str, float]) -> Fitted:

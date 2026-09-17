@@ -33,6 +33,14 @@ def test_round_to_moves_to_the_nearest_step() -> None:
 
 
 @pytest.mark.ml
+def test_round_to_sends_a_half_up_like_the_service() -> None:
+    step = fit_step("round_to", np.zeros(2), np.zeros(2), {"step": 5.0})
+
+    # numpy would send 92.5 to the even neighbour, 90; the service predictor sends it to 95.
+    assert list(step(np.array([92.5, 17.5]))) == [95.0, 20.0]
+
+
+@pytest.mark.ml
 def test_isotonic_reaches_the_ends_the_head_never_reached() -> None:
     predictions, labels = hedged()
 
