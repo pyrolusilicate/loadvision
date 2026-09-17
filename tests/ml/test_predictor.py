@@ -84,6 +84,18 @@ def test_predictions_stay_within_the_range(tmp_path: Path, intercept: float) -> 
 
 
 @pytest.mark.ml
+def test_a_member_outside_the_range_is_clipped_before_the_average(tmp_path: Path) -> None:
+    predictor = PackagePredictor(build_ensemble(tmp_path, [130.0, 50.0], [0.5, 0.5]))
+
+    [prediction] = predictor.predict([make_image()])
+
+    # Training clips every head, so the member counts as 100 and the pair averages to 75.
+    # Averaging 130 with 50 first would answer 90 here and 75 in `submission.csv`.
+    assert prediction.load_pct.value == pytest.approx(75.0)
+    assert prediction.uncertainty == pytest.approx(50.0)
+
+
+@pytest.mark.ml
 def test_postprocessing_chain_from_the_manifest_is_applied(tmp_path: Path) -> None:
     postprocess = [{"name": "round_to", "params": {"step": 5}}]
     package = build_ensemble(tmp_path, [97.0], [1.0], postprocess=postprocess)

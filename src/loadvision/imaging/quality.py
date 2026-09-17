@@ -13,7 +13,6 @@ from PIL import Image
 from loadvision.imaging.prepared_image import PreparedImage
 
 THUMBNAIL: Final = 32
-MAX_CHANNEL: Final = 255.0
 
 # The Laplacian needs a pixel on every side of the one it looks at.
 _MIN_SIDE: Final = 3

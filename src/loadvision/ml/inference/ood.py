@@ -62,7 +62,9 @@ class OodReference:
         path.parent.mkdir(parents=True, exist_ok=True)
         np.savez(
             path,
-            vectors=self.vectors,
+            # float16 on disk: `build` already rounded the values, so this halves the file
+            # without changing a single score.
+            vectors=self.vectors.astype(np.float16),
             backbone=np.array(self.backbone),
             dim=np.array(self.vectors.shape[1]),
         )

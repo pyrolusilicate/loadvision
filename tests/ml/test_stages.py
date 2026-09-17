@@ -11,7 +11,10 @@ from PIL import Image
 
 from loadvision.ml.data.manifest import load_split
 from loadvision.ml.data.splits import build_folds, write_folds
+from loadvision.ml.inference.predictor import PackagePredictor
+from loadvision.ml.models import backbones as backbones_module
 from loadvision.ml.models.backbones import Backbone
+from loadvision.ml.packaging.model_package import ModelPackage
 from loadvision.ml.pipeline.runner import PipelineRunner, RunStatus
 from loadvision.ml.pipeline.stage import RunContext, StageCheckError, StageResult
 from loadvision.ml.pipeline.stages import (
@@ -26,6 +29,7 @@ from loadvision.ml.pipeline.stages import (
 )
 from loadvision.ml.pipeline.stages.train_folds import Member
 from loadvision.ml.registry import BackboneSpec
+from loadvision.ml.training.embedding_cache import read_image
 
 DIM = 6
 SPEC = BackboneSpec(timm_name="fake", patch=8, height=32, width=24)
@@ -484,6 +488,41 @@ def test_members_sharing_a_checkpoint_share_its_file(
     manifest = json.loads((ctx.run_dir / "package" / "manifest.json").read_text(encoding="utf-8"))
     # Both toy members name the same checkpoint, so the package carries one copy of it.
     assert len({member["weights"] for member in manifest["members"]}) == 1
+
+
+@pytest.mark.ml
+def test_the_package_answers_exactly_what_the_submission_says(
+    workspace: tuple[RunContext, Path], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The service and the platform must see one model, not two that share a config.
+
+    `predict_test` and `build_package` fit the same heads and the same chain by two separate
+    code paths, so this is the only check that keeps them from drifting apart.
+    """
+    ctx, folds_file = workspace
+    chain = [("median_bins", {"bins": 4.0}), ("round_to", {"step": 5.0})]
+    run_upto(ctx, folds_file, chain)
+    PredictTest(members=members(), chain=chain, load=toy_loader).run(ctx)
+    monkeypatch.setattr(backbones_module, "load_backbone", toy_loader)
+    monkeypatch.setattr(build_package, "load_backbone", toy_loader)
+    monkeypatch.setattr(build_package, "_place_checkpoint", fake_checkpoint)
+    monkeypatch.chdir(folds_file.parent)
+    stage = BuildPackage(members=members(), chain=chain, folds_file=Path(folds_file.name))
+
+    result = stage.run(ctx)
+    stage.check(ctx, result)
+
+    predictor = PackagePredictor(ModelPackage.load(ctx.run_dir / "package"))
+    test_photos = load_split(ctx.data_dir, "test")
+    answered = [
+        prediction.load_pct.value
+        for prediction in predictor.predict([read_image(sample.path) for sample in test_photos])
+    ]
+    with (ctx.run_dir / "submission.csv").open(newline="", encoding="utf-8") as file:
+        submitted = {row["image_id"]: float(row["load_pct"]) for row in csv.DictReader(file)}
+    assert answered == pytest.approx(
+        [submitted[sample.image_id] for sample in test_photos], abs=0.05
+    )
 
 
 @pytest.mark.ml

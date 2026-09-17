@@ -34,6 +34,10 @@ _MIN_LOAD_PCT = 0.0
 _MAX_LOAD_PCT = 100.0
 
 
+def _clip(value: float) -> float:
+    return min(max(value, _MIN_LOAD_PCT), _MAX_LOAD_PCT)
+
+
 @dataclass(frozen=True, slots=True)
 class RidgeHead:
     """Linear head with the standardization it was fitted with.
@@ -87,11 +91,16 @@ class RidgeHead:
     def apply(self, features: NDArray[np.floating[Any]]) -> float:
         """Returns the load percent this head predicts for one feature vector.
 
+        The value is clipped, exactly as `ml.training.head_trainer.FittedHead.predict` clips it:
+        a member that answers 111 must weigh the same here as it did when the ensemble was
+        measured, otherwise the service and the submission drift apart on every photo where
+        one member leaves the range.
+
         Args:
             features: Features of one photo, in the order the head was fitted on.
 
         Returns:
-            Prediction before the ensemble average and postprocessing.
+            Load from 0 to 100, before the ensemble average and postprocessing.
 
         Raises:
             ModelPackageError: If the number of features does not match the head.
@@ -99,7 +108,7 @@ class RidgeHead:
         flat = np.asarray(features, dtype=np.float64).ravel()
         if flat.shape != self.mean.shape:
             raise ModelPackageError(f"head expects {self.mean.size} features, got {flat.size}")
-        return float((flat - self.mean) / self.scale @ self.weights + self.intercept)
+        return _clip(float((flat - self.mean) / self.scale @ self.weights + self.intercept))
 
 
 @dataclass(frozen=True, slots=True)
@@ -108,10 +117,6 @@ class _LoadedMember:
     head: RidgeHead
     # None for the numpy runtime, where the preprocessing already returns the features.
     encoder: object | None = None
-
-
-def _clip(value: float) -> float:
-    return min(max(value, _MIN_LOAD_PCT), _MAX_LOAD_PCT)
 
 
 class PackagePredictor:
