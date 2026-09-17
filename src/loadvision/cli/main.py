@@ -4,7 +4,7 @@ import argparse
 import logging
 from collections.abc import Sequence
 
-from loadvision.cli.commands import model
+from loadvision.cli.commands import data, eval, features, model, train
 from loadvision.cli.errors import CommandError
 from loadvision.errors import LoadvisionError
 
@@ -27,6 +27,10 @@ def main(argv: Sequence[str] | None = None) -> int:
         prog="loadvision", description="Loadvision: cargo load estimation from photos."
     )
     groups = parser.add_subparsers(title="groups", required=True)
+    data.add_commands(groups)
+    features.add_commands(groups)
+    eval.add_commands(groups)
+    train.add_commands(groups)
     model.add_commands(groups)
     args = parser.parse_args(argv)
     logging.basicConfig(level=logging.INFO, format="%(message)s")
