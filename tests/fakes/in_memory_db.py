@@ -50,6 +50,9 @@ class InMemoryAssessmentRepository:
         self._table = table
 
     def add(self, assessment: Assessment) -> None:
+        # Mirrors the primary key: a repeated id fails instead of silently replacing a row.
+        if self._table.get(assessment.id) is not None:
+            raise ValueError(f"assessment {assessment.id} already exists")
         stored = self.find_by_shipment_and_image(assessment.shipment_id, assessment.image_sha256)
         if stored is not None:
             raise AssessmentAlreadyExistsError(
