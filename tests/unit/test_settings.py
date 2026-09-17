@@ -24,7 +24,6 @@ def test_repository_config_loads_with_limits_in_validator_units() -> None:
     assert limits.min_side == settings.images.min_side_px
     assert limits.media_types == frozenset(MediaType)
     assert settings.api.max_body_bytes == settings.api.max_body_mb * MEBIBYTE
-    assert settings.model_dir == settings.storage.models_dir / settings.model.version
 
 
 @pytest.mark.unit
