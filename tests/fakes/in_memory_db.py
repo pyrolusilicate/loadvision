@@ -6,6 +6,7 @@ from uuid import UUID
 
 from loadvision.application.ports import AssessmentAlreadyExistsError, ImageRecord
 from loadvision.domain.assessment import Assessment
+from loadvision.domain.confirmed_label import ConfirmedLabel
 from loadvision.domain.model_version import ModelVersion, ModelVersionId, ModelVersionStatus
 from loadvision.domain.shipment import Shipment, ShipmentId
 
@@ -104,6 +105,21 @@ class InMemoryImageRepository:
         return self._table.get(sha256)
 
 
+class InMemoryLabelRepository:
+    def __init__(self, table: _Table[str, ConfirmedLabel]) -> None:
+        self._table = table
+
+    def get(self, image_sha256: str) -> ConfirmedLabel | None:
+        return self._table.get(image_sha256)
+
+    def save(self, label: ConfirmedLabel) -> None:
+        self._table.put(label.image_sha256, label)
+
+    def list_for_training(self) -> list[ConfirmedLabel]:
+        usable = [row for row in self._table.rows() if row.load_pct is not None]
+        return sorted(usable, key=lambda row: row.image_sha256)
+
+
 class InMemoryModelVersionRepository:
     def __init__(self, table: _Table[ModelVersionId, ModelVersion]) -> None:
         self._table = table
@@ -148,12 +164,14 @@ class _Tables:
         self.assessments = _Table(store.assessments)
         self.images = _Table(store.images)
         self.model_versions = _Table(store.model_versions)
+        self.labels = _Table(store.labels)
 
     def commit(self) -> None:
         self.shipments.commit()
         self.assessments.commit()
         self.images.commit()
         self.model_versions.commit()
+        self.labels.commit()
 
 
 class InMemoryUnitOfWork:
@@ -182,6 +200,10 @@ class InMemoryUnitOfWork:
     @property
     def model_versions(self) -> InMemoryModelVersionRepository:
         return InMemoryModelVersionRepository(self._open().model_versions)
+
+    @property
+    def labels(self) -> InMemoryLabelRepository:
+        return InMemoryLabelRepository(self._open().labels)
 
     def __enter__(self) -> Self:
         self._tables = _Tables(self._store)
@@ -212,6 +234,7 @@ class InMemoryStore:
         self.assessments: dict[UUID, Assessment] = {}
         self.images: dict[str, ImageRecord] = {}
         self.model_versions: dict[ModelVersionId, ModelVersion] = {}
+        self.labels: dict[str, ConfirmedLabel] = {}
 
     def unit_of_work(self) -> InMemoryUnitOfWork:
         return InMemoryUnitOfWork(self)
