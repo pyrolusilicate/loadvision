@@ -6,6 +6,7 @@ from typing import Any, Final
 
 from loadvision.ml.pipeline.stage import Stage
 from loadvision.ml.pipeline.stages.build_manifest import BuildManifest
+from loadvision.ml.pipeline.stages.build_package import BuildPackage
 from loadvision.ml.pipeline.stages.evaluate import Evaluate
 from loadvision.ml.pipeline.stages.extract_embeddings import ExtractEmbeddings
 from loadvision.ml.pipeline.stages.predict_test import PredictTest
@@ -14,6 +15,7 @@ from loadvision.ml.training.head_trainer import DEFAULT_HEAD
 
 __all__ = [
     "BuildManifest",
+    "BuildPackage",
     "Evaluate",
     "ExtractEmbeddings",
     "PredictTest",
@@ -22,6 +24,7 @@ __all__ = [
 ]
 
 DEFAULT_FOLDS: Final = Path("configs/splits/folds.json")
+DEFAULT_VERSION: Final = "v1"
 
 
 def build_pipeline(config: Mapping[str, Any], *, device: str = "cpu") -> list[Stage]:
@@ -50,6 +53,13 @@ def build_pipeline(config: Mapping[str, Any], *, device: str = "cpu") -> list[St
         TrainFolds(members=members, chain=chain, folds_file=folds_file, device=device),
         Evaluate(),
         PredictTest(members=members, chain=chain, device=device),
+        BuildPackage(
+            members=members,
+            chain=chain,
+            package_version=str(config.get("version", DEFAULT_VERSION)),
+            folds_file=folds_file,
+            device=device,
+        ),
     ]
 
 

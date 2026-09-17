@@ -35,6 +35,46 @@ class Backbone:
     dim: int
     spec: BackboneSpec
 
+    def tokens(self, batch: torch.Tensor) -> torch.Tensor:
+        """Runs the encoder and returns its tokens, before any pooling.
+
+        Kept apart from `pool` so that members sharing a checkpoint and an input box run the
+        encoder once and then pool its tokens each in their own way. That is the whole cost of
+        a prediction, so sharing it halves the latency of the current ensemble.
+
+        Args:
+            batch: Float tensor of shape (photos, 3, height, width) on the encoder's device.
+
+        Returns:
+            Token tensor of the encoder, prefix tokens included.
+        """
+        forward_features = cast(
+            Callable[[torch.Tensor], torch.Tensor], self.module.forward_features
+        )
+        return forward_features(batch)
+
+    def pool(self, tokens: torch.Tensor) -> torch.Tensor:
+        """Turns encoder tokens into one vector per photo, the way this entry asks for.
+
+        Args:
+            tokens: Output of `tokens`.
+
+        Returns:
+            Float tensor of shape (photos, `dim`).
+        """
+        if self.spec.pooling == "pooled":
+            forward_head = cast(Callable[[torch.Tensor], torch.Tensor], self.module.forward_head)
+            return forward_head(tokens)
+        prefix = int(getattr(self.module, "num_prefix_tokens", 0))
+        patches = tokens[:, prefix:, :]
+        rows = self.spec.height // self.spec.patch
+        cols = self.spec.width // self.spec.patch
+        grid = patches.reshape(tokens.shape[0], rows, cols, -1).permute(0, 3, 1, 2)
+        pooled = torch.nn.functional.adaptive_avg_pool2d(
+            grid, (self.spec.grid_rows, self.spec.grid_cols)
+        )
+        return pooled.flatten(1)
+
     def encode(self, batch: torch.Tensor) -> torch.Tensor:
         """Turns a batch of prepared photos into one vector each.
 
@@ -44,21 +84,7 @@ class Backbone:
         Returns:
             Float tensor of shape (photos, `dim`).
         """
-        if self.spec.pooling == "pooled":
-            return self.module(batch)
-        forward_features = cast(
-            Callable[[torch.Tensor], torch.Tensor], self.module.forward_features
-        )
-        tokens = forward_features(batch)
-        prefix = int(getattr(self.module, "num_prefix_tokens", 0))
-        patches = tokens[:, prefix:, :]
-        rows = self.spec.height // self.spec.patch
-        cols = self.spec.width // self.spec.patch
-        grid = patches.reshape(batch.shape[0], rows, cols, -1).permute(0, 3, 1, 2)
-        pooled = torch.nn.functional.adaptive_avg_pool2d(
-            grid, (self.spec.grid_rows, self.spec.grid_cols)
-        )
-        return pooled.flatten(1)
+        return self.pool(self.tokens(batch))
 
 
 def load_backbone(name: str, device: str) -> Backbone:

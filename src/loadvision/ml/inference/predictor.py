@@ -17,6 +17,7 @@ from loadvision.imaging.preprocessing import preprocess
 from loadvision.ml.packaging.baseline_package import BASELINE_BACKBONE
 from loadvision.ml.packaging.manifest import Member, Runtime
 from loadvision.ml.packaging.model_package import ModelPackage, ModelPackageError
+from loadvision.ml.postprocess import ASPECT, Applier, load_curves, make_chain
 
 _HEAD_KEYS: Final = frozenset({"mean", "scale", "weights", "intercept"})
 
@@ -104,6 +105,8 @@ class RidgeHead:
 class _LoadedMember:
     member: Member
     head: RidgeHead
+    # None for the numpy runtime, where the preprocessing already returns the features.
+    encoder: object | None = None
 
 
 def _clip(value: float) -> float:
@@ -117,39 +120,71 @@ class PackagePredictor:
     input sizes live in one package. The ensemble is their weighted average, and
     `uncertainty` is how far the members are apart.
 
+    Members that name the same checkpoint at the same input size run it once and pool its
+    tokens each in their own way, so an ensemble of four costs two runs of the encoder.
+
     Args:
         package: Verified model package.
+        device: Torch device for members with the torch runtime.
 
     Raises:
         ModelPackageError: If a member needs a runtime or backbone that is not supported, its
-            head cannot be read, or its preprocessing and head do not fit together. Every
-            member predicts on a blank photo here, so an unknown preprocessing, a wrong
-            parameter or a head for other features fails at load time, not on the first
-            request. Also if the package has postprocessing steps, which are not applied yet.
+            head cannot be read, its preprocessing and head do not fit together, or a
+            postprocessing step is unknown or misses its file. Every member predicts on a blank
+            photo here, so a wrong parameter or a head for other features fails at load time,
+            not on the first request.
     """
 
-    def __init__(self, package: ModelPackage) -> None:
-        if package.manifest.postprocess:
-            # Applying the chain from the postprocessing registry is the ML side of task K5.
-            # Until it lands, a package that needs the chain must not answer without it.
-            names = ", ".join(step.name for step in package.manifest.postprocess)
-            raise ModelPackageError(f"postprocessing steps are not applied yet: {names}")
+    def __init__(self, package: ModelPackage, device: str = "cpu") -> None:
         self._package = package
+        self._device = device
         self._members = tuple(
-            _LoadedMember(member=member, head=self._load_head(package, member))
+            _LoadedMember(
+                member=member,
+                head=RidgeHead.load(package.path(member.head)),
+                encoder=self._load_encoder(member),
+            )
             for member in package.manifest.members
         )
+        self._postprocess = self._load_postprocess(package)
         self._check_on_blank_photo()
 
-    @staticmethod
-    def _load_head(package: ModelPackage, member: Member) -> RidgeHead:
-        if member.runtime is not Runtime.NUMPY:
+    def _load_encoder(self, member: Member) -> object | None:
+        if member.runtime is Runtime.NUMPY:
+            if member.backbone not in _NUMPY_BACKBONES:
+                raise ModelPackageError(
+                    f"backbone {member.backbone!r} is not supported by runtime {member.runtime}"
+                )
+            return None
+        if member.runtime is not Runtime.TORCH:
             raise ModelPackageError(f"runtime {member.runtime} is not supported yet")
-        if member.backbone not in _NUMPY_BACKBONES:
-            raise ModelPackageError(
-                f"backbone {member.backbone!r} is not supported by runtime {member.runtime}"
+        # Imported here and not at the top: a package of numpy members must load in a service
+        # image that carries no torch at all.
+        from loadvision.ml.models.backbones import load_backbone
+
+        try:
+            return load_backbone(member.backbone, self._device)
+        except KeyError as error:
+            raise ModelPackageError(f"unknown backbone {member.backbone!r}") from error
+
+    @staticmethod
+    def _load_postprocess(package: ModelPackage) -> Applier | None:
+        steps = package.manifest.postprocess
+        if not steps:
+            return None
+        try:
+            return make_chain(
+                [
+                    (
+                        step.name,
+                        dict(step.params),
+                        load_curves(package.path(step.file)) if step.file else None,
+                    )
+                    for step in steps
+                ]
             )
-        return RidgeHead.load(package.path(member.head))
+        except (KeyError, OSError, ValueError) as error:
+            raise ModelPackageError(f"postprocessing chain: {error}") from error
 
     def _check_on_blank_photo(self) -> None:
         pixels: NDArray[np.uint8] = np.zeros((_PROBE_HEIGHT, _PROBE_WIDTH, 3), dtype=np.uint8)
@@ -180,19 +215,75 @@ class PackagePredictor:
         """
         return [self._predict_one(image) for image in images]
 
-    @staticmethod
-    def _member_value(loaded: _LoadedMember, image: PreparedImage) -> float:
-        preprocessing = loaded.member.preprocessing
-        return loaded.head.apply(preprocess(preprocessing.name, image, preprocessing.params))
+    def _member_value(self, loaded: _LoadedMember, image: PreparedImage) -> float:
+        return self._features({id(loaded): loaded}, image)[id(loaded)]
+
+    def _features(
+        self, members: dict[int, _LoadedMember], image: PreparedImage
+    ) -> dict[int, float]:
+        """Predicts every member for one photo, running each encoder at most once."""
+        values: dict[int, float] = {}
+        groups: dict[tuple[str, str], list[tuple[int, _LoadedMember]]] = {}
+        for key, loaded in members.items():
+            if loaded.encoder is None:
+                preprocessing = loaded.member.preprocessing
+                prepared = preprocess(preprocessing.name, image, preprocessing.params)
+                values[key] = loaded.head.apply(prepared)
+                continue
+            groups.setdefault(_group_key(loaded), []).append((key, loaded))
+
+        for sharing in groups.values():
+            values.update(self._torch_group(sharing, image))
+        return values
+
+    def _torch_group(
+        self, sharing: list[tuple[int, _LoadedMember]], image: PreparedImage
+    ) -> dict[int, float]:
+        import torch
+
+        first = sharing[0][1]
+        preprocessing = first.member.preprocessing
+        prepared = preprocess(preprocessing.name, image, preprocessing.params)
+        with torch.inference_mode():
+            # One run of the encoder for every member of the group; they differ only in how
+            # they pool its tokens.
+            tokens = _backbone(first).tokens(torch.from_numpy(prepared[None]).to(self._device))
+            return {
+                key: loaded.head.apply(_backbone(loaded).pool(tokens).float().cpu().numpy()[0])
+                for key, loaded in sharing
+            }
 
     def _predict_one(self, image: PreparedImage) -> Prediction:
-        values = [self._member_value(loaded, image) for loaded in self._members]
+        by_key = {index: loaded for index, loaded in enumerate(self._members)}
+        computed = self._features(by_key, image)
+        values = [computed[index] for index in range(len(self._members))]
         average = sum(
             value * loaded.member.weight
             for value, loaded in zip(values, self._members, strict=True)
         )
+        corrected = _clip(average)
+        if self._postprocess is not None:
+            aspect = np.array([image.width / image.height], dtype=np.float64)
+            corrected = float(
+                self._postprocess(np.array([corrected], dtype=np.float64), {ASPECT: aspect})[0]
+            )
         spread = max(values) - min(values) if len(values) > 1 else None
         return Prediction(
-            load_pct=LoadPercent(_clip(average)),
+            load_pct=LoadPercent(_clip(corrected)),
             uncertainty=spread,
         )
+
+
+def _backbone(loaded: _LoadedMember) -> Any:
+    return loaded.encoder
+
+
+def _group_key(loaded: _LoadedMember) -> tuple[str, str]:
+    """What members must share to run the encoder once: the checkpoint and the exact input."""
+    backbone = _backbone(loaded)
+    preprocessing = loaded.member.preprocessing
+    numbers = ",".join(f"{key}={value:g}" for key, value in sorted(preprocessing.params.items()))
+    return (
+        f"{backbone.spec.timm_name}:{backbone.spec.height}x{backbone.spec.width}",
+        f"{preprocessing.name}({numbers})",
+    )

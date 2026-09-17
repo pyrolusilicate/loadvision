@@ -35,16 +35,28 @@ PARAMS = {
 
 
 class CountingEncoder(torch.nn.Module):
-    """Stand-in for a real encoder: returns one number per channel and counts the photos seen."""
+    """Stand-in for a real encoder, with the two halves timm models have.
+
+    `forward_features` runs the network and `forward_head` pools its output, so a member may
+    share the first half with another member and pool it differently.
+    """
 
     def __init__(self) -> None:
         super().__init__()
         self.seen = 0
 
-    def forward(self, batch: torch.Tensor) -> torch.Tensor:
+    def forward_features(self, batch: torch.Tensor) -> torch.Tensor:
         self.seen += batch.shape[0]
+        # One token per patch of an 4x3 grid, as a small vision transformer would return.
         means = batch.mean(dim=(2, 3))
-        return torch.cat([means, means[:, :1]], dim=1)
+        tokens = torch.cat([means, means[:, :1]], dim=1)
+        return tokens[:, None, :].repeat(1, 12, 1)
+
+    def forward_head(self, tokens: torch.Tensor) -> torch.Tensor:
+        return tokens.mean(dim=1)
+
+    def forward(self, batch: torch.Tensor) -> torch.Tensor:
+        return self.forward_head(self.forward_features(batch))
 
 
 def fake_backbone() -> tuple[Backbone, CountingEncoder]:

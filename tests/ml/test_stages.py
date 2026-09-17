@@ -16,10 +16,12 @@ from loadvision.ml.pipeline.runner import PipelineRunner, RunStatus
 from loadvision.ml.pipeline.stage import RunContext, StageCheckError, StageResult
 from loadvision.ml.pipeline.stages import (
     BuildManifest,
+    BuildPackage,
     Evaluate,
     ExtractEmbeddings,
     PredictTest,
     TrainFolds,
+    build_package,
     build_pipeline,
 )
 from loadvision.ml.pipeline.stages.train_folds import Member
@@ -41,11 +43,29 @@ NOW = datetime(2026, 9, 17, 10, 0, 0, tzinfo=UTC)
 
 
 class ToyEncoder(torch.nn.Module):
-    """Stand-in encoder: the mean of every channel plus its square, so a head can learn."""
+    """Stand-in encoder with the two halves timm models have, so pooling can be shared.
+
+    Its features are the mean of every channel and its square, enough for a head to learn.
+    """
+
+    def forward_features(self, batch: torch.Tensor) -> torch.Tensor:
+        means = batch.mean(dim=(2, 3))
+        tokens = torch.cat([means, means**2], dim=1)
+        return tokens[:, None, :].repeat(1, 12, 1)
+
+    def forward_head(self, tokens: torch.Tensor) -> torch.Tensor:
+        return tokens.mean(dim=1)
 
     def forward(self, batch: torch.Tensor) -> torch.Tensor:
-        means = batch.mean(dim=(2, 3))
-        return torch.cat([means, means**2], dim=1)
+        return self.forward_head(self.forward_features(batch))
+
+
+def fake_checkpoint(root: Path, timm_name: str) -> Path:
+    """Stands in for the pretrained weights, so a test writes bytes instead of 340 MB."""
+    target = root / "weights" / f"{timm_name}.safetensors"
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_bytes(b"weights of " + timm_name.encode())
+    return target
 
 
 def toy_loader(name: str, _device: str) -> Backbone:
@@ -367,6 +387,7 @@ def test_build_pipeline_reads_a_config() -> None:
         "train_folds",
         "evaluate",
         "predict_test",
+        "build_package",
     ]
 
 
@@ -418,3 +439,60 @@ def test_evaluate_needs_the_manifest_for_scenarios(workspace: tuple[RunContext, 
 
     with pytest.raises(FileNotFoundError, match="build_manifest did not run"):
         Evaluate().run(ctx)
+
+
+@pytest.mark.ml
+def test_build_package_writes_a_package_the_service_can_load(
+    workspace: tuple[RunContext, Path], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    ctx, folds_file = workspace
+    run_upto(ctx, folds_file, chain=[("round_to", {"step": 5.0})])
+    monkeypatch.setattr(build_package, "load_backbone", toy_loader)
+    monkeypatch.setattr(build_package, "_place_checkpoint", fake_checkpoint)
+    # The manifest records the folds by their repository path, never an absolute one.
+    monkeypatch.chdir(folds_file.parent)
+    stage = BuildPackage(
+        members=members(),
+        chain=[("round_to", {"step": 5.0})],
+        folds_file=Path(folds_file.name),
+    )
+
+    result = stage.run(ctx)
+
+    manifest = json.loads((ctx.run_dir / "package" / "manifest.json").read_text(encoding="utf-8"))
+    assert len(manifest["members"]) == len(members())
+    assert [step["name"] for step in manifest["postprocess"]] == ["round_to"]
+    assert manifest["cv"]["mae"] > 0
+    assert manifest["folds"]["file"] == folds_file.name
+    assert result.counts["members"] == len(members())
+    # Every file the manifest names is listed with its hash, so the loader can verify it.
+    assert set(manifest["files"]) >= {"m0/head.npz", "m1/head.npz"}
+
+
+@pytest.mark.ml
+def test_members_sharing_a_checkpoint_share_its_file(
+    workspace: tuple[RunContext, Path], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    ctx, folds_file = workspace
+    run_upto(ctx, folds_file)
+    monkeypatch.setattr(build_package, "load_backbone", toy_loader)
+    monkeypatch.setattr(build_package, "_place_checkpoint", fake_checkpoint)
+    monkeypatch.chdir(folds_file.parent)
+
+    BuildPackage(members=members(), folds_file=Path(folds_file.name)).run(ctx)
+
+    manifest = json.loads((ctx.run_dir / "package" / "manifest.json").read_text(encoding="utf-8"))
+    # Both toy members name the same checkpoint, so the package carries one copy of it.
+    assert len({member["weights"] for member in manifest["members"]}) == 1
+
+
+@pytest.mark.ml
+def test_build_package_needs_training_first(workspace: tuple[RunContext, Path]) -> None:
+    ctx, folds_file = workspace
+    BuildManifest().run(ctx)
+    ExtractEmbeddings(encoders=["toy_a", "toy_b"], load=toy_loader).run(ctx)
+
+    with pytest.raises(FileNotFoundError, match="train_folds did not run"):
+        BuildPackage(
+            members=members(), chain=[("round_to", {"step": 5.0})], folds_file=folds_file
+        ).run(ctx)

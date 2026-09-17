@@ -84,12 +84,47 @@ def test_predictions_stay_within_the_range(tmp_path: Path, intercept: float) -> 
 
 
 @pytest.mark.ml
-def test_package_with_postprocessing_steps_is_refused_until_the_chain_is_applied(
-    tmp_path: Path,
-) -> None:
+def test_postprocessing_chain_from_the_manifest_is_applied(tmp_path: Path) -> None:
     postprocess = [{"name": "round_to", "params": {"step": 5}}]
     package = build_ensemble(tmp_path, [97.0], [1.0], postprocess=postprocess)
-    with pytest.raises(ModelPackageError, match="steps are not applied yet: round_to"):
+
+    prediction = PackagePredictor(package).predict([make_image()])[0]
+
+    # A head that always answers 97 rounds to 95, not to 97.
+    assert prediction.load_pct.value == 95.0
+
+
+@pytest.mark.ml
+def test_chain_steps_are_applied_in_the_order_of_the_manifest(tmp_path: Path) -> None:
+    postprocess = [
+        {"name": "round_to", "params": {"step": 5}},
+        {"name": "snap_high", "params": {"threshold": 95}},
+    ]
+    package = build_ensemble(tmp_path, [93.0], [1.0], postprocess=postprocess)
+
+    prediction = PackagePredictor(package).predict([make_image()])[0]
+
+    # 93 rounds to 95 first, and only then the snap sees it as confident enough for 100.
+    assert prediction.load_pct.value == 100.0
+
+
+@pytest.mark.ml
+def test_an_unknown_postprocessing_step_fails_when_the_predictor_is_built(
+    tmp_path: Path,
+) -> None:
+    postprocess = [{"name": "magic_touch", "params": {}}]
+    package = build_ensemble(tmp_path, [50.0], [1.0], postprocess=postprocess)
+
+    with pytest.raises(ModelPackageError, match="postprocessing chain"):
+        PackagePredictor(package)
+
+
+@pytest.mark.ml
+def test_a_step_that_needs_a_curve_without_its_file_is_refused(tmp_path: Path) -> None:
+    postprocess = [{"name": "median_bins", "params": {"bins": 16}}]
+    package = build_ensemble(tmp_path, [50.0], [1.0], postprocess=postprocess)
+
+    with pytest.raises(ModelPackageError, match="needs a curve"):
         PackagePredictor(package)
 
 

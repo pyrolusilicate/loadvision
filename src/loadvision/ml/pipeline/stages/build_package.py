@@ -1,0 +1,273 @@
+"""Stage that packs the trained ensemble into the model package the service loads."""
+
+import csv
+import shutil
+import subprocess
+from collections.abc import Mapping, Sequence
+from dataclasses import dataclass
+from datetime import UTC, datetime
+from pathlib import Path
+from typing import Any, Final
+
+import numpy as np
+from numpy.typing import NDArray
+
+from loadvision.domain.timestamps import format_utc
+from loadvision.ml.data.manifest import load_split
+from loadvision.ml.evaluation.metrics import mae_by_range, summary
+from loadvision.ml.models.backbones import Backbone, load_backbone
+from loadvision.ml.packaging.manifest import (
+    CvMetrics,
+    FoldsRef,
+    Manifest,
+    Member,
+    PostprocessStep,
+    Preprocessing,
+    Runtime,
+)
+from loadvision.ml.packaging.model_package import (
+    ModelPackage,
+    file_sha256,
+    hash_package_files,
+    write_package,
+)
+from loadvision.ml.pipeline.stage import RunContext, StageCheckError, StageResult
+from loadvision.ml.pipeline.stages.extract_embeddings import EMBEDDINGS_DIR
+from loadvision.ml.pipeline.stages.train_folds import OOF_FILE, Chain, read_facts
+from loadvision.ml.pipeline.stages.train_folds import Member as MemberSpec
+from loadvision.ml.training.embedding_cache import embed_samples
+from loadvision.ml.training.head_trainer import fit_head
+from loadvision.ml.training.postprocess_fit import fit_chain
+
+PACKAGE_DIR: Final = "package"
+
+_CHECKPOINT_FILE: Final = "model.safetensors"
+
+_PERCENT: Final = 100.0
+
+
+@dataclass(frozen=True, slots=True)
+class BuildPackage:
+    """Fits the shipped heads and the chain on every labelled photo and writes the package.
+
+    The package is what the service loads, so building it inside the run is what makes the
+    submission and the service answer with the same model rather than with two models that
+    happen to share a config.
+
+    Attributes:
+        members: Encoder and head of every ensemble member.
+        chain: Postprocessing steps, fitted on the out-of-fold predictions.
+        package_version: Package version in the `ModelVersionId` format.
+        now: Build time; the current time when omitted.
+        folds_file: Canonical folds file, recorded next to the CV metrics.
+        device: Torch device the encoders run on while fitting.
+    """
+
+    members: Sequence[MemberSpec]
+    chain: Chain = ()
+    package_version: str = "v1"
+    folds_file: Path = Path("configs/splits/folds.json")
+    device: str = "cpu"
+    now: datetime | None = None
+
+    @property
+    def name(self) -> str:
+        """Stage name."""
+        return "build_package"
+
+    @property
+    def version(self) -> str:
+        """Version of the stage logic; the package has its own `package_version`."""
+        return "1"
+
+    def inputs(self, ctx: RunContext) -> Mapping[str, str]:
+        """What the result depends on."""
+        return {
+            "members": ";".join(member.describe() for member in self.members),
+            "chain": ";".join(name for name, _ in self.chain),
+            "oof": str(ctx.run_dir / OOF_FILE),
+            "package_version": self.package_version,
+        }
+
+    def run(self, ctx: RunContext) -> StageResult:
+        """Writes `package/` with the heads, the curves and `manifest.json`.
+
+        Raises:
+            FileNotFoundError: If the training stage left no out-of-fold predictions.
+        """
+        # Read first: a package without the out-of-fold predictions would carry no honest
+        # metrics, and finding that out after loading four encoders wastes a minute.
+        raw = _read_raw(ctx.run_dir / OOF_FILE)
+        train = load_split(ctx.data_dir, "train")
+        labels = np.array([sample.label for sample in train], dtype=np.float64)
+        root = ctx.run_dir / PACKAGE_DIR
+        root.mkdir(parents=True, exist_ok=True)
+
+        members: list[Member] = []
+        weight = 1.0 / len(self.members)
+        weights: dict[str, Path] = {}
+        for index, spec in enumerate(self.members):
+            backbone = load_backbone(spec.encoder, self.device)
+            features = embed_samples(
+                train, backbone, cache_dir=ctx.cache_dir / EMBEDDINGS_DIR, device=self.device
+            ).astype(np.float64)
+            head_path = root / f"m{index}" / "head.npz"
+            fit_head(spec.head, features, labels, spec.params).save(head_path)
+            # Members that name the same checkpoint share its file, so an ensemble of four
+            # carries two sets of weights rather than four copies of the same bytes.
+            checkpoint = weights.get(backbone.spec.timm_name) or _place_checkpoint(
+                root, backbone.spec.timm_name
+            )
+            weights[backbone.spec.timm_name] = checkpoint
+            members.append(
+                _member(
+                    backbone,
+                    head_path.relative_to(root),
+                    checkpoint.relative_to(root),
+                    weight,
+                )
+            )
+
+        steps = self._fitted_steps(ctx, root, train, labels, raw)
+        manifest = Manifest.model_validate(
+            {
+                "schema_version": 1,
+                "version": self.package_version,
+                "created_at": format_utc(self.now or datetime.now(UTC)),
+                "git_commit": _git_commit(),
+                "data_hash": _data_hash(ctx),
+                "members": [member.model_dump(mode="json") for member in members],
+                "postprocess": [step.model_dump(mode="json") for step in steps],
+                **self._cv(ctx),
+                "files": hash_package_files(root),
+            }
+        )
+        write_package(root, manifest)
+        return StageResult(
+            artifacts={"package": root, "manifest": root / "manifest.json"},
+            counts={"members": len(members), "steps": len(steps), "files": len(manifest.files)},
+            metrics={"weight_sum": sum(member.weight for member in members)},
+        )
+
+    def check(self, ctx: RunContext, result: StageResult) -> None:
+        """Loads the package the way the service does and predicts with it.
+
+        Raises:
+            StageCheckError: If the package cannot be loaded or answers outside [0, 100].
+        """
+        root = result.artifacts.get("package")
+        if root is None or not (root / "manifest.json").is_file():
+            raise StageCheckError(f"{self.name}: package was not written")
+        # Imported here so the stage does not drag the inference module into every run.
+        from loadvision.ml.inference.predictor import PackagePredictor
+        from loadvision.ml.training.embedding_cache import read_image
+
+        try:
+            predictor = PackagePredictor(ModelPackage.load(root), device=self.device)
+        except Exception as error:
+            raise StageCheckError(f"{self.name}: package does not load: {error}") from error
+        photos = [read_image(sample.path) for sample in load_split(ctx.data_dir, "test")[:2]]
+        values = [prediction.load_pct.value for prediction in predictor.predict(photos)]
+        if not values or not all(0.0 <= value <= _PERCENT for value in values):
+            raise StageCheckError(f"{self.name}: package predicted {values}")
+
+    def _fitted_steps(
+        self,
+        ctx: RunContext,
+        root: Path,
+        train: Sequence[Any],
+        labels: NDArray[np.float64],
+        raw: NDArray[np.float64],
+    ) -> list[PostprocessStep]:
+        if not self.chain:
+            return []
+        fitted = fit_chain(self.chain, raw, labels, read_facts(ctx, train))
+        steps: list[PostprocessStep] = []
+        for index, step in enumerate(fitted.steps):
+            path = step.save_curves_to(root / "postprocess" / f"step_{index}.npz")
+            steps.append(
+                PostprocessStep.model_validate(
+                    {
+                        "name": step.name,
+                        "params": step.params,
+                        "file": None if path is None else str(path.relative_to(root)),
+                    }
+                )
+            )
+        return steps
+
+    def _cv(self, ctx: RunContext) -> dict[str, Any]:
+        path = ctx.run_dir / OOF_FILE
+        with path.open(newline="", encoding="utf-8") as file:
+            rows = list(csv.DictReader(file))
+        labels = np.array([float(row["label"]) for row in rows])
+        predicted = np.array([float(row["predicted"]) for row in rows])
+        metrics = summary(labels, predicted, [int(row["fold"]) for row in rows])
+        return {
+            "cv": CvMetrics(
+                mae=metrics["mae"],
+                within_10=metrics["within_10"] * _PERCENT,
+                mae_by_range=mae_by_range(labels, predicted),
+            ).model_dump(mode="json"),
+            "folds": FoldsRef(
+                file=str(self.folds_file), sha256=file_sha256(self.folds_file)
+            ).model_dump(mode="json"),
+        }
+
+
+def _place_checkpoint(root: Path, timm_name: str) -> Path:
+    """Copies the pretrained checkpoint into the package, the way `model pull` will.
+
+    The file is the untouched timm checkpoint, so a clean clone can fetch it again by name and
+    verify it against the hash the manifest records.
+
+    Args:
+        root: Package folder.
+        timm_name: Checkpoint name in the timm model hub.
+
+    Returns:
+        Path of the copy inside the package.
+    """
+    from huggingface_hub import hf_hub_download
+
+    source = Path(hf_hub_download(f"timm/{timm_name}", _CHECKPOINT_FILE))
+    target = root / "weights" / f"{timm_name}.safetensors"
+    target.parent.mkdir(parents=True, exist_ok=True)
+    if not target.is_file():
+        shutil.copyfile(source, target)
+    return target
+
+
+def _member(backbone: Backbone, head: Path, weights: Path, weight: float) -> Member:
+    return Member.model_validate(
+        {
+            "backbone": backbone.name,
+            "runtime": Runtime.TORCH.value,
+            "head": str(head),
+            "weights": str(weights),
+            "weight": weight,
+            "preprocessing": Preprocessing.model_validate(
+                {"name": backbone.preprocessing, "params": dict(backbone.params)}
+            ).model_dump(mode="json"),
+        }
+    )
+
+
+def _read_raw(path: Path) -> NDArray[np.float64]:
+    if not path.is_file():
+        raise FileNotFoundError(f"{path} is missing; train_folds did not run")
+    with path.open(newline="", encoding="utf-8") as file:
+        return np.array([float(row["raw"]) for row in csv.DictReader(file)])
+
+
+def _git_commit() -> str:
+    result = subprocess.run(
+        ["git", "rev-parse", "HEAD"], capture_output=True, text=True, check=False
+    )
+    return result.stdout.strip() or "0" * 40
+
+
+def _data_hash(ctx: RunContext) -> str:
+    from loadvision.ml.pipeline.stages.build_manifest import MANIFEST_FILE
+
+    return file_sha256(ctx.run_dir / MANIFEST_FILE)
