@@ -261,11 +261,12 @@
   <xs:complexType name="ConfirmedLabelType">
     <xs:annotation>
       <xs:documentation>
-        Подтверждённая загрузка. Метка относится к фото (sha256), поэтому видна во всех
-        оценках этого фото.
+        Подтверждённая метка. Относится к фото (sha256), поэтому видна во всех оценках этого
+        фото. Есть loadPct, если фото пригодно; unusable="true", если фото непригодно.
       </xs:documentation>
     </xs:annotation>
-    <xs:attribute name="loadPct" type="LoadPctType" use="required"/>
+    <xs:attribute name="loadPct" type="LoadPctType"/>
+    <xs:attribute name="unusable" type="xs:boolean" default="false"/>
     <xs:attribute name="author" type="AuthorType"/>
     <xs:attribute name="updatedAt" type="UtcDateTimeType" use="required"/>
   </xs:complexType>
@@ -311,19 +312,35 @@
     <xs:attribute name="declaredLoadPct" type="LoadPctType"/>
     <xs:attribute name="needsReview" type="xs:boolean"/>
     <xs:attribute name="confirmedLoadPct" type="LoadPctType"/>
+    <xs:attribute name="photoUnusable" type="xs:boolean" default="false"/>
     <xs:attribute name="modelVersion" type="ModelVersionType" use="required"/>
     <xs:attribute name="createdAt" type="UtcDateTimeType" use="required"/>
   </xs:complexType>
 
   <!-- PUT /api/v1/assessments/{assessment_id}/label -->
 
+  <xs:complexType name="UnusableType">
+    <xs:annotation>
+      <xs:documentation>
+        Фото непригодно для оценки: закрыт объектив, чёрный или засвеченный кадр. Такое фото
+        не идёт в дообучение.
+      </xs:documentation>
+    </xs:annotation>
+  </xs:complexType>
+
   <xs:element name="LabelRequest">
     <xs:annotation>
-      <xs:documentation>Подтвердить загрузку на фото оценки. Повтор заменяет метку.</xs:documentation>
+      <xs:documentation>
+        Подтвердить загрузку на фото оценки или отметить фото как непригодное. Повтор заменяет
+        метку.
+      </xs:documentation>
     </xs:annotation>
     <xs:complexType>
       <xs:sequence>
-        <xs:element name="LoadPct" type="LoadPctType"/>
+        <xs:choice>
+          <xs:element name="LoadPct" type="LoadPctType"/>
+          <xs:element name="Unusable" type="UnusableType"/>
+        </xs:choice>
         <xs:element name="Author" type="AuthorType" minOccurs="0"/>
       </xs:sequence>
     </xs:complexType>
@@ -332,7 +349,10 @@
   <xs:element name="Label">
     <xs:complexType>
       <xs:sequence>
-        <xs:element name="LoadPct" type="LoadPctType"/>
+        <xs:choice>
+          <xs:element name="LoadPct" type="LoadPctType"/>
+          <xs:element name="Unusable" type="UnusableType"/>
+        </xs:choice>
         <xs:element name="Author" type="AuthorType" minOccurs="0"/>
         <xs:element name="UpdatedAt" type="UtcDateTimeType"/>
       </xs:sequence>

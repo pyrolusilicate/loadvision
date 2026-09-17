@@ -11,6 +11,7 @@ from typing import Final, Protocol, Self
 from uuid import UUID
 
 from loadvision.domain.assessment import SHA256_HEX_PATTERN, Assessment, LoadPercent
+from loadvision.domain.confirmed_label import ConfirmedLabel
 from loadvision.domain.model_version import ModelVersion, ModelVersionId
 from loadvision.domain.shipment import Shipment, ShipmentId
 from loadvision.domain.timestamps import ensure_aware
@@ -206,6 +207,25 @@ class ModelVersionRepository(Protocol):
         ...
 
 
+class LabelRepository(Protocol):
+    """Confirmed labels within the current unit of work; a photo has at most one label."""
+
+    def get(self, image_sha256: str) -> ConfirmedLabel | None:
+        """Returns the label of the photo, or None if it has none."""
+        ...
+
+    def save(self, label: ConfirmedLabel) -> None:
+        """Stores the label, replacing an earlier label of the same photo.
+
+        The photo record must already be stored in `ImageRepository`.
+        """
+        ...
+
+    def list_for_training(self) -> list[ConfirmedLabel]:
+        """Returns the labels with a load, sorted by photo hash; unusable photos are left out."""
+        ...
+
+
 class ImageStorage(Protocol):
     """Original photo bytes addressed by their SHA-256, outside the database transaction.
 
@@ -240,6 +260,9 @@ class UnitOfWork(Protocol):
 
     @property
     def model_versions(self) -> ModelVersionRepository: ...
+
+    @property
+    def labels(self) -> LabelRepository: ...
 
     def __enter__(self) -> Self: ...
 
@@ -292,6 +315,17 @@ class LabeledImage:
         """
         if _SHA256_HEX_RE.fullmatch(self.image_sha256) is None:
             raise ValueError("image_sha256 must be 64 lowercase hex characters")
+
+    @classmethod
+    def from_label(cls, label: ConfirmedLabel) -> Self:
+        """Turns a confirmed label into a training example.
+
+        Raises:
+            ValueError: If the label marks the photo as unusable.
+        """
+        if label.load_pct is None:
+            raise ValueError(f"photo {label.image_sha256} is unusable and has no load")
+        return cls(image_sha256=label.image_sha256, load_pct=label.load_pct)
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)

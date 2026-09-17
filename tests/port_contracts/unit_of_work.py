@@ -10,7 +10,8 @@ from loadvision.application.ports import (
     UnitOfWork,
     UnitOfWorkFactory,
 )
-from loadvision.domain.assessment import Assessment
+from loadvision.domain.assessment import Assessment, LoadPercent
+from loadvision.domain.confirmed_label import LabelSource
 from loadvision.domain.model_version import ModelVersionId, ModelVersionStatus
 from loadvision.domain.shipment import ShipmentId
 from tests.builders import (
@@ -18,6 +19,7 @@ from tests.builders import (
     make_assessment,
     make_image,
     make_image_record,
+    make_label,
     make_model_version,
     make_shipment,
 )
@@ -203,3 +205,54 @@ class UnitOfWorkContract:
         with uow_factory() as uow:
             assert uow.model_versions.get_active() == new.activate(T0 + timedelta(hours=2))
             assert uow.model_versions.get(old.version) == old.retire()
+
+    def test_label_is_saved_and_read_back(self, uow_factory: UnitOfWorkFactory) -> None:
+        label = make_label(PHOTO_A, 70.0)
+        with uow_factory() as uow:
+            uow.images.add(make_image_record(PHOTO_A))
+            uow.labels.save(label)
+            uow.commit()
+        with uow_factory() as uow:
+            assert uow.labels.get(label.image_sha256) == label
+            assert uow.labels.get(UNKNOWN_SHA256) is None
+
+    def test_saving_a_label_of_the_same_photo_replaces_it(
+        self, uow_factory: UnitOfWorkFactory
+    ) -> None:
+        first = make_label(PHOTO_A, 70.0)
+        second = first.replaced(
+            load_pct=LoadPercent(90.0),
+            source=LabelSource.UI,
+            author=None,
+            at=T0 + timedelta(minutes=5),
+        )
+        with uow_factory() as uow:
+            uow.images.add(make_image_record(PHOTO_A))
+            uow.labels.save(first)
+            uow.commit()
+        with uow_factory() as uow:
+            uow.labels.save(second)
+            uow.commit()
+        with uow_factory() as uow:
+            assert uow.labels.get(first.image_sha256) == second
+            assert uow.labels.list_for_training() == [second]
+
+    def test_training_gets_usable_labels_sorted_by_photo_hash(
+        self, uow_factory: UnitOfWorkFactory
+    ) -> None:
+        photos = [b"photo-a", b"photo-b", b"photo-c"]
+        labels = [
+            make_label(photos[0], 40.0),
+            make_label(photos[1], None),
+            make_label(photos[2], 90.0),
+        ]
+        with uow_factory() as uow:
+            for photo, label in zip(photos, labels, strict=True):
+                uow.images.add(make_image_record(photo))
+                uow.labels.save(label)
+            uow.commit()
+        with uow_factory() as uow:
+            usable = [labels[0], labels[2]]
+            assert uow.labels.list_for_training() == sorted(
+                usable, key=lambda row: row.image_sha256
+            )
