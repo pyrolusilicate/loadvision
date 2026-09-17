@@ -40,6 +40,28 @@ scripts/check.sh    # или just check
 git config core.hooksPath .githooks    # или just hooks
 ```
 
+## Команды
+
+После `uv sync` доступна команда `loadvision`:
+
+```bash
+uv run loadvision model build-baseline                       # пакет модели в storage/models/
+uv run loadvision train configs/experiments/<имя>.json       # весь пайплайн обучения
+uv run loadvision data folds --check                         # проверить configs/splits/folds.json
+uv run loadvision eval heads                                 # сравнение энкодеров и голов по OOF
+uv run loadvision eval errors                                # отчёт об ошибках в runs/eda/
+```
+
+Обучение и сравнение моделей требуют `data/` и группы зависимостей `ml`. Сервису хватает пакета
+модели в `storage/models/`.
+
+## Сервис
+
+```bash
+uv run loadvision model build-baseline    # модель, с которой сервис отвечает
+just up                                   # Postgres, миграции и API на http://localhost:8000
+```
+
 ## CI
 
 На GitLab хакатона нет раннеров, поэтому пайплайн не создаётся и проверки идут локально в хуке. Когда раннер появится, в Settings -> CI/CD -> Variables добавьте переменную `RUN_CI` со значением `true`: CI запустит тот же `scripts/check.sh`.
@@ -88,7 +110,7 @@ baseline/           стартовое решение организаторов
 
 ```bash
 # весь цикл: данные -> эмбеддинги -> обучение по фолдам -> метрики -> submission.csv -> пакет модели
-uv run python scripts/run_pipeline.py configs/experiments/ens4_apache_by_aspect.json --device mps
+uv run loadvision train configs/experiments/ens4_apache_by_aspect.json --device mps
 ```
 
 Одна команда проходит шесть этапов, каждый со своими постусловиями, и оставляет папку прогона `runs/run_<время>_<хвост>/`:
@@ -112,11 +134,13 @@ run.jsonl        события прогона
 Другие полезные команды:
 
 ```bash
-uv run python scripts/make_folds.py              # собрать configs/splits/folds.json
-uv run python scripts/make_folds.py --check      # только проверить существующий файл
-uv run python scripts/evaluate.py                # перебор энкодеров и голов по OOF
-uv run python scripts/evaluate_postprocess.py    # перебор цепочек постобработки
-uv run python scripts/analyze_errors.py          # отчёт по ошибкам с графиками в runs/eda/
+uv run loadvision data folds                     # собрать configs/splits/folds.json
+uv run loadvision data folds --check             # только проверить существующий файл
+uv run loadvision features probe                 # kNN-зонд по реестру энкодеров, без обучения
+uv run loadvision eval heads                     # перебор энкодеров и голов по OOF
+uv run loadvision eval postprocess               # перебор цепочек постобработки
+uv run loadvision eval errors                    # отчёт по ошибкам с графиками в runs/eda/
+uv run loadvision model build-baseline           # пакет baseline в storage/models/
 uv run pytest -m data                            # проверки на реальном датасете
 ```
 

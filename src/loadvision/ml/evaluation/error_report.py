@@ -1,182 +1,120 @@
-"""Explains where the model is wrong, as numbers, charts and the photos themselves.
+"""Where the model is wrong, as one HTML page: numbers, charts and the photos themselves.
 
-Fits the ensemble out of fold, writes one row per photo to `runs/oof/predictions.csv` and
-renders `runs/eda/errors.html`. The point is not the average error but its shape: which loads,
-which scenes and which shooting conditions carry it.
-
-Usage:
-    uv run python scripts/analyze_errors.py
-    uv run python scripts/analyze_errors.py --member dinov3_vitb16:200 --member siglip2_vitb16:300
+The point is not the average error but its shape: which loads, which scenes and which shooting
+conditions carry it.
 """
 
-import argparse
-import csv
 import html
-import logging
 from collections import Counter, defaultdict
-from pathlib import Path
-from typing import Any, Final
+from collections.abc import Sequence
+from typing import Final
 
 import numpy as np
 from numpy.typing import NDArray
 from PIL import Image
-from scipy import stats
 
-from loadvision.ml.data.manifest import Sample, load_split
-from loadvision.ml.data.splits import read_folds
-from loadvision.ml.evaluation.cross_validation import out_of_fold
+from loadvision.ml.data.manifest import Sample
+from loadvision.ml.evaluation.charts import bars, card, stat
+from loadvision.ml.evaluation.ensemble import Member
 from loadvision.ml.evaluation.metrics import summary
-from loadvision.ml.models.backbones import load_backbone
-from loadvision.ml.training.embedding_cache import embed_samples
-from loadvision.ml.training.head_trainer import DEFAULT_HEAD, fit_head
-
-CACHE_DIR: Final = Path("runs/cache/embeddings")
-FOLDS: Final = Path("configs/splits/folds.json")
-PREDICTIONS: Final = Path("runs/oof/predictions.csv")
-REPORT: Final = Path("runs/eda/errors.html")
-DEFAULT_MEMBERS: Final = (("dinov3_vitb16", 200.0), ("pe_spatial_vitb16", 50.0))
 
 WORST_SHOWN: Final = 24
-DARK_THRESHOLD: Final = 60.0
-
-logger = logging.getLogger("errors")
-
-
-# --------------------------------------------------------------------------- charts
-
-
-def bars(
-    items: list[tuple[str, float]],
-    *,
-    unit: str = "",
-    decimals: int = 2,
-    zero_line: bool = False,
-) -> str:
-    """One-series bar chart as inline SVG, with a native tooltip on every bar."""
-    width, height, pad_left, pad_bottom, pad_top = 720, 230, 48, 36, 12
-    values = [value for _, value in items]
-    low = min(0.0, min(values)) if zero_line else 0.0
-    high = max(values) or 1.0
-    span = (high - low) or 1.0
-    plot_w, plot_h = width - pad_left - 8, height - pad_bottom - pad_top
-    slot = plot_w / len(items)
-    bar_w = max(2.0, slot * 0.72)
-
-    def y_of(value: float) -> float:
-        return pad_top + plot_h * (1 - (value - low) / span)
-
-    out = [f'<svg viewBox="0 0 {width} {height}" role="img">']
-    for fraction in (0.0, 0.5, 1.0):
-        value = low + span * fraction
-        y = y_of(value)
-        out.append(
-            f'<line class="grid" x1="{pad_left}" y1="{y:.1f}" x2="{width - 8}" y2="{y:.1f}"/>'
-        )
-        out.append(
-            f'<text class="tick" x="{pad_left - 6}" y="{y + 4:.1f}" text-anchor="end">'
-            f"{value:.{decimals}f}</text>"
-        )
-    base = y_of(0.0) if zero_line else y_of(low)
-    for index, (label, value) in enumerate(items):
-        x = pad_left + slot * index + (slot - bar_w) / 2
-        top = min(y_of(value), base)
-        bar_h = max(abs(y_of(value) - base), 1.0)
-        out.append(
-            f'<rect class="bar" x="{x:.1f}" y="{top:.1f}" width="{bar_w:.1f}" '
-            f'height="{bar_h:.1f}" rx="3"><title>{html.escape(label)}: '
-            f"{value:.{decimals}f}{unit}</title></rect>"
-        )
-        if len(items) <= 24 or index % max(1, len(items) // 12) == 0:
-            out.append(
-                f'<text class="tick" x="{x + bar_w / 2:.1f}" y="{height - pad_bottom + 16}" '
-                f'text-anchor="middle">{html.escape(label)}</text>'
-            )
-    out.append("</svg>")
-    return "\n".join(out)
+_THUMBNAIL: Final = (32, 32)
+_LIGHT_ORDER: Final = ("0-40", "40-60", "60-80", "80-100", "100+")
+_LIGHT_EDGES: Final = (40, 60, 80, 100)
+_SIZE_ORDER: Final = ("1", "2-3", "4+")
+_WORST_GROUPS: Final = 10
+_BIN_WIDTH: Final = 10
 
 
-def card(title: str, subtitle: str, body: str, note: str = "") -> str:
-    tail = f'<p class="note">{note}</p>' if note else ""
-    return (
-        f'<section class="card"><h3>{title}</h3><p class="sub">{subtitle}</p>{body}{tail}</section>'
-    )
+def brightness_of(samples: Sequence[Sample]) -> NDArray[np.float64]:
+    """Mean brightness of every photo, 0 to 255, measured on a thumbnail.
 
+    Rotation does not change it, so the photos are read without the EXIF handling the model
+    input needs.
 
-def stat(value: str, label: str, hint: str = "") -> str:
-    return (
-        f'<div class="stat"><div class="v">{value}</div><div class="l">{label}</div>'
-        f'<div class="h">{hint}</div></div>'
-    )
+    Args:
+        samples: Photos to measure.
 
-
-# --------------------------------------------------------------------------- data
-
-
-def brightness_of(samples: list[Sample]) -> NDArray[np.float64]:
+    Raises:
+        OSError: If a photo cannot be read.
+    """
     values: list[float] = []
     for item in samples:
         with Image.open(item.path) as image:
-            values.append(float(np.asarray(image.convert("L").resize((32, 32))).mean()))
+            values.append(float(np.asarray(image.convert("L").resize(_THUMBNAIL)).mean()))
     return np.array(values)
 
 
-def ensemble_oof(
-    samples: list[Sample],
-    labels: NDArray[np.float64],
-    numbers: list[int],
-    members: list[tuple[str, float]],
-    device: str,
-) -> NDArray[np.float64]:
-    parts: list[NDArray[np.float64]] = []
-    for encoder, alpha in members:
-        backbone = load_backbone(encoder, device)
-        features = embed_samples(samples, backbone, cache_dir=CACHE_DIR, device=device).astype(
-            np.float64
-        )
-        result = out_of_fold(
-            features,
-            labels,
-            numbers,
-            lambda a, b, penalty=alpha: fit_head(DEFAULT_HEAD, a, b, {"alpha": penalty}).predict,
-        )
-        logger.info("%s alpha=%g: oof mae %.3f", encoder, alpha, result.metrics["mae"])
-        parts.append(result.predictions)
-    return np.mean(parts, axis=0)
+def skewness(values: NDArray[np.float64]) -> float:
+    """Returns how lopsided the distribution is; below zero means a longer left tail."""
+    centered = values - values.mean()
+    variance = float((centered**2).mean())
+    return float((centered**3).mean() / variance**1.5) if variance else 0.0
+
+
+def kurtosis(values: NDArray[np.float64]) -> float:
+    """Returns how heavy the tails are compared with a normal distribution, which gives zero."""
+    centered = values - values.mean()
+    variance = float((centered**2).mean())
+    return float((centered**4).mean() / variance**2 - 3.0) if variance else 0.0
 
 
 def bucket_mae(
-    keys: list[str], errors: NDArray[np.float64], order: list[str]
+    keys: Sequence[str], errors: NDArray[np.float64], order: Sequence[str]
 ) -> list[tuple[str, float]]:
+    """Mean error inside every bucket, in the given order; empty buckets are left out."""
     grouped: dict[str, list[float]] = defaultdict(list)
     for key, error in zip(keys, errors, strict=True):
         grouped[key].append(float(error))
     return [(key, float(np.mean(grouped[key]))) for key in order if grouped[key]]
 
 
-# --------------------------------------------------------------------------- report
+def label_bin(value: float) -> str:
+    """Returns the name of the ten-point bucket a load falls into, with 100 on its own."""
+    if value >= 100:
+        return "100"
+    start = min(int(value // _BIN_WIDTH) * _BIN_WIDTH, 90)
+    return f"{start}-{start + _BIN_WIDTH - 1}"
+
+
+def light_bin(value: float) -> str:
+    """Returns the name of the brightness bucket a photo falls into."""
+    for name, top in zip(_LIGHT_ORDER, _LIGHT_EDGES, strict=False):
+        if value < top:
+            return name
+    return _LIGHT_ORDER[-1]
 
 
 def build_report(
-    samples: list[Sample],
+    samples: Sequence[Sample],
     labels: NDArray[np.float64],
     predicted: NDArray[np.float64],
-    numbers: list[int],
+    folds: Sequence[int],
     light: NDArray[np.float64],
-    members: list[tuple[str, float]],
+    members: Sequence[Member],
 ) -> str:
+    """Renders the report of one ensemble.
+
+    Args:
+        samples: Labelled photos, in the order of the predictions.
+        labels: Reference loads.
+        predicted: Out-of-fold predictions.
+        folds: Fold number of every photo.
+        light: Brightness of every photo.
+        members: Members of the ensemble, for the header.
+
+    Returns:
+        The page as text.
+    """
     signed = predicted - labels
     errors = np.abs(signed)
-    metrics = summary(labels, predicted, numbers)
-    skew = float(stats.skew(signed))
-    kurtosis = float(stats.kurtosis(signed))
+    metrics = summary(labels, predicted, folds)
+    skew = skewness(signed)
+    tails = kurtosis(signed)
 
     group_sizes = Counter(item.group_id for item in samples)
-    bin_of = lambda value: min(int(value // 10) * 10, 90)  # noqa: E731
-    bin_order = [f"{start}-{start + 9}" for start in range(0, 100, 10)] + ["100"]
-
-    def label_bin(value: float) -> str:
-        return "100" if value >= 100 else f"{bin_of(value)}-{bin_of(value) + 9}"
-
+    bin_order = [f"{start}-{start + 9}" for start in range(0, 100, _BIN_WIDTH)] + ["100"]
     label_keys = [label_bin(float(value)) for value in labels]
     mae_by_label = bucket_mae(label_keys, errors, bin_order)
     bias_by_label = [
@@ -187,26 +125,14 @@ def build_report(
         (name, float(np.mean(predicted[[i for i, k in enumerate(label_keys) if k == name]])))
         for name, _ in mae_by_label
     ]
-
-    light_order = ["0-40", "40-60", "60-80", "80-100", "100+"]
-
-    def light_bin(value: float) -> str:
-        for name, top in zip(light_order, (40, 60, 80, 100), strict=False):
-            if value < top:
-                return name
-        return "100+"
-
-    mae_by_light = bucket_mae([light_bin(v) for v in light], errors, light_order)
-    size_order = ["1", "2-3", "4+"]
+    mae_by_light = bucket_mae([light_bin(v) for v in light], errors, _LIGHT_ORDER)
 
     def size_bin(item: Sample) -> str:
         count = group_sizes[item.group_id]
         return "1" if count == 1 else ("2-3" if count <= 3 else "4+")
 
-    mae_by_size = bucket_mae([size_bin(item) for item in samples], errors, size_order)
-    mae_by_fold = bucket_mae(
-        [str(n) for n in numbers], errors, [str(n) for n in sorted(set(numbers))]
-    )
+    mae_by_size = bucket_mae([size_bin(item) for item in samples], errors, _SIZE_ORDER)
+    mae_by_fold = bucket_mae([str(n) for n in folds], errors, [str(n) for n in sorted(set(folds))])
 
     edges = np.arange(-60, 65, 5)
     signed_hist, _ = np.histogram(signed, bins=edges)
@@ -221,19 +147,18 @@ def build_report(
         for i in worst
     )
 
-    group_errors = defaultdict(list)
+    group_errors: dict[str | None, list[float]] = defaultdict(list)
     for item, error in zip(samples, errors, strict=True):
         group_errors[item.group_id].append(float(error))
     multi = sorted(
         ((g, float(np.mean(v)), len(v)) for g, v in group_errors.items() if len(v) > 1),
         key=lambda row: -row[1],
-    )[:10]
+    )[:_WORST_GROUPS]
     group_rows = "".join(
         f"<tr><td>{html.escape(str(g)[4:12])}</td><td>{n}</td><td>{m:.1f}</td></tr>"
         for g, m, n in multi
     )
-
-    members_text = ", ".join(f"{name} alpha={alpha:g}" for name, alpha in members)
+    members_text = ", ".join(f"{m.encoder} alpha={m.alpha:g}" for m in members)
 
     return f"""<!doctype html><html lang="ru"><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
@@ -282,7 +207,7 @@ code{{font-family:ui-monospace,monospace;font-size:13px;color:var(--ink2)}}
 {stat(f"{metrics['within_10']:.1%}", "в пределах 10", "доля фото")}
 {stat(f"{metrics['p95_error']:.0f}", "p95 ошибки", "у 5% хуже")}
 {stat(f"{skew:+.2f}", "skewness", "перекос распределения")}
-{stat(f"{kurtosis:+.2f}", "kurtosis", "тяжесть хвостов")}
+{stat(f"{tails:+.2f}", "kurtosis", "тяжесть хвостов")}
 {stat(f"{metrics['bias']:+.2f}", "bias", "средний сдвиг")}
 </div>
 
@@ -295,7 +220,7 @@ code{{font-family:ui-monospace,monospace;font-size:13px;color:var(--ink2)}}
                 [(f"{int(e)}", float(c)) for e, c in zip(edges[:-1], signed_hist, strict=False)],
                 decimals=0,
             ),
-            f"skewness {skew:+.2f}, kurtosis {kurtosis:+.2f}. "
+            f"skewness {skew:+.2f}, kurtosis {tails:+.2f}. "
             + (
                 "Перекос влево: крупные ошибки чаще в занижение."
                 if skew < -0.2
@@ -305,7 +230,7 @@ code{{font-family:ui-monospace,monospace;font-size:13px;color:var(--ink2)}}
             )
             + (
                 " Хвосты тяжелее нормальных: редкие очень большие промахи есть."
-                if kurtosis > 1
+                if tails > 1
                 else " Хвосты не тяжелее нормальных."
             ),
         )
@@ -371,59 +296,3 @@ code{{font-family:ui-monospace,monospace;font-size:13px;color:var(--ink2)}}
 <div class="gal">{gallery}</div>
 </section>
 </main>"""
-
-
-def main() -> None:
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--member", action="append", default=None)
-    parser.add_argument("--device", default="mps")
-    parser.add_argument("--data", type=Path, default=Path("data"))
-    args = parser.parse_args()
-    logging.basicConfig(level=logging.INFO, format="%(message)s")
-
-    members = (
-        [(m.split(":")[0], float(m.split(":")[1])) for m in args.member]
-        if args.member
-        else list(DEFAULT_MEMBERS)
-    )
-    samples = load_split(args.data, "train")
-    folds = read_folds(FOLDS)
-    numbers = folds.fold_indices(samples)
-    labels = np.array([s.label for s in samples], dtype=np.float64)
-
-    predicted = ensemble_oof(samples, labels, numbers, members, args.device)
-    light = brightness_of(samples)
-
-    PREDICTIONS.parent.mkdir(parents=True, exist_ok=True)
-    with PREDICTIONS.open("w", newline="", encoding="utf-8") as sink:
-        writer = csv.writer(sink)
-        writer.writerow(
-            ["image_id", "group_id", "fold", "label", "predicted", "error", "brightness"]
-        )
-        for item, fold, true, pred, value in zip(
-            samples, numbers, labels, predicted, light, strict=True
-        ):
-            writer.writerow(
-                [
-                    item.image_id,
-                    item.group_id,
-                    fold,
-                    f"{true:g}",
-                    f"{pred:.2f}",
-                    f"{pred - true:.2f}",
-                    f"{value:.1f}",
-                ]
-            )
-
-    REPORT.parent.mkdir(parents=True, exist_ok=True)
-    REPORT.write_text(
-        build_report(samples, labels, predicted, numbers, light, members), encoding="utf-8"
-    )
-    metrics: dict[str, Any] = summary(labels, predicted, numbers)
-    logger.info("")
-    logger.info("ensemble oof mae %.3f", metrics["mae"])
-    logger.info("written %s and %s", PREDICTIONS, REPORT)
-
-
-if __name__ == "__main__":
-    main()

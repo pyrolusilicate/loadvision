@@ -1,4 +1,4 @@
-"""Behavior every UnitOfWork implementation must have: the fake now, Postgres later."""
+"""Behavior every UnitOfWork implementation must have: the in-memory fake and Postgres."""
 
 from datetime import timedelta
 from uuid import UUID
@@ -10,7 +10,7 @@ from loadvision.application.ports import (
     UnitOfWork,
     UnitOfWorkFactory,
 )
-from loadvision.domain.assessment import Assessment, LoadPercent
+from loadvision.domain.assessment import Assessment, LoadPercent, ReviewReason, Signals
 from loadvision.domain.confirmed_label import LabelSource
 from loadvision.domain.model_version import ModelVersionId, ModelVersionStatus
 from loadvision.domain.shipment import ShipmentId
@@ -75,6 +75,17 @@ class UnitOfWorkContract:
         with uow_factory() as uow:
             assert uow.shipments.get(ShipmentId("RP-1")) is None
 
+    def test_unit_of_work_is_not_used_outside_its_with_block(
+        self, uow_factory: UnitOfWorkFactory
+    ) -> None:
+        uow = uow_factory()
+        with pytest.raises(RuntimeError, match="outside its with block"):
+            uow.shipments.get(ShipmentId("RP-1"))
+        with uow:
+            pass
+        with pytest.raises(RuntimeError, match="outside its with block"):
+            uow.commit()
+
     def test_unknown_rows_are_absent(self, uow_factory: UnitOfWorkFactory) -> None:
         with uow_factory() as uow:
             assert uow.shipments.get(ShipmentId("RP-404")) is None
@@ -124,6 +135,20 @@ class UnitOfWorkContract:
             assert found(assessment.shipment_id, assessment.image_sha256) == assessment
             assert found(ShipmentId("RP-2"), assessment.image_sha256) is None
             assert found(assessment.shipment_id, UNKNOWN_SHA256) is None
+
+    def test_assessment_keeps_its_signals_reasons_and_request_id(
+        self, uow_factory: UnitOfWorkFactory
+    ) -> None:
+        assessment = make_assessment(
+            signals=Signals(uncertainty=1.5, ood_score=0.25, brightness=0.5, sharpness=0.75),
+            review_reasons=frozenset({ReviewReason.TOO_DARK, ReviewReason.LOW_CONFIDENCE}),
+            request_id="req-1",
+        )
+        with uow_factory() as uow:
+            store_assessment(uow, assessment)
+            uow.commit()
+        with uow_factory() as uow:
+            assert uow.assessments.get(assessment.id) == assessment
 
     def test_duplicate_photo_in_a_shipment_raises_and_unit_of_work_stays_usable(
         self, uow_factory: UnitOfWorkFactory
@@ -206,6 +231,12 @@ class UnitOfWorkContract:
             assert uow.model_versions.get_active() == new.activate(T0 + timedelta(hours=2))
             assert uow.model_versions.get(old.version) == old.retire()
 
+    def test_updating_an_unregistered_model_version_fails(
+        self, uow_factory: UnitOfWorkFactory
+    ) -> None:
+        with uow_factory() as uow, pytest.raises(ValueError, match="not registered"):
+            uow.model_versions.update(make_model_version("v404"))
+
     def test_label_is_saved_and_read_back(self, uow_factory: UnitOfWorkFactory) -> None:
         label = make_label(PHOTO_A, 70.0)
         with uow_factory() as uow:
@@ -252,6 +283,7 @@ class UnitOfWorkContract:
                 uow.labels.save(label)
             uow.commit()
         with uow_factory() as uow:
+            assert uow.labels.get(labels[1].image_sha256) == labels[1]
             usable = [labels[0], labels[2]]
             assert uow.labels.list_for_training() == sorted(
                 usable, key=lambda row: row.image_sha256
