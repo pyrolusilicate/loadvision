@@ -11,6 +11,7 @@ Hackathon MVP: estimate cargo load (0-100%) from a truck body photo, store it by
 - `just fmt` format and autofix
 - `just test -k name` run selected fast tests
 - `just db-up` / `just db-down` local Postgres (needs `.env` from `.env.example`)
+- `just db-migrate` apply migrations to the database from `.env`; `just integration` run Postgres tests in throwaway databases
 
 ## Layout and rules
 
