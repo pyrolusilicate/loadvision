@@ -2,7 +2,6 @@
 
 import argparse
 import logging
-import shutil
 from datetime import datetime
 from pathlib import Path
 from typing import Final
@@ -17,6 +16,7 @@ from loadvision.domain.timestamps import format_utc, utc_now
 from loadvision.ml.inference.predictor import PackagePredictor
 from loadvision.ml.packaging.baseline_package import build_baseline_package
 from loadvision.ml.packaging.model_package import ModelPackage
+from loadvision.ml.packaging.model_store import place_package
 from loadvision.settings import load_settings
 
 DEFAULT_BASELINE_DIR: Final = Path("baseline")
@@ -146,11 +146,11 @@ def register_package(args: argparse.Namespace) -> int:
     if not args.skip_load_check:
         # Fails here rather than on the first request of a client after activation.
         PackagePredictor(package)
-    target = load_settings().storage.models_dir / version.value
-    if target.resolve() != args.package.resolve():
-        if target.exists():
-            raise CommandError(f"{target} already holds a package of version {version.value}")
-        shutil.copytree(args.package, target)
+    try:
+        placed = place_package(args.package, load_settings().storage.models_dir)
+    except FileExistsError as error:
+        raise CommandError(str(error)) from error
+    target = placed.root
     with unit_of_work_factory() as uow_factory:
         try:
             registered = RegisterModel(uow_factory=uow_factory, clock=utc_now)(version)
