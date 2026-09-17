@@ -176,6 +176,21 @@ def test_accepts_boundary_value(
 
 
 @pytest.mark.contract
+@pytest.mark.parametrize("example", ["label_request.xml", "label.xml"])
+def test_label_has_either_a_load_or_unusable(schema: etree.XMLSchema, example: str) -> None:
+    both = parse_example(example)
+    load = both.find(f"{{{API}}}LoadPct")
+    assert load is not None
+    load.addnext(etree.Element(f"{{{API}}}Unusable"))
+    assert not schema.validate(both)
+    neither = parse_example(example)
+    load = neither.find(f"{{{API}}}LoadPct")
+    assert load is not None
+    neither.remove(load)
+    assert not schema.validate(neither)
+
+
+@pytest.mark.contract
 def test_rejects_unknown_element(schema: etree.XMLSchema) -> None:
     root = parse_example("assessment_request.xml")
     etree.SubElement(root, f"{{{API}}}Comment").text = "fragile"
