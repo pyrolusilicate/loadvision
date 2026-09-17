@@ -19,7 +19,7 @@ Hackathon MVP: estimate cargo load (0-100%) from a truck body photo, store it by
 - `ShipmentId` format lives only in `domain/shipment.py` (`SHIPMENT_ID_PATTERN`) and is repeated in the XSD; keep it out of configs.
 - One file = one responsibility, roughly 50-300 lines. Split by the folder plan instead of growing a file.
 - Protocols only where two implementations exist (real and fake for tests). Registries in `ml/registry.py` for backbones and heads.
-- Shared contracts change only with both owners: `application/ports.py`, model package manifest, XSD, `errors.py`, observability event names, TrainingRunner, first migration, `configs/splits/folds.json`, registry keys a manifest names (preprocessing, postprocessing).
+- Shared contracts change only with both owners: `application/ports.py`, model package manifest, XSD, `errors.py`, observability event names, TrainingRunner, first migration, `configs/splits/folds.json`, registry keys a manifest names (preprocessing, postprocessing), photo decoding in `imaging/validator.py` (training and the embedding cache read photos through it).
 - `imaging/preprocessing.py` is the only path from image bytes to model input, for both training and serving.
 - Data lives in `data/train`, `data/test`; runs in `runs/`; service files in `storage/`. None of them are committed.
 - `baseline/` is the organizers' reference code; do not edit or lint it.
