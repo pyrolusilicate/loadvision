@@ -15,6 +15,7 @@ from loadvision.domain.confirmed_label import ConfirmedLabel
 from loadvision.domain.model_version import ModelVersion, ModelVersionId
 from loadvision.domain.shipment import Shipment, ShipmentId
 from loadvision.domain.timestamps import ensure_aware
+from loadvision.domain.training_job import TrainingJob, TrainingMode
 from loadvision.errors import ErrorCode
 from loadvision.imaging.prepared_image import MediaType, PreparedImage
 
@@ -226,6 +227,43 @@ class LabelRepository(Protocol):
         ...
 
 
+class TrainingJobRepository(Protocol):
+    """Training jobs within the current unit of work: the queue the worker takes from."""
+
+    def add(self, job: TrainingJob) -> None:
+        """Stores a new job."""
+        ...
+
+    def get(self, job_id: UUID) -> TrainingJob | None:
+        """Returns the job, or None if it is unknown."""
+        ...
+
+    def find_unfinished(self) -> TrainingJob | None:
+        """Returns a job that is queued or running, or None when every job has ended."""
+        ...
+
+    def claim_next(self) -> TrainingJob | None:
+        """Takes the oldest queued job for this worker.
+
+        The job is locked until the unit of work ends, so no other worker sees it. Returns
+        None when nothing waits or another job is already running: retraining runs one at a
+        time, and the database holds that rule as well.
+        """
+        ...
+
+    def list_recent(self, limit: int) -> list[TrainingJob]:
+        """Returns the newest jobs first, at most `limit` of them."""
+        ...
+
+    def update(self, job: TrainingJob) -> None:
+        """Saves the status and the outcome of a stored job.
+
+        Raises:
+            ValueError: If the job was never stored.
+        """
+        ...
+
+
 class ImageStorage(Protocol):
     """Original photo bytes addressed by their SHA-256, outside the database transaction.
 
@@ -264,6 +302,9 @@ class UnitOfWork(Protocol):
     @property
     def labels(self) -> LabelRepository: ...
 
+    @property
+    def training_jobs(self) -> TrainingJobRepository: ...
+
     def __enter__(self) -> Self: ...
 
     def __exit__(
@@ -279,19 +320,6 @@ class UnitOfWork(Protocol):
 
 
 type UnitOfWorkFactory = Callable[[], UnitOfWork]
-
-
-class TrainingMode(StrEnum):
-    """How much of the pipeline a retraining run repeats.
-
-    Attributes:
-        FAST: Heads and ensemble weights on cached embeddings of a frozen encoder. Minutes on
-            a CPU, so the worker can run it.
-        FULL: The whole pipeline, fine-tuning included. Needs a GPU and runs from the CLI.
-    """
-
-    FAST = "fast"
-    FULL = "full"
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)

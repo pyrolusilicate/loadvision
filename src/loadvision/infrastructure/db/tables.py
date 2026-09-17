@@ -28,11 +28,11 @@ from sqlalchemy import (
 )
 from sqlalchemy.dialects.postgresql import ARRAY, JSONB
 
-from loadvision.application.ports import TrainingMode
 from loadvision.domain.assessment import SHA256_HEX_PATTERN, ReviewReason
 from loadvision.domain.confirmed_label import LabelSource
 from loadvision.domain.model_version import MODEL_VERSION_PATTERN, ModelVersionStatus
 from loadvision.domain.shipment import SHIPMENT_ID_PATTERN
+from loadvision.domain.training_job import TrainingJobStatus, TrainingMode
 from loadvision.imaging.prepared_image import MediaType
 
 # Fixed constraint names: migrations refer to them, and autogenerate stays deterministic.
@@ -43,9 +43,6 @@ NAMING_CONVENTION: Final = {
     "ix": "ix_%(table_name)s_%(column_0_N_name)s",
     "ck": "ck_%(table_name)s_%(constraint_name)s",
 }
-
-# Values without a domain type yet; they move to the domain with TrainingJob (task 7.1).
-JOB_STATUSES: Final = ("queued", "running", "succeeded", "failed")
 
 metadata: Final = MetaData(naming_convention=NAMING_CONVENTION)
 
@@ -204,7 +201,7 @@ training_jobs: Final = Table(
     _aware("started_at", nullable=True),
     _aware("finished_at", nullable=True),
     CheckConstraint(_one_of("mode", TrainingMode), name="mode_known"),
-    CheckConstraint(_one_of("status", JOB_STATUSES), name="status_known"),
+    CheckConstraint(_one_of("status", TrainingJobStatus), name="status_known"),
     CheckConstraint("(started_at IS NULL) = (status = 'queued')", name="started_unless_queued"),
     CheckConstraint(
         "(finished_at IS NOT NULL) = (status IN ('succeeded', 'failed'))",
