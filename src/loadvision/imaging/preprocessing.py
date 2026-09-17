@@ -81,7 +81,9 @@ def resize_pad(image: PreparedImage, params: Params) -> ModelInput:
     scale = min(width / image.width, height / image.height)
     resized = Image.fromarray(image.pixels).resize(
         (max(1, round(image.width * scale)), max(1, round(image.height * scale))),
-        Image.Resampling.BILINEAR,
+        # Bicubic, because every encoder we consider was pretrained with it; baseline_v0 keeps
+        # bilinear, since it must reproduce the organizers' reference code byte for byte.
+        Image.Resampling.BICUBIC,
     )
     canvas = np.zeros((height, width, 3), np.uint8)
     top = (height - resized.height) // 2
