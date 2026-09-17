@@ -8,10 +8,15 @@ from loadvision.imaging.views import IDENTITY, VIEWS
 
 # A key names one pretrained checkpoint at one input size forever: it is written into a model
 # package manifest, and the service resolves the package by it long after the experiment.
-DEFAULT_BACKBONE: Final = "dinov2_vitb14"
+# The default is the best single encoder we measured: MAE 8.607 out of fold, Apache-2.0.
+DEFAULT_BACKBONE: Final = "pe_spatial_vitb16_grid4x3_padmean"
 
 # Letterboxing into the encoder box; `imaging/preprocessing.py` holds the alternatives.
 DEFAULT_PREPROCESSING: Final = "resize_pad"
+
+# One look at the photo by default. Adding the mirror is measured at 0.036 MAE and costs a
+# second run of the encoder, so it is opt-in: `imaging/views.py` holds the alternatives.
+DEFAULT_VIEWS: Final = (IDENTITY,)
 
 type Pooling = Literal["pooled", "grid"]
 
@@ -53,7 +58,7 @@ class BackboneSpec:
     pooling: Pooling = "pooled"
     grid_rows: int = 1
     grid_cols: int = 1
-    views: tuple[str, ...] = (IDENTITY,)
+    views: tuple[str, ...] = DEFAULT_VIEWS
 
     def __post_init__(self) -> None:
         """Checks the box against the patch grid.

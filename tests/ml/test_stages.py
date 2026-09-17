@@ -409,7 +409,6 @@ def test_build_pipeline_reads_a_config() -> None:
 @pytest.mark.parametrize(
     "config",
     [
-        {},
         {"members": []},
         {"members": [{"head": "ridge"}]},
         {"members": [{"encoder": "x", "params": {"alpha": "many"}}]},
@@ -600,3 +599,35 @@ def test_build_package_needs_training_first(workspace: tuple[RunContext, Path]) 
         BuildPackage(
             members=members(), chain=[("round_to", {"step": 5.0})], folds_file=folds_file
         ).run(ctx)
+
+
+@pytest.mark.ml
+def test_a_config_without_members_gets_the_shipped_ensemble() -> None:
+    """The best known setup is written in code, so it has one answer a reader can find."""
+    from loadvision.ml.pipeline.stages import DEFAULT_CHAIN, DEFAULT_MEMBERS
+    from loadvision.ml.postprocess import APPLIERS
+    from loadvision.ml.registry import BACKBONES
+
+    stages = build_pipeline({})
+
+    assert [stage.name for stage in stages] == [
+        "build_manifest",
+        "extract_embeddings",
+        "train_folds",
+        "evaluate",
+        "predict_test",
+        "build_package",
+    ]
+    # Every default names something the registries actually hold.
+    assert all(name in BACKBONES for name, _ in DEFAULT_MEMBERS)
+    assert all(name in APPLIERS for name, _ in DEFAULT_CHAIN)
+    # And every default encoder ships under a licence that lets us distribute its weights.
+    assert {BACKBONES[name].license for name, _ in DEFAULT_MEMBERS} == {"Apache-2.0"}
+
+
+@pytest.mark.ml
+def test_the_config_still_wins_over_the_defaults() -> None:
+    stages = build_pipeline({"members": [{"encoder": "toy", "params": {"alpha": 7}}]})
+    train = next(stage for stage in stages if isinstance(stage, TrainFolds))
+
+    assert [member.encoder for member in train.members] == ["toy"]

@@ -6,7 +6,7 @@ worker takes when it retrains on confirmed labels, so research and retraining fo
 rules.
 
 Usage:
-    uv run python scripts/run_pipeline.py configs/experiments/ens4_median16_round5.json
+    uv run python scripts/run_pipeline.py                     # the shipped configuration
     uv run python scripts/run_pipeline.py <config> --device mps
 """
 
@@ -21,6 +21,7 @@ from loadvision.ml.pipeline.runner import PipelineRunner, RunStatus
 from loadvision.ml.pipeline.stage import RunContext, new_run_id
 from loadvision.ml.pipeline.stages import build_pipeline
 
+DEFAULT_CONFIG: Final = Path("configs/experiments/ens4_apache_by_aspect.json")
 DEFAULT_RUNS: Final = Path("runs")
 DEFAULT_CACHE: Final = Path("runs/cache")
 DEFAULT_DATA: Final = Path("data")
@@ -32,7 +33,13 @@ logger = logging.getLogger("pipeline")
 def main() -> int:
     """Runs the pipeline and returns the process exit code."""
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("config", type=Path, help="experiment config in JSON")
+    parser.add_argument(
+        "config",
+        type=Path,
+        nargs="?",
+        default=DEFAULT_CONFIG,
+        help=f"experiment config in JSON; without it the shipped one, {DEFAULT_CONFIG}",
+    )
     parser.add_argument("--device", default="cpu", help="torch device, such as mps or cuda")
     parser.add_argument("--runs-dir", type=Path, default=DEFAULT_RUNS)
     parser.add_argument("--cache-dir", type=Path, default=DEFAULT_CACHE)
