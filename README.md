@@ -34,6 +34,28 @@ scripts/check.sh    # или just check
 git config core.hooksPath .githooks    # или just hooks
 ```
 
+## Команды
+
+После `uv sync` доступна команда `loadvision`:
+
+```bash
+uv run loadvision model build-baseline                       # пакет модели в storage/models/
+uv run loadvision train configs/experiments/<имя>.json       # весь пайплайн обучения
+uv run loadvision data folds --check                         # проверить configs/splits/folds.json
+uv run loadvision eval heads                                 # сравнение энкодеров и голов по OOF
+uv run loadvision eval errors                                # отчёт об ошибках в runs/eda/
+```
+
+Обучение и сравнение моделей требуют `data/` и группы зависимостей `ml`. Сервису хватает пакета
+модели в `storage/models/`.
+
+## Сервис
+
+```bash
+uv run loadvision model build-baseline    # модель, с которой сервис отвечает
+just up                                   # Postgres, миграции и API на http://localhost:8000
+```
+
 ## CI
 
 На GitLab хакатона нет раннеров, поэтому пайплайн не создаётся и проверки идут локально в хуке. Когда раннер появится, в Settings -> CI/CD -> Variables добавьте переменную `RUN_CI` со значением `true`: CI запустит тот же `scripts/check.sh`.

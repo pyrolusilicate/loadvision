@@ -54,7 +54,7 @@ evaluate             oof.csv -> metrics.json, worst_oof.csv
 predict_test         голова на всех метках -> submission.csv
 ```
 
-Запуск: `uv run python scripts/run_pipeline.py configs/experiments/<имя>.json --device mps`.
+Запуск: `uv run loadvision train configs/experiments/<имя>.json --device mps`.
 Результат - папка `runs/run_<время>_<хвост>/` с `summary.json`, `run.jsonl` и артефактами.
 
 Подробности каждого шага - в `ml/pipeline.md`.
@@ -74,17 +74,19 @@ predict_test         голова на всех метках -> submission.csv
 uv sync                                   поставить всё
 scripts/check.sh                          ruff, pyright, import-linter, быстрые тесты
 uv run pytest -m data                     проверки на реальном датасете, нужен data/
-uv run python scripts/make_folds.py       собрать configs/splits/folds.json
-uv run python scripts/make_folds.py --check   только проверить файл
-uv run python scripts/probe_encoders.py   kNN-зонд по реестру энкодеров, без обучения
-uv run python scripts/run_pipeline.py configs/experiments/<имя>.json   весь пайплайн
-uv run python scripts/evaluate.py         перебор энкодеров и голов по OOF
-uv run python scripts/evaluate_postprocess.py   перебор цепочек постобработки
-uv run python scripts/analyze_errors.py   отчёт по ошибкам с графиками в runs/eda/
+uv run loadvision data folds              собрать configs/splits/folds.json
+uv run loadvision data folds --check      только проверить файл
+uv run loadvision features probe          kNN-зонд по реестру энкодеров, без обучения
+uv run loadvision train configs/experiments/<имя>.json   весь пайплайн
+uv run loadvision eval heads              перебор энкодеров и голов по OOF
+uv run loadvision eval postprocess        перебор цепочек постобработки
+uv run loadvision eval errors             отчёт по ошибкам с графиками в runs/eda/
+uv run loadvision model build-baseline    пакет baseline в storage/models/
 ```
 
-Скрипты в `scripts/` - исследовательские: они перебирают варианты и пишут историю в `runs/`.
-Пайплайн - производственный: он считает одну конфигурацию из конфига и оставляет папку прогона.
+Команды `eval` и `features` - исследовательские: они перебирают варианты и пишут историю в
+`runs/`. `train` - производственный: он считает одну конфигурацию из конфига и оставляет папку
+прогона.
 
 ## Правила ведения документации
 
