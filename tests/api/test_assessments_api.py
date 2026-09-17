@@ -1,120 +1,39 @@
 import base64
 import re
 from collections.abc import Iterator
-from dataclasses import dataclass
+from uuid import UUID
 
 import pytest
-from fastapi.testclient import TestClient
-from httpx2 import Response
 from lxml import etree
 
-from loadvision.api.app import create_app
 from loadvision.api.middleware import REQUEST_ID_PATTERN
-from loadvision.api.services import ApiServices
 from loadvision.api.xml.parser import NAMESPACE, schema_bytes
-from loadvision.application.assess_photo import AssessPhoto
-from loadvision.application.ports import LoadPredictor
 from loadvision.domain.shipment import ShipmentId
-from loadvision.errors import ERROR_CATALOG, ErrorCode
-from loadvision.imaging.prepared_image import MediaType, PreparedImage
-from loadvision.imaging.validator import ImageLimits, prepare_image
-from loadvision.ml.inference.active_model import ActiveModel
+from loadvision.errors import ErrorCode
+from loadvision.imaging.prepared_image import PreparedImage
 from tests import image_files
-from tests.builders import T0
-from tests.fakes.clock import FixedClock, SequentialIds
-from tests.fakes.image_storage import InMemoryImageStorage
-from tests.fakes.in_memory_db import InMemoryStore
-from tests.fakes.predictor import FakePredictor
-
-LIMITS = ImageLimits(
-    max_bytes=2_000_000, max_pixels=1_000_000, min_side=256, media_types=frozenset(MediaType)
+from tests.api.service import (
+    MAX_BODY_BYTES,
+    PHOTO,
+    PHOTO_SHA256,
+    XML,
+    Service,
+    assert_error,
+    child,
+    document,
+    make_service,
+    post,
+    request_body,
 )
-MAX_BODY_BYTES = 1_000_000
-PHOTO = image_files.jpeg()
-PHOTO_SHA256 = prepare_image(PHOTO, LIMITS).sha256
-XML = {"Content-Type": "application/xml; charset=utf-8"}
-SCHEMA = etree.XMLSchema(etree.fromstring(schema_bytes()))
+from tests.builders import make_assessment
+from tests.fakes.image_storage import InMemoryImageStorage
+from tests.fakes.predictor import FakePredictor
+from tests.port_contracts.unit_of_work import store_assessment
 
 
 class FailingImageStorage(InMemoryImageStorage):
     def save(self, image: PreparedImage) -> None:
         raise OSError("disk full at /srv/storage")
-
-
-@dataclass
-class Service:
-    client: TestClient
-    store: InMemoryStore
-    storage: InMemoryImageStorage
-
-
-def make_service(
-    predictor: LoadPredictor | None = None, storage: InMemoryImageStorage | None = None
-) -> Service:
-    store = InMemoryStore()
-    storage = InMemoryImageStorage() if storage is None else storage
-    model = ActiveModel()
-    if predictor is not None:
-        model.activate(predictor)
-    services = ApiServices(
-        assess_photo=AssessPhoto(
-            uow_factory=store.unit_of_work,
-            storage=storage,
-            limits=LIMITS,
-            clock=FixedClock(T0),
-            new_id=SequentialIds(),
-        ),
-        model=model,
-        request_id_header="X-Request-ID",
-        max_body_bytes=MAX_BODY_BYTES,
-    )
-    client = TestClient(create_app(services), raise_server_exceptions=False)
-    return Service(client=client, store=store, storage=storage)
-
-
-@pytest.fixture
-def service() -> Service:
-    return make_service(FakePredictor(loads={PHOTO_SHA256: 85.25}))
-
-
-def request_body(shipment_id: str = "RP-1", image: str | None = None) -> bytes:
-    data = base64.b64encode(PHOTO).decode() if image is None else image
-    return (
-        '<?xml version="1.0" encoding="UTF-8"?>'
-        f'<AssessmentRequest xmlns="{NAMESPACE}">'
-        f"<ShipmentId>{shipment_id}</ShipmentId><Image>{data}</Image>"
-        "</AssessmentRequest>"
-    ).encode()
-
-
-def post(client: TestClient, body: bytes, headers: dict[str, str] | None = None) -> Response:
-    return client.post(
-        "/api/v1/assessments", content=body, headers=XML if headers is None else headers
-    )
-
-
-def document(response: Response) -> etree._Element:
-    """Parses a response and checks it is XML valid against the published schema."""
-    assert response.headers["content-type"] == "application/xml; charset=utf-8"
-    root = etree.fromstring(response.content)
-    SCHEMA.assertValid(root)
-    return root
-
-
-def child(root: etree._Element, name: str) -> etree._Element:
-    found = root.find(f"{{{NAMESPACE}}}{name}")
-    assert found is not None, name
-    return found
-
-
-def assert_error(response: Response, code: ErrorCode) -> None:
-    root = document(response)
-    spec = ERROR_CATALOG[code]
-    assert response.status_code == spec.http_status
-    assert root.get("code") == code.value
-    assert child(root, "Message").text == spec.message
-    assert child(root, "Hint").text == spec.hint
-    assert root.get("requestId") == response.headers["X-Request-ID"]
 
 
 @pytest.mark.api
@@ -139,6 +58,47 @@ def test_new_photo_is_assessed_and_stored(service: Service) -> None:
     [stored] = service.store.assessments.values()
     assert str(stored.id) == root.get("id")
     assert stored.request_id == response.headers["X-Request-ID"]
+
+
+@pytest.mark.api
+def test_stored_assessment_is_read_by_id(service: Service) -> None:
+    created = document(post(service.client, request_body()))
+
+    response = service.client.get(f"/api/v1/assessments/{created.get('id')}")
+
+    assert response.status_code == 200
+    root = document(response)
+    assert "reused" not in root.attrib
+    assert root.find(f"{{{NAMESPACE}}}ConfirmedLabel") is None
+    assert etree.tostring(child(root, "Image")) == etree.tostring(child(created, "Image"))
+    assert child(root, "LoadPct").text == "85.3"
+
+
+@pytest.mark.api
+def test_assessment_id_in_upper_case_is_the_same_assessment(service: Service) -> None:
+    assessment = make_assessment(id=UUID("3f6c2a4e-7b1d-4c55-9a0e-5d2f8e41c7aa"))
+    with service.store.unit_of_work() as uow:
+        store_assessment(uow, assessment)
+        uow.commit()
+
+    response = service.client.get(f"/api/v1/assessments/{str(assessment.id).upper()}")
+
+    assert document(response).get("id") == str(assessment.id)
+
+
+@pytest.mark.api
+@pytest.mark.parametrize("assessment_id", ["00000000-0000-0000-0000-000000000404", "not-a-uuid"])
+def test_unknown_or_malformed_assessment_is_not_found(service: Service, assessment_id: str) -> None:
+    response = service.client.get(f"/api/v1/assessments/{assessment_id}")
+    assert_error(response, ErrorCode.ASSESSMENT_NOT_FOUND)
+
+
+@pytest.mark.api
+def test_assessment_is_not_replaced_through_its_address(service: Service) -> None:
+    created = document(post(service.client, request_body()))
+    response = service.client.put(f"/api/v1/assessments/{created.get('id')}", headers=XML)
+    assert_error(response, ErrorCode.METHOD_NOT_ALLOWED)
+    assert response.headers["allow"] == "GET"
 
 
 @pytest.mark.api
