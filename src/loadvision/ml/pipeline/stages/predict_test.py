@@ -13,7 +13,7 @@ from loadvision.ml.data.manifest import load_split
 from loadvision.ml.models.backbones import Backbone, load_backbone
 from loadvision.ml.pipeline.stage import RunContext, StageCheckError, StageResult
 from loadvision.ml.pipeline.stages.extract_embeddings import EMBEDDINGS_DIR
-from loadvision.ml.pipeline.stages.train_folds import OOF_FILE, Chain, Member
+from loadvision.ml.pipeline.stages.train_folds import OOF_FILE, Chain, Member, read_facts
 from loadvision.ml.training.embedding_cache import embed_samples
 from loadvision.ml.training.head_trainer import fit_head
 from loadvision.ml.training.postprocess_fit import fit_chain
@@ -90,8 +90,12 @@ class PredictTest:
 
         predictions = np.clip(np.mean(parts, axis=0), _MIN_LOAD, _MAX_LOAD)
         if self.chain:
+            # The chain is fitted on the out-of-fold predictions of the training photos, the
+            # only place a hedging head is visible without cheating, and applied to the test
+            # ones with their own facts.
             raw, reference = _read_oof(ctx.run_dir / OOF_FILE)
-            predictions = fit_chain(self.chain, raw, reference)(predictions)
+            fitted = fit_chain(self.chain, raw, reference, read_facts(ctx, train))
+            predictions = fitted(predictions, read_facts(ctx, test))
 
         path = ctx.run_dir / SUBMISSION_FILE
         _write(path, [sample.image_id for sample in test], predictions)

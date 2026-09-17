@@ -3,7 +3,7 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from loadvision.ml.postprocess import load_curve, make_chain
+from loadvision.ml.postprocess import load_curves, make_chain
 from loadvision.ml.training.postprocess_fit import FITTERS, fit_chain, fit_step
 
 
@@ -31,7 +31,7 @@ def test_isotonic_reaches_the_ends_the_head_never_reached() -> None:
 
     assert np.abs(labels - corrected).mean() < np.abs(labels - predictions).mean()
     assert corrected.max() > predictions.max()
-    assert step.curve is not None
+    assert step.curves is not None
 
 
 @pytest.mark.ml
@@ -54,7 +54,7 @@ def test_snap_high_learns_a_threshold_and_stores_it_in_params() -> None:
     corrected = step.apply(predictions)
 
     assert "threshold" in step.params
-    assert step.curve is None
+    assert step.curves is None
     assert corrected[-1] == 100.0
     assert corrected[0] == 30.0
 
@@ -112,10 +112,10 @@ def test_a_fitted_chain_and_the_service_chain_agree(tmp_path: Path) -> None:
     # What the package would carry: params in the manifest, curves as files.
     rebuilt = []
     for index, step in enumerate(chain.steps):
-        path = step.save_curve_to(tmp_path / f"step_{index}.npz")
-        rebuilt.append((step.name, step.params, load_curve(path) if path else None))
+        path = step.save_curves_to(tmp_path / f"step_{index}.npz")
+        rebuilt.append((step.name, step.params, load_curves(path) if path else None))
 
-    assert np.allclose(chain(predictions), make_chain(rebuilt)(predictions))
+    assert np.allclose(chain(predictions), make_chain(rebuilt)(predictions, {}))
 
 
 @pytest.mark.ml

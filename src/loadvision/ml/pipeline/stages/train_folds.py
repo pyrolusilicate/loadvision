@@ -15,7 +15,9 @@ from loadvision.ml.evaluation.cross_validation import out_of_fold
 from loadvision.ml.models.backbones import Backbone, load_backbone
 from loadvision.ml.packaging.model_package import file_sha256
 from loadvision.ml.pipeline.stage import RunContext, StageCheckError, StageResult
+from loadvision.ml.pipeline.stages.build_manifest import MANIFEST_FILE
 from loadvision.ml.pipeline.stages.extract_embeddings import EMBEDDINGS_DIR
+from loadvision.ml.postprocess import ASPECT
 from loadvision.ml.training.embedding_cache import embed_samples
 from loadvision.ml.training.head_trainer import DEFAULT_HEAD, fit_head
 from loadvision.ml.training.postprocess_fit import fit_chain
@@ -119,7 +121,7 @@ class TrainFolds:
             parts.append(result.predictions)
 
         raw = np.clip(np.mean(parts, axis=0), _MIN_LOAD, _MAX_LOAD)
-        predicted = self._apply_chain(raw, labels, numbers)
+        predicted = self._apply_chain(raw, labels, numbers, read_facts(ctx, samples))
         path = ctx.run_dir / OOF_FILE
         _write(path, samples, numbers, labels, raw, predicted)
         return StageResult(
@@ -151,7 +153,11 @@ class TrainFolds:
             raise StageCheckError(f"{self.name}: predictions outside [0, 100] or not finite")
 
     def _apply_chain(
-        self, raw: NDArray[np.float64], labels: NDArray[np.float64], numbers: Sequence[int]
+        self,
+        raw: NDArray[np.float64],
+        labels: NDArray[np.float64],
+        numbers: Sequence[int],
+        facts: Mapping[str, NDArray[np.float64]],
     ) -> NDArray[np.float64]:
         if not self.chain:
             return raw
@@ -160,8 +166,13 @@ class TrainFolds:
         corrected = np.empty_like(raw)
         for fold in sorted(set(numbers)):
             validation = np.array([value == fold for value in numbers])
-            apply = fit_chain(self.chain, raw[~validation], labels[~validation])
-            corrected[validation] = apply(raw[validation])
+            apply = fit_chain(
+                self.chain,
+                raw[~validation],
+                labels[~validation],
+                _pick(facts, ~validation),
+            )
+            corrected[validation] = apply(raw[validation], _pick(facts, validation))
         return corrected
 
 
@@ -189,3 +200,36 @@ def _write(
                     f"{after:.4f}",
                 ]
             )
+
+
+def read_facts(ctx: RunContext, samples: Sequence[Sample]) -> dict[str, NDArray[np.float64]]:
+    """Reads what conditional postprocessing steps may look at, in the order of `samples`.
+
+    The facts come from the manifest of this run, so they are the same numbers the report
+    slices photos by, and nothing is decoded twice.
+
+    Args:
+        ctx: Context of the run.
+        samples: Photos, in prediction order.
+
+    Returns:
+        Fact name to one number per photo.
+
+    Raises:
+        FileNotFoundError: If the manifest stage did not run.
+        KeyError: If a photo is missing from the manifest.
+    """
+    path = ctx.run_dir / MANIFEST_FILE
+    if not path.is_file():
+        raise FileNotFoundError(f"{path} is missing; build_manifest did not run")
+    with path.open(newline="", encoding="utf-8") as file:
+        rows = {row["image_id"]: row for row in csv.DictReader(file)}
+    return {
+        ASPECT: np.array([float(rows[s.image_id]["aspect"]) for s in samples], dtype=np.float64)
+    }
+
+
+def _pick(
+    facts: Mapping[str, NDArray[np.float64]], mask: NDArray[np.bool_]
+) -> dict[str, NDArray[np.float64]]:
+    return {name: values[mask] for name, values in facts.items()}

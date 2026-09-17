@@ -110,6 +110,32 @@ BACKBONES: Final = MappingProxyType(
             grid_rows=2,
             grid_cols=2,
         ),
+        # Same encoders with a neutral padding instead of black: half of the dataset has
+        # proportions far from the box, so a wide band of the input is padding.
+        "dinov3_vitb16_padmean": BackboneSpec(
+            timm_name="vit_base_patch16_dinov3.lvd1689m",
+            patch=16,
+            height=512,
+            width=384,
+            preprocessing="resize_pad_mean",
+        ),
+        "pe_spatial_vitb16_padmean": BackboneSpec(
+            timm_name="vit_pe_spatial_base_patch16_512.fb",
+            patch=16,
+            height=512,
+            width=384,
+            preprocessing="resize_pad_mean",
+        ),
+        "pe_spatial_vitb16_grid4x3_padmean": BackboneSpec(
+            timm_name="vit_pe_spatial_base_patch16_512.fb",
+            patch=16,
+            height=512,
+            width=384,
+            preprocessing="resize_pad_mean",
+            pooling="grid",
+            grid_rows=4,
+            grid_cols=3,
+        ),
         "pe_spatial_vitb16_grid4x3": BackboneSpec(
             timm_name="vit_pe_spatial_base_patch16_512.fb",
             patch=16,

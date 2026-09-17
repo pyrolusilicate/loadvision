@@ -1,0 +1,51 @@
+{
+  "name": "ens4_median16_by_aspect",
+  "description": "Two pooled encoders and two 4x3 grids, ridge heads, a median calibration per population of photos, then rounding to 5.",
+  "folds": "configs/splits/folds.json",
+  "members": [
+    {
+      "encoder": "dinov3_vitb16",
+      "head": "ridge",
+      "params": {
+        "alpha": 200
+      }
+    },
+    {
+      "encoder": "pe_spatial_vitb16",
+      "head": "ridge",
+      "params": {
+        "alpha": 50
+      }
+    },
+    {
+      "encoder": "dinov3_vitb16_grid4x3",
+      "head": "ridge",
+      "params": {
+        "alpha": 3000
+      }
+    },
+    {
+      "encoder": "pe_spatial_vitb16_grid4x3",
+      "head": "ridge",
+      "params": {
+        "alpha": 1000
+      }
+    }
+  ],
+  "postprocess": [
+    {
+      "name": "median_bins_by_aspect",
+      "params": {
+        "bins": 16,
+        "low": 0.7,
+        "high": 0.8
+      }
+    },
+    {
+      "name": "round_to",
+      "params": {
+        "step": 5
+      }
+    }
+  ]
+}

@@ -27,7 +27,7 @@ def make_image(height: int, width: int, value: int = 255) -> PreparedImage:
 
 @pytest.mark.unit
 def test_registry_lists_both_preprocessings() -> None:
-    assert names() == ("baseline_v0", "resize_pad")
+    assert names() == ("baseline_v0", "resize_pad", "resize_pad_mean")
 
 
 @pytest.mark.unit
@@ -103,4 +103,25 @@ def test_preprocessing_is_reproducible() -> None:
     assert digests == {
         "baseline_v0": "c0dfeca716ff61a1e3de9d7e3194faa09d1ff2370f19adee3b03360a4786cf15",
         "resize_pad": "2afb83023ccd03e1b366401ecb430645750818dd35d6fea9308a19a5b71e4ba5",
+        "resize_pad_mean": "73944473d99dc27d80d8b326ac4b6965962d62e1ddfd52c7720e8783db8249ba",
     }
+
+
+@pytest.mark.unit
+def test_mean_fill_leaves_the_padding_at_zero() -> None:
+    # A photo far from the box proportions: a wide band of the input is padding.
+    pixels: NDArray[np.uint8] = np.full((10, 40, 3), 200, dtype=np.uint8)
+    image = PreparedImage(b"photo", MediaType.JPEG, pixels)
+
+    black = preprocess("resize_pad", image, BOX)
+    neutral = preprocess("resize_pad_mean", image, BOX)
+
+    # The top row of the box is padding in both. Black normalizes to a value no real photo
+    # produces; the mean colour normalizes to the neutral zero.
+    # With this box mean and std, black lands exactly on -1; what matters is that it is far
+    # from the neutral zero a pretrained encoder expects where nothing was photographed.
+    assert float(black[:, 0, 0].max()) < -0.5
+    assert abs(float(neutral[:, 0, 0].max())) < 0.01
+    # The photo itself lands identically either way.
+    middle = neutral.shape[1] // 2
+    assert np.allclose(black[:, middle, :], neutral[:, middle, :])
