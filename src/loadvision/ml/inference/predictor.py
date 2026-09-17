@@ -1,6 +1,5 @@
 """LoadPredictor implementation backed by a model package."""
 
-import math
 from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
@@ -16,7 +15,7 @@ from loadvision.errors import LoadvisionError
 from loadvision.imaging.prepared_image import MediaType, PreparedImage
 from loadvision.imaging.preprocessing import preprocess
 from loadvision.ml.packaging.baseline_package import BASELINE_BACKBONE
-from loadvision.ml.packaging.manifest import Member, Postprocess, Runtime
+from loadvision.ml.packaging.manifest import Member, Runtime
 from loadvision.ml.packaging.model_package import ModelPackage, ModelPackageError
 
 _HEAD_KEYS: Final = frozenset({"mean", "scale", "weights", "intercept"})
@@ -107,16 +106,8 @@ class _LoadedMember:
     head: RidgeHead
 
 
-def _apply_postprocess(value: float, postprocess: Postprocess) -> float:
-    clipped = min(max(value, _MIN_LOAD_PCT), _MAX_LOAD_PCT)
-    if postprocess.round_to is not None:
-        # Python's round sends a half to the even neighbour, so with a step of 5 it would turn
-        # 12.5 into 10 but 17.5 into 20; here a half always goes up.
-        step = postprocess.round_to
-        clipped = math.floor(clipped / step + 0.5) * step
-    if postprocess.snap_100 is not None and clipped >= postprocess.snap_100:
-        clipped = _MAX_LOAD_PCT
-    return min(max(clipped, _MIN_LOAD_PCT), _MAX_LOAD_PCT)
+def _clip(value: float) -> float:
+    return min(max(value, _MIN_LOAD_PCT), _MAX_LOAD_PCT)
 
 
 class PackagePredictor:
@@ -134,10 +125,15 @@ class PackagePredictor:
             head cannot be read, or its preprocessing and head do not fit together. Every
             member predicts on a blank photo here, so an unknown preprocessing, a wrong
             parameter or a head for other features fails at load time, not on the first
-            request.
+            request. Also if the package has postprocessing steps, which are not applied yet.
     """
 
     def __init__(self, package: ModelPackage) -> None:
+        if package.manifest.postprocess:
+            # Applying the chain from the postprocessing registry is the ML side of task K5.
+            # Until it lands, a package that needs the chain must not answer without it.
+            names = ", ".join(step.name for step in package.manifest.postprocess)
+            raise ModelPackageError(f"postprocessing steps are not applied yet: {names}")
         self._package = package
         self._members = tuple(
             _LoadedMember(member=member, head=self._load_head(package, member))
@@ -197,6 +193,6 @@ class PackagePredictor:
         )
         spread = max(values) - min(values) if len(values) > 1 else None
         return Prediction(
-            load_pct=LoadPercent(_apply_postprocess(average, self._package.manifest.postprocess)),
+            load_pct=LoadPercent(_clip(average)),
             uncertainty=spread,
         )
