@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Final
 
-from loadvision.imaging.quality import brightness
+from loadvision.imaging.quality import ASPECT_DIGITS, aspect, brightness
 from loadvision.ml.data.manifest import Sample, load_split
 from loadvision.ml.pipeline.stage import RunContext, StageCheckError, StageResult
 from loadvision.ml.training.embedding_cache import read_image
@@ -111,7 +111,7 @@ def _describe(sample: Sample, split: str) -> dict[str, str]:
         "group_id": sample.group_id or "",
         "width": str(width),
         "height": str(height),
-        "aspect": f"{width / height:.4f}",
+        "aspect": f"{aspect(decoded):.{ASPECT_DIGITS}f}",
         "brightness": f"{brightness(decoded):.2f}",
     }
 

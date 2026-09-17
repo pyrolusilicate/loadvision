@@ -18,26 +18,37 @@ from loadvision.cli.paths import (
 from loadvision.ml.data.manifest import Sample
 from loadvision.ml.data.splits import Folds
 from loadvision.ml.evaluation.postprocess_search import CHAINS
+from tests import image_files
 from tests.settings_files import use_settings
 
 PHOTOS = 200
 FOLD_COUNT = 5
 
 
-def dataset() -> Dataset:
-    """Twenty labelled photos in ten scenes, two photos each, spread over five folds."""
+def dataset(photos_dir: Path) -> Dataset:
+    """Labelled photos in scenes of two, spread over five folds, with files on disk.
+
+    The photos are real, and half of them are proportioned like the population the conditional
+    postprocessing steps single out, so a chain that picks a curve by the frame has both
+    groups to work with.
+    """
+    photos_dir.mkdir(parents=True, exist_ok=True)
     # Up to 90, so adding five in the fake ensemble never runs into the clip at 100.
     labels = np.array([float((index * 13) % 91) for index in range(PHOTOS)])
-    samples = [
-        Sample(
-            image_id=f"img_{index:04d}",
-            path=Path(f"img_{index:04d}.jpg"),
-            sha256="a" * 64,
-            label=float(labels[index]),
-            group_id=f"grp_{index // 2}",
+    samples = []
+    for index in range(PHOTOS):
+        width, height = (75, 100) if index % 2 else (120, 100)
+        path = photos_dir / f"img_{index:04d}.jpg"
+        path.write_bytes(image_files.jpeg(width, height))
+        samples.append(
+            Sample(
+                image_id=f"img_{index:04d}",
+                path=path,
+                sha256="a" * 64,
+                label=float(labels[index]),
+                group_id=f"grp_{index // 2}",
+            )
         )
-        for index in range(PHOTOS)
-    ]
     folds = Folds(
         schema_version=1,
         created_at="2026-09-17T12:00:00Z",
@@ -61,7 +72,7 @@ def dataset() -> Dataset:
 def runs_dir(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     runs = tmp_path / "runs"
     use_settings(tmp_path, monkeypatch, runs={"dir": str(runs)})
-    data = dataset()
+    data = dataset(tmp_path / "photos")
     monkeypatch.setattr("loadvision.cli.commands.eval.dataset_of", lambda _data_dir: data)
     monkeypatch.setattr(
         "loadvision.cli.commands.eval.ensemble_predictions",

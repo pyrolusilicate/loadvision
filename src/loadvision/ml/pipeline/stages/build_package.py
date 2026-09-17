@@ -34,6 +34,7 @@ from loadvision.ml.packaging.model_package import (
     write_package,
 )
 from loadvision.ml.pipeline.stage import RunContext, StageCheckError, StageResult
+from loadvision.ml.pipeline.stages.build_manifest import MANIFEST_FILE as DATASET_TABLE
 from loadvision.ml.pipeline.stages.extract_embeddings import EMBEDDINGS_DIR
 from loadvision.ml.pipeline.stages.train_folds import OOF_FILE, Chain, read_facts
 from loadvision.ml.pipeline.stages.train_folds import Member as MemberSpec
@@ -387,6 +388,4 @@ def _git_commit() -> str:
 
 
 def _data_hash(ctx: RunContext) -> str:
-    from loadvision.ml.pipeline.stages.build_manifest import MANIFEST_FILE
-
-    return file_sha256(ctx.run_dir / MANIFEST_FILE)
+    return file_sha256(ctx.run_dir / DATASET_TABLE)

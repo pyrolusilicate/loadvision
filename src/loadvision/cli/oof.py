@@ -2,6 +2,7 @@
 
 import argparse
 import logging
+from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -11,12 +12,34 @@ from numpy.typing import NDArray
 from loadvision.cli.dataset import train_samples
 from loadvision.cli.errors import CommandError
 from loadvision.cli.paths import embeddings_cache
+from loadvision.imaging.quality import aspect
 from loadvision.ml.data.manifest import Sample
 from loadvision.ml.data.splits import Folds, read_folds
 from loadvision.ml.evaluation.ensemble import Member, ensemble_out_of_fold
 from loadvision.ml.pipeline.stages import DEFAULT_FOLDS
+from loadvision.ml.postprocess import ASPECT, Facts
+from loadvision.ml.training.embedding_cache import read_image
 
 _logger = logging.getLogger(__name__)
+
+
+def photo_facts(samples: Sequence[Sample]) -> Facts:
+    """Reads what conditional postprocessing steps look at, in the order of `samples`.
+
+    The pipeline takes these from the `manifest.csv` of its run; a sweep has no run, so it
+    decodes the photos itself. Both go through the same decoder and the same definition of
+    proportions, so a chain measured here behaves the same way inside the package.
+
+    Args:
+        samples: Photos, in prediction order.
+
+    Returns:
+        Fact name to one number per photo.
+
+    Raises:
+        LoadvisionError: If a photo cannot be decoded.
+    """
+    return {ASPECT: np.array([aspect(read_image(s.path)) for s in samples], dtype=np.float64)}
 
 
 @dataclass(frozen=True, slots=True)

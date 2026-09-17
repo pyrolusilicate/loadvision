@@ -317,12 +317,17 @@ def balance_report(
 
 
 def write_folds(path: Path, folds: Folds) -> None:
-    """Writes the file with sorted keys, so a rebuilt split gives a comparable diff."""
+    """Writes the file with sorted keys, so a rebuilt split gives a comparable diff.
+
+    The write goes through a temporary file and a rename, the way the run recorder writes its
+    summary: retraining rewrites this file on a running service, and a half-written split
+    would take the promotion gate and every comparison down with it.
+    """
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(
-        json.dumps(folds.as_dict(), ensure_ascii=False, indent=2, sort_keys=True) + "\n",
-        encoding="utf-8",
-    )
+    text = json.dumps(folds.as_dict(), ensure_ascii=False, indent=2, sort_keys=True) + "\n"
+    partial = path.with_name(f"{path.name}.partial")
+    partial.write_text(text, encoding="utf-8")
+    partial.replace(path)
 
 
 def read_folds(path: Path) -> Folds:
