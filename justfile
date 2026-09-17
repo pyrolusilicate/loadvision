@@ -22,6 +22,10 @@ check:
 hooks:
     git config core.hooksPath .githooks
 
+# Service in Docker: Postgres, migrations and the API on port 8000
+up:
+    docker compose up -d --build api
+
 # Local Postgres
 db-up:
     docker compose up -d postgres

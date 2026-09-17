@@ -1,0 +1,16 @@
+# The image needs only pyproject.toml, uv.lock, README.md, src, alembic.ini and configs.
+.git
+.venv
+.env
+data
+runs
+storage
+baseline
+docs
+tests
+scripts
+**/__pycache__
+.ruff_cache
+.pytest_cache
+.import_linter_cache
+.uv-cache
