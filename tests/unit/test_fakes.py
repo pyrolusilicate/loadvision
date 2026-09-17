@@ -6,7 +6,7 @@ import pytest
 from loadvision.domain.assessment import LoadPercent
 from loadvision.domain.model_version import ModelVersionStatus
 from loadvision.domain.shipment import ShipmentId
-from tests.builders import T0, make_image, make_model_version
+from tests.builders import T0, make_assessment, make_image, make_model_version
 from tests.fakes.clock import FixedClock, SequentialIds
 from tests.fakes.in_memory_db import InMemoryStore
 from tests.fakes.predictor import FakePredictor
@@ -52,6 +52,14 @@ def test_second_active_model_version_is_rejected_like_the_database_index() -> No
         uow.model_versions.add(make_model_version("v1", status=active, activated_at=T0))
         with pytest.raises(ValueError, match="already active"):
             uow.model_versions.add(make_model_version("v2", status=active, activated_at=T0))
+
+
+@pytest.mark.unit
+def test_repeated_assessment_id_is_rejected_like_the_primary_key() -> None:
+    with InMemoryStore().unit_of_work() as uow:
+        uow.assessments.add(make_assessment())
+        with pytest.raises(ValueError, match="already exists"):
+            uow.assessments.add(make_assessment(shipment_id=ShipmentId("RP-2")))
 
 
 @pytest.mark.unit
