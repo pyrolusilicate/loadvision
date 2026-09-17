@@ -14,6 +14,7 @@ from typing import Any, Final
 
 import numpy as np
 from numpy.typing import NDArray
+from scipy.interpolate import PchipInterpolator
 from sklearn.isotonic import IsotonicRegression
 
 from loadvision.ml.postprocess import (
@@ -46,6 +47,10 @@ _SNAP_LOW_GRID: Final = np.arange(0.0, 20.0, 0.5)
 _EXPAND_GRID: Final = np.arange(1.0, 2.51, 0.02)
 _MIN_BIN_SIZE: Final = 5
 _DEFAULT_BINS: Final = 16
+
+# Points a smoothed curve is stored at. Dense enough that the straight lines the service draws
+# between them are indistinguishable from the spline, so the service still needs only numpy.
+_SMOOTH_POINTS: Final = 101
 
 
 @dataclass(frozen=True, slots=True)
@@ -182,6 +187,36 @@ def _fit_median_bins(
     return {"bins": float(bins)}, [(np.array(centres), knots_out)]
 
 
+def _smooth_knots(knots_in: Loads, knots_out: Loads) -> Curve:
+    """Redraws a curve as a dense monotone spline through its own knots.
+
+    Binning leaves a staircase: every prediction inside one band gets the same answer, which
+    throws away the ordering the model found inside that band. A shape-preserving cubic spline
+    keeps the knots and fills the gaps smoothly, and cannot overshoot between them the way an
+    ordinary cubic would.
+    """
+    keep = np.concatenate(([True], np.diff(knots_in) > 0))
+    inputs, outputs = knots_in[keep], knots_out[keep]
+    if inputs.size < 2:
+        return knots_in, knots_out
+    grid = np.linspace(float(inputs[0]), float(inputs[-1]), _SMOOTH_POINTS)
+    return grid, clip(np.maximum.accumulate(PchipInterpolator(inputs, outputs)(grid)))
+
+
+def _smoothed(base: Fitter) -> Fitter:
+    """Runs a fitter that produces knots and replaces its staircase with a smooth curve."""
+
+    def fit(
+        predictions: Loads, labels: Loads, facts: Facts, params: Mapping[str, float]
+    ) -> Learned:
+        learned, curves = base(predictions, labels, facts, params)
+        if curves is None:
+            raise ValueError("smoothing needs a base step with a curve")
+        return learned, [_smooth_knots(knots_in, knots_out) for knots_in, knots_out in curves]
+
+    return fit
+
+
 def _aspect_groups(
     facts: Facts, params: Mapping[str, float], size: int
 ) -> tuple[Loads, float, float]:
@@ -232,8 +267,10 @@ FITTERS: Final[Mapping[str, Fitter]] = {
     "linear_expand": _fit_linear_expand,
     "isotonic": _fit_isotonic,
     "median_bins": _fit_median_bins,
+    "median_bins_smooth": _smoothed(_fit_median_bins),
     "isotonic_by_aspect": _fit_by_aspect(_fit_isotonic),
     "median_bins_by_aspect": _fit_by_aspect(_fit_median_bins),
+    "median_bins_smooth_by_aspect": _fit_by_aspect(_smoothed(_fit_median_bins)),
 }
 
 

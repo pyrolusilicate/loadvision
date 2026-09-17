@@ -114,17 +114,28 @@ APPLIERS: Final[Mapping[str, Builder]] = {
     "linear_expand": _build_linear_expand,
     "isotonic": _build_curve,
     "median_bins": _build_curve,
+    "median_bins_smooth": _build_curve,
     "isotonic_by_aspect": _build_curve_by_aspect,
     "median_bins_by_aspect": _build_curve_by_aspect,
+    "median_bins_smooth_by_aspect": _build_curve_by_aspect,
 }
 
 # Steps whose shape is learned and stored in a file next to the head.
 CURVE_STEPS: Final = frozenset(
-    {"isotonic", "median_bins", "isotonic_by_aspect", "median_bins_by_aspect"}
+    {
+        "isotonic",
+        "median_bins",
+        "median_bins_smooth",
+        "isotonic_by_aspect",
+        "median_bins_by_aspect",
+        "median_bins_smooth_by_aspect",
+    }
 )
 
 # Steps that pick their curve by a fact of the photo rather than by the prediction alone.
-CONDITIONAL_STEPS: Final = frozenset({"isotonic_by_aspect", "median_bins_by_aspect"})
+CONDITIONAL_STEPS: Final = frozenset(
+    {"isotonic_by_aspect", "median_bins_by_aspect", "median_bins_smooth_by_aspect"}
+)
 
 _ASPECT_GROUPS: Final = 2
 _USUAL_GROUP: Final = 0
