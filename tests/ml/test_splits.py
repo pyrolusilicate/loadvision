@@ -12,6 +12,8 @@ from loadvision.ml.data.splits import (
     balance_report,
     build_folds,
     check_covers,
+    check_unchanged,
+    extend_folds,
     label_bins,
     read_folds,
     write_folds,
@@ -184,3 +186,136 @@ def test_canonical_folds_match_the_real_dataset() -> None:
     assert all(len(seen) == 1 for seen in folds_of(folds, samples).values())
     sizes = Counter(folds.fold_indices(samples))
     assert min(sizes.values()) >= len(samples) // folds.n_folds - 1
+
+
+@pytest.mark.ml
+def test_a_photo_of_a_known_scene_joins_that_scene_fold() -> None:
+    samples = dataset()
+    folds = build_folds(samples, now=NOW, dedup=DEDUP)
+    extra = sample("img_005_new", 50.0, "grp_005")
+
+    extended = extend_folds(folds, [*samples, extra])
+
+    assert extended.fold_of("img_005_new") == folds.fold_of("img_005_0")
+
+
+@pytest.mark.ml
+def test_extending_never_moves_a_stored_row() -> None:
+    samples = dataset()
+    folds = build_folds(samples, now=NOW, dedup=DEDUP)
+    fresh = [sample(f"img_new_{i:02d}", float(i % 11 * 10), f"grp_new_{i:02d}") for i in range(30)]
+
+    extended = extend_folds(folds, [*samples, *fresh])
+
+    check_unchanged(folds, extended)
+    assert {i: extended.fold_of(i) for i in folds.images} == {
+        i: folds.fold_of(i) for i in folds.images
+    }
+    assert len(extended.images) == len(folds.images) + 30
+
+
+@pytest.mark.ml
+def test_extending_keeps_the_creation_time_and_the_seed() -> None:
+    samples = dataset()
+    folds = build_folds(samples, now=NOW, dedup=DEDUP, seed=3)
+    extra = sample("img_new", 40.0, "grp_new")
+
+    extended = extend_folds(folds, [*samples, extra])
+
+    # `created_at` records the primary split, so a later import must not touch it.
+    assert (extended.created_at, extended.seed) == (folds.created_at, folds.seed)
+
+
+@pytest.mark.ml
+def test_a_new_scene_goes_where_its_bin_is_thinnest() -> None:
+    samples = dataset()
+    folds = build_folds(samples, now=NOW, dedup=DEDUP)
+    bins = dict(zip([s.image_id for s in samples], label_bins(samples), strict=True))
+    counts = Counter(folds.fold_of(image_id) for image_id, value in bins.items() if value == 5)
+    thinnest = min(range(folds.n_folds), key=lambda fold: (counts[fold], fold))
+
+    extended = extend_folds(folds, [*samples, sample("img_new", 55.0, "grp_new")])
+
+    assert extended.fold_of("img_new") == thinnest
+
+
+@pytest.mark.ml
+def test_a_new_scene_stays_whole_and_is_placed_by_its_median_label() -> None:
+    samples = dataset()
+    folds = build_folds(samples, now=NOW, dedup=DEDUP)
+    scene = [
+        sample("img_a", 0.0, "grp_new"),
+        sample("img_b", 50.0, "grp_new"),
+        sample("img_c", 100.0, "grp_new"),
+    ]
+
+    extended = extend_folds(folds, [*samples, *scene])
+
+    placed = {extended.fold_of(item.image_id) for item in scene}
+    assert len(placed) == 1
+    # The median of 0, 50 and 100 is 50, so the scene is placed by bin 5, not by 0 or 100.
+    assert extended.fold_of("img_a") == extend_folds(
+        folds, [*samples, sample("img_probe", 50.0, "grp_new")]
+    ).fold_of("img_probe")
+
+
+@pytest.mark.ml
+def test_extending_is_deterministic() -> None:
+    samples = dataset()
+    folds = build_folds(samples, now=NOW, dedup=DEDUP)
+    fresh = [sample(f"img_new_{i}", float(i * 7 % 101), f"grp_new_{i}") for i in range(12)]
+
+    first = extend_folds(folds, [*samples, *fresh])
+    again = extend_folds(folds, [*reversed(fresh), *reversed(samples)])
+
+    assert first.as_dict() == again.as_dict()
+
+
+@pytest.mark.ml
+def test_a_stored_photo_missing_from_the_manifest_is_rejected() -> None:
+    samples = dataset()
+    folds = build_folds(samples, now=NOW, dedup=DEDUP)
+
+    with pytest.raises(ValueError, match="missing from the manifest"):
+        extend_folds(folds, samples[1:])
+
+
+@pytest.mark.ml
+def test_a_stored_photo_that_changed_scene_is_rejected() -> None:
+    samples = dataset()
+    folds = build_folds(samples, now=NOW, dedup=DEDUP)
+    renamed = [sample(samples[0].image_id, samples[0].label, "grp_999"), *samples[1:]]
+
+    with pytest.raises(ValueError, match="changed scene"):
+        extend_folds(folds, renamed)
+
+
+@pytest.mark.ml
+def test_check_unchanged_catches_a_moved_row() -> None:
+    samples = dataset()
+    folds = build_folds(samples, now=NOW, dedup=DEDUP)
+    moved = {image_id: scene for image_id, scene in folds.images.items()}
+    other = {name: (fold + 1) % folds.n_folds for name, fold in folds.scene_groups.items()}
+
+    with pytest.raises(ValueError, match="moved from fold"):
+        check_unchanged(folds, Folds(**{**folds.as_dict(), "scene_groups": other, "images": moved}))
+
+
+@pytest.mark.data
+@pytest.mark.skipif(not CANONICAL.is_file(), reason="canonical folds file is not built")
+def test_thirty_new_labels_leave_the_real_folds_alone() -> None:
+    samples = load_split(DATA_DIR, "train")
+    folds = read_folds(CANONICAL)
+    fresh = [
+        sample(f"img_confirmed_{i:02d}", float(i % 11 * 10), f"grp_confirmed_{i:02d}")
+        for i in range(30)
+    ]
+
+    extended = extend_folds(folds, [*samples, *fresh])
+
+    check_unchanged(folds, extended)
+    check_covers(extended, [*samples, *fresh])
+    assert len(extended.images) == len(samples) + 30
+    report = balance_report(extended, [*samples, *fresh])
+    # Invariants 4 and 5 are metrics when extending, not errors: the numbers go to the run.
+    assert report["fold_size_gap"] < 0.1

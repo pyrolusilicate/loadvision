@@ -27,6 +27,7 @@ from loadvision.ml.packaging.manifest import (
     Runtime,
 )
 from loadvision.ml.packaging.model_package import (
+    PACKAGE_OOF,
     ModelPackage,
     file_sha256,
     hash_package_files,
@@ -147,6 +148,12 @@ class BuildPackage:
                     weight,
                 )
             )
+
+        # The package carries the predictions it was measured by, so the gate can compare it
+        # with another version without refitting anything.
+        oof = root / PACKAGE_OOF
+        oof.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(ctx.run_dir / OOF_FILE, oof)
 
         steps = self._fitted_steps(ctx, root, train, labels, raw)
         ood = self._ood(root, pooled)
