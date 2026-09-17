@@ -172,6 +172,8 @@
       <xs:enumeration value="CORRUPTED_IMAGE"/>
       <xs:enumeration value="SHIPMENT_NOT_FOUND"/>
       <xs:enumeration value="ASSESSMENT_NOT_FOUND"/>
+      <xs:enumeration value="ROUTE_NOT_FOUND"/>
+      <xs:enumeration value="METHOD_NOT_ALLOWED"/>
       <xs:enumeration value="TRAINING_ALREADY_RUNNING"/>
       <xs:enumeration value="MODEL_VERSION_STATUS_CONFLICT"/>
       <xs:enumeration value="MODEL_NOT_READY"/>
