@@ -5,7 +5,12 @@
 ARG UV_VERSION=0.12.14
 ARG PYTHON_VERSION=3.12
 
-FROM ghcr.io/astral-sh/uv:${UV_VERSION}-python${PYTHON_VERSION}-trixie-slim AS build
+# Both stages start from Docker Hub's official image through Google's mirror, and uv comes from
+# PyPI: Docker Hub does not answer from Russian networks, and one registry instead of two (the uv
+# image lives on ghcr.io) halves the requests a flaky connection can fail.
+FROM mirror.gcr.io/library/python:${PYTHON_VERSION}-slim-trixie AS build
+ARG UV_VERSION
+RUN pip install --no-cache-dir "uv==${UV_VERSION}"
 ENV UV_COMPILE_BYTECODE=1 \
     UV_LINK_MODE=copy \
     UV_PYTHON_DOWNLOADS=never
@@ -19,7 +24,6 @@ COPY src ./src
 RUN --mount=type=cache,target=/root/.cache/uv \
     uv sync --locked --no-default-groups --group serve --no-editable
 
-# The same official image as on Docker Hub, which Russian networks often cannot reach.
 FROM mirror.gcr.io/library/python:${PYTHON_VERSION}-slim-trixie
 RUN useradd --create-home --uid 1000 loadvision
 WORKDIR /app
