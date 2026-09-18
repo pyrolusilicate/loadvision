@@ -6,8 +6,7 @@ import uuid
 
 from loadvision.application.training_jobs import DEFAULT_LIMIT, StartTraining
 from loadvision.cli.database import unit_of_work_factory
-from loadvision.cli.values import short_utc
-from loadvision.domain.timestamps import utc_now
+from loadvision.domain.timestamps import format_utc_seconds, utc_now
 from loadvision.domain.training_job import TrainingJob, TrainingMode
 
 _logger = logging.getLogger(__name__)
@@ -86,7 +85,7 @@ def list_jobs(args: argparse.Namespace) -> int:
             "%-38s%-12s%-22s%-24s%s",
             job.id,
             job.status.value,
-            short_utc(job.created_at),
+            format_utc_seconds(job.created_at),
             _result(job),
             _gate(job),
         )

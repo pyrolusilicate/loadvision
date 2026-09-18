@@ -10,8 +10,8 @@ from loadvision.cli.database import unit_of_work_factory
 from loadvision.cli.errors import CommandError
 from loadvision.cli.options import add_data_option
 from loadvision.cli.provenance import dataset_hash, git_commit
-from loadvision.cli.values import short_utc, version_of
-from loadvision.domain.timestamps import utc_now
+from loadvision.cli.values import version_of
+from loadvision.domain.timestamps import format_utc_seconds, utc_now
 from loadvision.ml.inference.predictor import PackagePredictor
 from loadvision.ml.packaging.baseline_package import build_baseline_package
 from loadvision.ml.packaging.model_package import ModelPackage
@@ -219,7 +219,7 @@ def list_versions(_args: argparse.Namespace) -> int:
             "%-24s%-12s%-22s%s",
             version.version.value,
             version.status.value,
-            short_utc(version.created_at),
-            "-" if version.activated_at is None else short_utc(version.activated_at),
+            format_utc_seconds(version.created_at),
+            "-" if version.activated_at is None else format_utc_seconds(version.activated_at),
         )
     return 0
