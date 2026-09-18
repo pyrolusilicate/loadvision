@@ -19,6 +19,8 @@ class ErrorCode(StrEnum):
     CORRUPTED_IMAGE = "CORRUPTED_IMAGE"
     SHIPMENT_NOT_FOUND = "SHIPMENT_NOT_FOUND"
     ASSESSMENT_NOT_FOUND = "ASSESSMENT_NOT_FOUND"
+    MODEL_VERSION_NOT_FOUND = "MODEL_VERSION_NOT_FOUND"
+    TRAINING_JOB_NOT_FOUND = "TRAINING_JOB_NOT_FOUND"
     ROUTE_NOT_FOUND = "ROUTE_NOT_FOUND"
     METHOD_NOT_ALLOWED = "METHOD_NOT_ALLOWED"
     TRAINING_ALREADY_RUNNING = "TRAINING_ALREADY_RUNNING"
@@ -98,6 +100,17 @@ ERROR_CATALOG: Final[Mapping[ErrorCode, ErrorSpec]] = MappingProxyType(
             404,
             "Оценка с таким идентификатором не найдена.",
             "Возьмите идентификатор из ответа на оценку фото или из истории перевозки.",
+        ),
+        ErrorCode.MODEL_VERSION_NOT_FOUND: ErrorSpec(
+            404,
+            "Версия модели с таким именем не зарегистрирована.",
+            "Список версий и их статусы возвращает GET /api/v1/models.",
+        ),
+        ErrorCode.TRAINING_JOB_NOT_FOUND: ErrorSpec(
+            404,
+            "Задача дообучения с таким идентификатором не найдена.",
+            "Возьмите идентификатор из ответа на POST /api/v1/training-jobs "
+            "или из GET /api/v1/training-jobs.",
         ),
         ErrorCode.ROUTE_NOT_FOUND: ErrorSpec(
             404,

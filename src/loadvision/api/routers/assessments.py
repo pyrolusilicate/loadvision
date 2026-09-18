@@ -1,12 +1,11 @@
 """Routes for photo assessments."""
 
-from uuid import UUID
-
 from fastapi import APIRouter
 from starlette.concurrency import run_in_threadpool
 from starlette.requests import Request
 from starlette.responses import Response
 
+from loadvision.api.path_params import uuid_from_path
 from loadvision.api.services import request_id_of, services_of
 from loadvision.api.xml.parser import check_content_type, parse_document
 from loadvision.api.xml.response import xml_response
@@ -15,24 +14,6 @@ from loadvision.application.assess_photo import AssessPhotoRequest
 from loadvision.errors import ErrorCode, LoadvisionError
 
 router = APIRouter()
-
-
-def assessment_id_from_path(text: str) -> UUID:
-    """Reads an assessment id from a URL path.
-
-    Only the canonical form, in any letter case, is accepted: `UUID` also parses braces and a
-    ``urn:uuid:`` prefix, which would give one assessment several addresses.
-
-    Raises:
-        LoadvisionError: `ASSESSMENT_NOT_FOUND` for anything else; no assessment has such an id.
-    """
-    try:
-        assessment_id = UUID(text)
-    except ValueError:
-        assessment_id = None
-    if assessment_id is None or str(assessment_id) != text.lower():
-        raise LoadvisionError(ErrorCode.ASSESSMENT_NOT_FOUND, "malformed assessment id")
-    return assessment_id
 
 
 @router.post("/api/v1/assessments")
@@ -64,5 +45,7 @@ async def create_assessment(request: Request) -> Response:
 @router.get("/api/v1/assessments/{assessment_id}")
 def get_assessment(request: Request, assessment_id: str) -> Response:
     """Answers 200 with the assessment and the label of its photo, 404 for an unknown id."""
-    details = services_of(request).get_assessment(assessment_id_from_path(assessment_id))
+    details = services_of(request).get_assessment(
+        uuid_from_path(assessment_id, ErrorCode.ASSESSMENT_NOT_FOUND)
+    )
     return xml_response(assessment_document(details.assessment, details.image, label=details.label))

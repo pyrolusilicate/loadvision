@@ -11,9 +11,11 @@ from loadvision.domain.assessment import Assessment, LoadPercent
 from loadvision.domain.confirmed_label import ConfirmedLabel, LabelSource
 from loadvision.domain.model_version import ModelVersion, ModelVersionId, ModelVersionStatus
 from loadvision.domain.shipment import Shipment, ShipmentId
+from loadvision.domain.training_job import TrainingJob, TrainingMode
 from loadvision.imaging.prepared_image import MediaType, PreparedImage
 
 T0 = datetime(2026, 9, 16, 12, 0, tzinfo=UTC)
+FIRST_JOB_ID = UUID(int=1)
 
 
 def make_shipment(shipment_id: str = "RP-1", created_at: datetime = T0) -> Shipment:
@@ -55,6 +57,15 @@ def make_model_version(
         created_at=created_at,
         activated_at=activated_at,
     )
+
+
+def make_job(
+    job_id: UUID = FIRST_JOB_ID,
+    *,
+    mode: TrainingMode = TrainingMode.FAST,
+    at: datetime = T0,
+) -> TrainingJob:
+    return TrainingJob.queued(job_id=job_id, mode=mode, at=at)
 
 
 def make_label(

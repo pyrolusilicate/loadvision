@@ -3,8 +3,9 @@
 from collections.abc import Callable
 from dataclasses import dataclass
 
+from loadvision.application.model_versions import ActivateModel
 from loadvision.application.ports import Clock, LoadPredictor, UnitOfWorkFactory
-from loadvision.domain.model_version import ModelVersion, ModelVersionId, ModelVersionStatus
+from loadvision.domain.model_version import ModelVersionId
 from loadvision.errors import ErrorCode, LoadvisionError
 
 
@@ -30,6 +31,10 @@ class LoadServedModel:
     load_package: Callable[[ModelVersionId], LoadPredictor]
     initial_version: ModelVersionId
 
+    @property
+    def _activate(self) -> ActivateModel:
+        return ActivateModel(uow_factory=self.uow_factory, clock=self.clock)
+
     def __call__(self) -> LoadPredictor:
         """Loads the model.
 
@@ -51,17 +56,6 @@ class LoadServedModel:
                 f"package of {version.value} declares version {predictor.version.value}",
             )
         if active is None:
-            self._activate(version)
+            # The version the service starts with may be brand new, so it is registered here.
+            self._activate(version, register=True)
         return predictor
-
-    def _activate(self, version: ModelVersionId) -> None:
-        now = self.clock()
-        with self.uow_factory() as uow:
-            stored = uow.model_versions.get(version)
-            if stored is None:
-                stored = ModelVersion(
-                    version=version, status=ModelVersionStatus.CANDIDATE, created_at=now
-                )
-                uow.model_versions.add(stored)
-            uow.model_versions.update(stored.activate(now))
-            uow.commit()

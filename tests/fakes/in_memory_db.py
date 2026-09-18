@@ -9,6 +9,7 @@ from loadvision.domain.assessment import Assessment
 from loadvision.domain.confirmed_label import ConfirmedLabel
 from loadvision.domain.model_version import ModelVersion, ModelVersionId, ModelVersionStatus
 from loadvision.domain.shipment import Shipment, ShipmentId
+from loadvision.domain.training_job import TrainingJob, TrainingJobStatus
 
 
 class _Table[K, V]:
@@ -120,6 +121,44 @@ class InMemoryLabelRepository:
         return sorted(usable, key=lambda row: row.image_sha256)
 
 
+class InMemoryTrainingJobRepository:
+    def __init__(self, table: _Table[UUID, TrainingJob]) -> None:
+        self._table = table
+
+    def add(self, job: TrainingJob) -> None:
+        if self._table.get(job.id) is not None:
+            raise ValueError(f"training job {job.id} already exists")
+        self._table.put(job.id, job)
+
+    def get(self, job_id: UUID) -> TrainingJob | None:
+        return self._table.get(job_id)
+
+    def find_unfinished(self) -> TrainingJob | None:
+        return next(
+            iter(self._by_status(TrainingJobStatus.QUEUED, TrainingJobStatus.RUNNING)), None
+        )
+
+    def claim_next(self) -> TrainingJob | None:
+        # No locking here: the fake has no parallel workers, and the queue under load is
+        # tested against Postgres.
+        if self._by_status(TrainingJobStatus.RUNNING):
+            return None
+        return next(iter(self._by_status(TrainingJobStatus.QUEUED)), None)
+
+    def list_recent(self, limit: int) -> list[TrainingJob]:
+        newest = sorted(self._table.rows(), key=lambda row: (row.created_at, str(row.id)))
+        return list(reversed(newest))[:limit]
+
+    def update(self, job: TrainingJob) -> None:
+        if self._table.get(job.id) is None:
+            raise ValueError(f"training job {job.id} is not stored")
+        self._table.put(job.id, job)
+
+    def _by_status(self, *statuses: TrainingJobStatus) -> list[TrainingJob]:
+        rows = [row for row in self._table.rows() if row.status in statuses]
+        return sorted(rows, key=lambda row: (row.created_at, str(row.id)))
+
+
 class InMemoryModelVersionRepository:
     def __init__(self, table: _Table[ModelVersionId, ModelVersion]) -> None:
         self._table = table
@@ -165,6 +204,7 @@ class _Tables:
         self.images = _Table(store.images)
         self.model_versions = _Table(store.model_versions)
         self.labels = _Table(store.labels)
+        self.training_jobs = _Table(store.training_jobs)
 
     def commit(self) -> None:
         self.shipments.commit()
@@ -172,6 +212,7 @@ class _Tables:
         self.images.commit()
         self.model_versions.commit()
         self.labels.commit()
+        self.training_jobs.commit()
 
 
 class InMemoryUnitOfWork:
@@ -205,6 +246,10 @@ class InMemoryUnitOfWork:
     def labels(self) -> InMemoryLabelRepository:
         return InMemoryLabelRepository(self._open().labels)
 
+    @property
+    def training_jobs(self) -> InMemoryTrainingJobRepository:
+        return InMemoryTrainingJobRepository(self._open().training_jobs)
+
     def __enter__(self) -> Self:
         self._tables = _Tables(self._store)
         return self
@@ -235,6 +280,7 @@ class InMemoryStore:
         self.images: dict[str, ImageRecord] = {}
         self.model_versions: dict[ModelVersionId, ModelVersion] = {}
         self.labels: dict[str, ConfirmedLabel] = {}
+        self.training_jobs: dict[UUID, TrainingJob] = {}
 
     def unit_of_work(self) -> InMemoryUnitOfWork:
         return InMemoryUnitOfWork(self)

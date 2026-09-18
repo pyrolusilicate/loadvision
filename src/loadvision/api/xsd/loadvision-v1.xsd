@@ -161,6 +161,37 @@
     </xs:restriction>
   </xs:simpleType>
 
+  <xs:simpleType name="TrainingModeType">
+    <xs:annotation>
+      <xs:documentation>
+        Сколько пайплайна повторяет дообучение: fast — только головы на замороженных
+        энкодерах, full — весь пайплайн с дообучением энкодера.
+      </xs:documentation>
+    </xs:annotation>
+    <xs:restriction base="xs:string">
+      <xs:enumeration value="fast"/>
+      <xs:enumeration value="full"/>
+    </xs:restriction>
+  </xs:simpleType>
+
+  <xs:simpleType name="JobStatusType">
+    <xs:restriction base="xs:string">
+      <xs:enumeration value="queued"/>
+      <xs:enumeration value="running"/>
+      <xs:enumeration value="succeeded"/>
+      <xs:enumeration value="failed"/>
+    </xs:restriction>
+  </xs:simpleType>
+
+  <xs:simpleType name="RunIdType">
+    <xs:annotation>
+      <xs:documentation>Идентификатор прогона пайплайна; он же имя папки прогона.</xs:documentation>
+    </xs:annotation>
+    <xs:restriction base="xs:string">
+      <xs:pattern value="[A-Za-z0-9][A-Za-z0-9._-]{0,99}"/>
+    </xs:restriction>
+  </xs:simpleType>
+
   <xs:simpleType name="ErrorCodeType">
     <xs:restriction base="xs:string">
       <xs:enumeration value="INVALID_CONTENT_TYPE"/>
@@ -172,12 +203,45 @@
       <xs:enumeration value="CORRUPTED_IMAGE"/>
       <xs:enumeration value="SHIPMENT_NOT_FOUND"/>
       <xs:enumeration value="ASSESSMENT_NOT_FOUND"/>
+      <xs:enumeration value="MODEL_VERSION_NOT_FOUND"/>
+      <xs:enumeration value="TRAINING_JOB_NOT_FOUND"/>
       <xs:enumeration value="ROUTE_NOT_FOUND"/>
       <xs:enumeration value="METHOD_NOT_ALLOWED"/>
       <xs:enumeration value="TRAINING_ALREADY_RUNNING"/>
       <xs:enumeration value="MODEL_VERSION_STATUS_CONFLICT"/>
       <xs:enumeration value="MODEL_NOT_READY"/>
       <xs:enumeration value="MODEL_INFERENCE_FAILED"/>
+      <xs:enumeration value="INTERNAL_ERROR"/>
+    </xs:restriction>
+  </xs:simpleType>
+
+  <xs:simpleType name="FailureCodeType">
+    <xs:annotation>
+      <xs:documentation>
+        Любой код каталога, включая те, что не становятся ответом клиенту: так задача
+        дообучения называет причину своего провала.
+      </xs:documentation>
+    </xs:annotation>
+    <xs:restriction base="xs:string">
+      <xs:enumeration value="INVALID_CONTENT_TYPE"/>
+      <xs:enumeration value="INVALID_XML"/>
+      <xs:enumeration value="INVALID_SHIPMENT_ID"/>
+      <xs:enumeration value="INVALID_ENCODING"/>
+      <xs:enumeration value="PAYLOAD_TOO_LARGE"/>
+      <xs:enumeration value="UNSUPPORTED_FORMAT"/>
+      <xs:enumeration value="CORRUPTED_IMAGE"/>
+      <xs:enumeration value="SHIPMENT_NOT_FOUND"/>
+      <xs:enumeration value="ASSESSMENT_NOT_FOUND"/>
+      <xs:enumeration value="MODEL_VERSION_NOT_FOUND"/>
+      <xs:enumeration value="TRAINING_JOB_NOT_FOUND"/>
+      <xs:enumeration value="ROUTE_NOT_FOUND"/>
+      <xs:enumeration value="METHOD_NOT_ALLOWED"/>
+      <xs:enumeration value="TRAINING_ALREADY_RUNNING"/>
+      <xs:enumeration value="MODEL_VERSION_STATUS_CONFLICT"/>
+      <xs:enumeration value="MODEL_NOT_READY"/>
+      <xs:enumeration value="MODEL_INFERENCE_FAILED"/>
+      <xs:enumeration value="STAGE_CHECK_FAILED"/>
+      <xs:enumeration value="MODEL_PACKAGE_INVALID"/>
       <xs:enumeration value="INTERNAL_ERROR"/>
     </xs:restriction>
   </xs:simpleType>
@@ -384,6 +448,67 @@
     <xs:attribute name="cvMae" type="NonNegativeDecimalType"/>
     <xs:attribute name="within10" type="PercentType"/>
   </xs:complexType>
+
+  <!-- POST /api/v1/training-jobs, GET /api/v1/training-jobs/{job_id} -->
+
+  <xs:element name="TrainingJobRequest">
+    <xs:annotation>
+      <xs:documentation>
+        Поставить дообучение на подтверждённых метках в очередь. Одновременно выполняется одна
+        задача: пока идёт другая, ответ — 409 с кодом TRAINING_ALREADY_RUNNING.
+      </xs:documentation>
+    </xs:annotation>
+    <xs:complexType>
+      <xs:sequence>
+        <xs:element name="Mode" type="TrainingModeType" minOccurs="0">
+          <xs:annotation>
+            <xs:documentation>По умолчанию fast: только головы, минуты счёта.</xs:documentation>
+          </xs:annotation>
+        </xs:element>
+      </xs:sequence>
+    </xs:complexType>
+  </xs:element>
+
+  <xs:element name="TrainingJob" type="TrainingJobType"/>
+
+  <xs:complexType name="TrainingJobType">
+    <xs:annotation>
+      <xs:documentation>
+        Задача дообучения. Result появляется, когда задача завершилась; отклонённый гейтом
+        кандидат — это тоже успешно выполненная задача, просто с gatePassed="false".
+      </xs:documentation>
+    </xs:annotation>
+    <xs:sequence>
+      <xs:element name="Result" type="TrainingResultType" minOccurs="0"/>
+    </xs:sequence>
+    <xs:attribute name="id" type="UuidType" use="required"/>
+    <xs:attribute name="status" type="JobStatusType" use="required"/>
+    <xs:attribute name="mode" type="TrainingModeType" use="required"/>
+    <xs:attribute name="createdAt" type="UtcDateTimeType" use="required"/>
+    <xs:attribute name="startedAt" type="UtcDateTimeType"/>
+    <xs:attribute name="finishedAt" type="UtcDateTimeType"/>
+  </xs:complexType>
+
+  <xs:complexType name="TrainingResultType">
+    <xs:attribute name="runId" type="RunIdType"/>
+    <xs:attribute name="baseVersion" type="ModelVersionType"/>
+    <xs:attribute name="version" type="ModelVersionType"/>
+    <xs:attribute name="gatePassed" type="xs:boolean"/>
+    <xs:attribute name="errorCode" type="FailureCodeType"/>
+  </xs:complexType>
+
+  <!-- GET /api/v1/training-jobs -->
+
+  <xs:element name="TrainingJobs">
+    <xs:annotation>
+      <xs:documentation>Последние задачи, новые первыми.</xs:documentation>
+    </xs:annotation>
+    <xs:complexType>
+      <xs:sequence>
+        <xs:element name="TrainingJob" type="TrainingJobType" minOccurs="0" maxOccurs="unbounded"/>
+      </xs:sequence>
+    </xs:complexType>
+  </xs:element>
 
   <!-- GET /health -->
 

@@ -6,7 +6,18 @@ from typing import Any
 import pytest
 import yaml
 
-from loadvision.settings import CONFIG_PATH_ENV, DEFAULT_CONFIG_PATH
+from loadvision.settings import CONFIG_PATH_ENV, DEFAULT_CONFIG_PATH, Settings
+
+
+def read_settings(**sections: dict[str, Any]) -> Settings:
+    """Returns the repository settings with some sections replaced.
+
+    Args:
+        **sections: Sections to replace, such as `storage` or `training`.
+    """
+    settings = yaml.safe_load(DEFAULT_CONFIG_PATH.read_text(encoding="utf-8"))
+    settings.update(sections)
+    return Settings.model_validate(settings)
 
 
 def use_settings(

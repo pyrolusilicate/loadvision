@@ -1,3 +1,4 @@
+import logging
 import shutil
 import subprocess
 from dataclasses import dataclass
@@ -10,10 +11,12 @@ from loadvision.cli.main import main
 from loadvision.imaging.prepared_image import MediaType, PreparedImage
 from loadvision.ml.inference.predictor import PackagePredictor
 from loadvision.ml.packaging.model_package import ModelPackage
+from tests.fakes.in_memory_db import InMemoryStore
+from tests.memory_database import use_memory_database
 from tests.ml.test_dataset_manifest import write_split
+from tests.model_packages import build_numpy_package, write_baseline_weights
 from tests.settings_files import use_settings
 
-FEATURES = 233
 INITIAL_VERSION = "baseline-v0"
 
 
@@ -46,15 +49,7 @@ def workspace(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Workspace:
         model={"version": INITIAL_VERSION},
     )
 
-    baseline_dir = tmp_path / "baseline"
-    baseline_dir.mkdir()
-    np.savez(
-        baseline_dir / "model.npz",
-        mean=np.zeros(FEATURES),
-        scale=np.ones(FEATURES),
-        weights=np.zeros(FEATURES),
-        intercept=np.asarray(55.0),
-    )
+    baseline_dir = write_baseline_weights(tmp_path / "baseline", load=55.0)
 
     data_dir = tmp_path / "data"
     write_split(data_dir, "train", [("img_a", "10.0")], groups=[("img_a", "grp_1")])
@@ -200,3 +195,137 @@ def test_unknown_command_exits_with_usage_error() -> None:
     with pytest.raises(SystemExit) as raised:
         main(["model", "publish"])
     assert raised.value.code == 2
+
+
+@pytest.fixture
+def store(monkeypatch: pytest.MonkeyPatch) -> InMemoryStore:
+    return use_memory_database(monkeypatch, "loadvision.cli.commands.model")
+
+
+def versions(store: InMemoryStore) -> dict[str, str]:
+    return {version.value: stored.status.value for version, stored in store.model_versions.items()}
+
+
+@pytest.mark.unit
+def test_registered_package_lands_in_the_models_folder_and_the_database(
+    workspace: Workspace, store: InMemoryStore, tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    caplog.set_level(logging.INFO)
+    package = build_numpy_package(tmp_path / "run", load=42.0, version="v1")
+
+    assert main(["model", "register", str(package)]) == 0
+
+    copied = workspace.models_dir / "v1"
+    assert (copied / "manifest.json").is_file()
+    assert versions(store) == {"v1": "candidate"}
+    assert "loadvision model activate v1" in caplog.text
+
+
+@pytest.mark.unit
+def test_package_already_in_the_models_folder_is_registered_where_it_is(
+    workspace: Workspace, store: InMemoryStore
+) -> None:
+    assert workspace.build() == 0
+    before = sorted(path.name for path in (workspace.models_dir / INITIAL_VERSION).iterdir())
+
+    assert main(["model", "register", str(workspace.models_dir / INITIAL_VERSION)]) == 0
+
+    assert versions(store) == {INITIAL_VERSION: "candidate"}
+    assert (
+        sorted(path.name for path in (workspace.models_dir / INITIAL_VERSION).iterdir()) == before
+    )
+
+
+@pytest.mark.unit
+def test_another_package_of_the_same_version_is_refused(
+    workspace: Workspace, store: InMemoryStore, tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    assert workspace.build() == 0
+    other = build_numpy_package(tmp_path / "run", load=42.0, version=INITIAL_VERSION)
+
+    assert main(["model", "register", str(other)]) == 1
+
+    assert "already holds a package" in caplog.text
+    assert versions(store) == {}
+
+
+@pytest.mark.unit
+def test_package_the_service_could_not_load_is_not_registered(
+    workspace: Workspace, store: InMemoryStore, tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    package = build_numpy_package(tmp_path / "run", load=42.0, version="v1", features=10)
+
+    assert main(["model", "register", str(package)]) == 1
+
+    assert "features" in caplog.text
+    assert not (workspace.models_dir / "v1").exists()
+    assert versions(store) == {}
+
+
+@pytest.mark.unit
+def test_load_check_can_be_skipped(
+    workspace: Workspace, store: InMemoryStore, tmp_path: Path
+) -> None:
+    package = build_numpy_package(tmp_path / "run", load=42.0, version="v1", features=10)
+
+    assert main(["model", "register", str(package), "--skip-load-check"]) == 0
+
+    assert versions(store) == {"v1": "candidate"}
+
+
+@pytest.mark.unit
+def test_activation_retires_the_previous_version_and_rollback_brings_it_back(
+    workspace: Workspace, store: InMemoryStore, tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    caplog.set_level(logging.INFO)
+    for tag in ("v1", "v2"):
+        package = build_numpy_package(tmp_path / tag, load=42.0, version=tag)
+        assert main(["model", "register", str(package)]) == 0
+        assert main(["model", "activate", tag]) == 0
+
+    assert versions(store) == {"v1": "retired", "v2": "active"}
+
+    assert main(["model", "rollback"]) == 0
+
+    assert versions(store) == {"v1": "active", "v2": "retired"}
+    assert "rolled back to v1" in caplog.text
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("command", "message"),
+    [
+        (["model", "activate", "v404"], "not registered"),
+        (["model", "activate", "../outside"], "invalid version"),
+        (["model", "rollback"], "no retired version"),
+    ],
+    ids=["unknown", "malformed", "nothing-to-roll-back"],
+)
+def test_activation_problems_are_reported(
+    store: InMemoryStore, caplog: pytest.LogCaptureFixture, command: list[str], message: str
+) -> None:
+    assert main(command) == 1
+    assert message in caplog.text
+
+
+@pytest.mark.unit
+def test_list_shows_registered_versions(
+    workspace: Workspace, store: InMemoryStore, tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    caplog.set_level(logging.INFO)
+
+    assert main(["model", "list"]) == 0
+    assert "no versions registered yet" in caplog.text
+
+    package = build_numpy_package(tmp_path / "run", load=42.0, version="v1")
+    assert main(["model", "register", str(package)]) == 0
+    assert main(["model", "activate", "v1"]) == 0
+    caplog.clear()
+
+    assert main(["model", "list"]) == 0
+
+    header, row = (record.getMessage() for record in caplog.records)
+    assert header.split() == ["version", "status", "registered", "activated"]
+    # Four columns, so no value ran into the next one.
+    assert row.split()[:2] == ["v1", "active"]
+    assert len(row.split()) == 4

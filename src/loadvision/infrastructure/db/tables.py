@@ -28,11 +28,12 @@ from sqlalchemy import (
 )
 from sqlalchemy.dialects.postgresql import ARRAY, JSONB
 
-from loadvision.application.ports import TrainingMode
 from loadvision.domain.assessment import SHA256_HEX_PATTERN, ReviewReason
 from loadvision.domain.confirmed_label import LabelSource
 from loadvision.domain.model_version import MODEL_VERSION_PATTERN, ModelVersionStatus
+from loadvision.domain.operator import OPERATOR_LOGIN_PATTERN
 from loadvision.domain.shipment import SHIPMENT_ID_PATTERN
+from loadvision.domain.training_job import TrainingJobStatus, TrainingMode
 from loadvision.imaging.prepared_image import MediaType
 
 # Fixed constraint names: migrations refer to them, and autogenerate stays deterministic.
@@ -43,9 +44,6 @@ NAMING_CONVENTION: Final = {
     "ix": "ix_%(table_name)s_%(column_0_N_name)s",
     "ck": "ck_%(table_name)s_%(constraint_name)s",
 }
-
-# Values without a domain type yet; they move to the domain with TrainingJob (task 7.1).
-JOB_STATUSES: Final = ("queued", "running", "succeeded", "failed")
 
 metadata: Final = MetaData(naming_convention=NAMING_CONVENTION)
 
@@ -110,7 +108,8 @@ model_versions: Final = Table(
     Column("status", Text, nullable=False),
     _aware("created_at"),
     _aware("activated_at", nullable=True),
-    # Filled by `model register` (task 4.10); the domain version does not carry them yet.
+    # Empty for now: the service finds a package by its version tag. Kept for the metrics a
+    # models list may show; the domain version does not carry them.
     Column("package_uri", Text),
     Column("manifest", JSONB),
     Column("cv_mae", Double),
@@ -204,7 +203,7 @@ training_jobs: Final = Table(
     _aware("started_at", nullable=True),
     _aware("finished_at", nullable=True),
     CheckConstraint(_one_of("mode", TrainingMode), name="mode_known"),
-    CheckConstraint(_one_of("status", JOB_STATUSES), name="status_known"),
+    CheckConstraint(_one_of("status", TrainingJobStatus), name="status_known"),
     CheckConstraint("(started_at IS NULL) = (status = 'queued')", name="started_unless_queued"),
     CheckConstraint(
         "(finished_at IS NOT NULL) = (status IN ('succeeded', 'failed'))",
@@ -217,4 +216,36 @@ training_jobs: Final = Table(
         unique=True,
         postgresql_where=text("status = 'running'"),
     ),
+)
+
+operators: Final = Table(
+    "operators",
+    metadata,
+    Column("login", Text, primary_key=True),
+    Column("password_hash", Text, nullable=False),
+    Column("active", Boolean, nullable=False),
+    _aware("created_at"),
+    Column("failed_sign_ins", Integer, nullable=False),
+    _aware("first_failure_at", nullable=True),
+    CheckConstraint(_matches("login", OPERATOR_LOGIN_PATTERN), name="login_format"),
+    CheckConstraint("failed_sign_ins >= 0", name="failed_sign_ins_non_negative"),
+    # The same rule as in the domain Operator: a failure window starts with the first failure.
+    CheckConstraint(
+        "(failed_sign_ins = 0) = (first_failure_at IS NULL)", name="failure_window_matches_count"
+    ),
+)
+
+operator_sessions: Final = Table(
+    "operator_sessions",
+    metadata,
+    # The hash of the token, never the token itself: a copy of the table lets nobody in.
+    Column("token_hash", Text, primary_key=True),
+    Column("login", Text, ForeignKey(operators.c.login), nullable=False),
+    Column("csrf", Text, nullable=False),
+    _aware("created_at"),
+    _aware("expires_at"),
+    CheckConstraint(_matches("token_hash", SHA256_HEX_PATTERN), name="token_hash_format"),
+    CheckConstraint("expires_at > created_at", name="expires_after_created"),
+    # Disabling an account or changing its password ends every session of it.
+    Index("ix_operator_sessions_login", "login"),
 )

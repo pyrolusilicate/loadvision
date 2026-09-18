@@ -1,6 +1,8 @@
 import base64
+import logging
 import re
 from collections.abc import Iterator
+from typing import Any
 from uuid import UUID
 
 import pytest
@@ -277,6 +279,52 @@ def test_unknown_route_and_method_answer_in_xml(service: Service) -> None:
     response = service.client.get("/api/v1/assessments")
     assert_error(response, ErrorCode.METHOD_NOT_ALLOWED)
     assert response.headers["allow"] == "POST"
+
+
+def finished_requests(caplog: pytest.LogCaptureFixture) -> list[dict[str, Any]]:
+    """Fields of the `request.finished` lines, extras included."""
+    return [vars(r) for r in caplog.records if vars(r).get("event") == "request.finished"]
+
+
+@pytest.mark.api
+def test_every_request_ends_with_one_log_line(
+    service: Service, caplog: pytest.LogCaptureFixture
+) -> None:
+    caplog.set_level(logging.INFO)
+
+    response = post(service.client, request_body())
+
+    [line] = finished_requests(caplog)
+    assert (line["method"], line["path"], line["status"]) == ("POST", "/api/v1/assessments", 201)
+    assert line["request_id"] == response.headers["X-Request-ID"]
+    assert line["duration_ms"] >= 0
+    # The photo never reaches the log.
+    assert base64.b64encode(PHOTO).decode()[:40] not in caplog.text
+
+
+@pytest.mark.api
+def test_a_refused_body_is_logged_with_its_status(
+    service: Service, caplog: pytest.LogCaptureFixture
+) -> None:
+    caplog.set_level(logging.INFO)
+
+    post(service.client, request_body(image="A" * MAX_BODY_BYTES))
+
+    [line] = finished_requests(caplog)
+    assert line["status"] == 413
+
+
+@pytest.mark.api
+def test_an_unexpected_error_is_logged_as_a_server_error(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    caplog.set_level(logging.INFO)
+    service = make_service(FakePredictor(), storage=FailingImageStorage())
+
+    post(service.client, request_body())
+
+    [line] = finished_requests(caplog)
+    assert line["status"] == 500
 
 
 @pytest.mark.api
