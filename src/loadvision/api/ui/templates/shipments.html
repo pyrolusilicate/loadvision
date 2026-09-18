@@ -1,0 +1,31 @@
+{% extends "base.html" %}
+{% block title %}Перевозки{% endblock %}
+{% block content %}
+<form method="get" action="{{ ui }}/shipments" class="search">
+  <label for="number">Номер перевозки</label>
+  <input id="number" name="number" type="text" placeholder="RP-2026-000123"
+         value="{{ history.shipment_id.value if history else '' }}" {% if not history %}autofocus{% endif %}>
+  <button type="submit">Найти</button>
+</form>
+{% if history %}
+<h1>Перевозка {{ history.shipment_id.value }}</h1>
+<p class="muted">Оценок: {{ history.assessments|length }}. Текущая — самая новая.</p>
+<div class="scroll">
+<table>
+  <thead><tr><th>Фото</th><th>Время</th><th>Прогноз</th><th>Подтверждено</th><th>Модель</th></tr></thead>
+  <tbody>
+  {% for item in history.assessments %}
+  {% set a = item.assessment %}
+  <tr>
+    <td><a href="{{ ui }}/assessments/{{ a.id }}"><img class="thumb" src="{{ ui }}/photos/{{ a.image_sha256 }}" alt="" loading="lazy"></a></td>
+    <td><a href="{{ ui }}/assessments/{{ a.id }}">{{ a.created_at|time }}</a>{% if loop.first %} <span class="badge">текущая</span>{% endif %}</td>
+    <td class="num">{{ a.load_pct.value|load }}%</td>
+    <td>{% if item.label %}{% if item.label.unusable %}<span class="badge bad">непригодно</span>{% else %}{{ item.label.load_pct.value|load }}%{% endif %}{% else %}<span class="muted">нет</span>{% endif %}</td>
+    <td><code>{{ a.model_version.value }}</code></td>
+  </tr>
+  {% endfor %}
+  </tbody>
+</table>
+</div>
+{% endif %}
+{% endblock %}

@@ -1,0 +1,36 @@
+{% extends "base.html" %}
+{% block title %}Дообучение{% endblock %}
+{% block content %}
+{% set status_names = {'queued': 'в очереди', 'running': 'идёт', 'succeeded': 'готово', 'failed': 'ошибка'} %}
+{% set status_tones = {'queued': 'warn', 'running': 'warn', 'succeeded': 'ok', 'failed': 'bad'} %}
+<div class="row">
+  <h1>Дообучение</h1>
+  <form method="post" action="{{ ui }}/jobs">
+    <input type="hidden" name="csrf" value="{{ session.csrf }}">
+    <button type="submit" title="Головы на замороженных энкодерах, минуты счёта">Дообучить на подтверждённых метках</button>
+  </form>
+</div>
+<p class="muted">Гейт пропускает кандидата, если новых меток хватает и на общих фото он ошибается не больше
+  работающей версии с учётом шума. Пропущенного кандидата воркер включает сам; сервис переходит на него после
+  перезапуска.</p>
+{% if not jobs %}
+<p class="note">Задач ещё не было.</p>
+{% else %}
+<div class="scroll">
+<table>
+  <thead><tr><th>Поставлена</th><th>Статус</th><th>Завершена</th><th>Версия</th><th>Гейт</th></tr></thead>
+  <tbody>
+  {% for job in jobs %}
+  <tr>
+    <td>{{ job.created_at|time }}</td>
+    <td><span class="badge {{ status_tones[job.status.value] }}">{{ status_names[job.status.value] }}</span></td>
+    <td>{{ job.finished_at|time if job.finished_at else '—' }}</td>
+    <td>{% if job.result_version %}<code>{{ job.result_version.value }}</code>{% elif job.error_code %}<code>{{ job.error_code.value }}</code>{% else %}—{% endif %}</td>
+    <td>{% if job.gate_passed is none %}—{% elif job.gate_passed %}пропустил{% else %}отказал{% endif %}</td>
+  </tr>
+  {% endfor %}
+  </tbody>
+</table>
+</div>
+{% endif %}
+{% endblock %}

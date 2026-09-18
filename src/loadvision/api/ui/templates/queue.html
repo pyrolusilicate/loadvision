@@ -1,0 +1,33 @@
+{% extends "base.html" %}
+{% block title %}Очередь{% endblock %}
+{% block content %}
+<div class="row">
+  <h1>{% if show_all %}Последние оценки{% else %}Ждут проверки{% endif %}</h1>
+  <div class="tabs">
+    <a href="{{ ui }}/" class="{% if not show_all %}on{% endif %}">Без метки</a>
+    <a href="{{ ui }}/?all=true" class="{% if show_all %}on{% endif %}">Все</a>
+  </div>
+</div>
+{% if not items %}
+<p class="note">{% if show_all %}Оценок пока нет.{% else %}Всё проверено: у каждого фото есть метка.{% endif %}</p>
+{% else %}
+<div class="grid">
+  {% for item in items %}
+  {% set a = item.assessment %}
+  <a class="tile" href="{{ ui }}/assessments/{{ a.id }}">
+    <img src="{{ ui }}/photos/{{ a.image_sha256 }}" alt="Фото перевозки {{ a.shipment_id.value }}" loading="lazy">
+    <span class="tile-body">
+      <strong class="load">{{ a.load_pct.value|load }}%</strong>
+      <span>{{ a.shipment_id.value }}</span>
+      <span class="muted">{{ a.created_at|time }}</span>
+      {% if item.label %}
+        {% if item.label.unusable %}<span class="badge bad">непригодно</span>
+        {% else %}<span class="badge ok">подтверждено {{ item.label.load_pct.value|load }}%</span>{% endif %}
+      {% endif %}
+      {% if a.review_reasons %}<span class="badge warn">проверить</span>{% endif %}
+    </span>
+  </a>
+  {% endfor %}
+</div>
+{% endif %}
+{% endblock %}

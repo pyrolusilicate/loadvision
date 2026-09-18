@@ -1,6 +1,7 @@
 """FastAPI application factory: routes, error handlers and middleware around ready services."""
 
 from fastapi import FastAPI
+from starlette.responses import RedirectResponse, Response
 from starlette.types import Lifespan
 
 from loadvision.api.errors import install_error_handlers
@@ -15,9 +16,16 @@ from loadvision.api.routers import (
     training_jobs,
 )
 from loadvision.api.services import ApiServices
+from loadvision.api.ui.app import create_ui_app
+from loadvision.api.ui.services import UiServices
+from loadvision.api.ui.templates import UI_PREFIX
 
 
-def create_app(services: ApiServices, lifespan: Lifespan[FastAPI] | None = None) -> FastAPI:
+def create_app(
+    services: ApiServices,
+    lifespan: Lifespan[FastAPI] | None = None,
+    ui: UiServices | None = None,
+) -> FastAPI:
     """Builds the application around ready services.
 
     The service process wires the real database, storage and model package in `api/main.py`;
@@ -26,6 +34,7 @@ def create_app(services: ApiServices, lifespan: Lifespan[FastAPI] | None = None)
     Args:
         services: Use cases, the active model and HTTP settings.
         lifespan: What runs when the application starts and stops.
+        ui: Services of the operator pages, or None to serve the XML API alone.
 
     Returns:
         The application.
@@ -40,9 +49,17 @@ def create_app(services: ApiServices, lifespan: Lifespan[FastAPI] | None = None)
     app.include_router(training_jobs.router)
     app.include_router(schema.router)
     app.include_router(health.router)
+    if ui is not None:
+        app.mount(UI_PREFIX, create_ui_app(ui))
+        app.add_api_route("/", _open_ui, include_in_schema=False)
     app.add_middleware(
         RequestContextMiddleware,
         header=services.request_id_header,
         max_body_bytes=services.max_body_bytes,
     )
     return app
+
+
+async def _open_ui() -> Response:
+    # The bare address of the service is what a person types, so it opens the pages.
+    return RedirectResponse(f"{UI_PREFIX}/", status_code=303)
