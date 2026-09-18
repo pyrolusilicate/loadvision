@@ -5,11 +5,10 @@ from starlette.concurrency import run_in_threadpool
 from starlette.requests import Request
 from starlette.responses import Response
 
+from loadvision.api.path_params import version_from_path
 from loadvision.api.services import services_of
 from loadvision.api.xml.response import xml_response
 from loadvision.api.xml.training import model_document, models_document
-from loadvision.domain.model_version import ModelVersionId
-from loadvision.errors import ErrorCode, LoadvisionError
 
 router = APIRouter()
 
@@ -28,13 +27,7 @@ async def activate_model(request: Request, version: str) -> Response:
     Answers 200 with the active version. Errors: 404 `MODEL_VERSION_NOT_FOUND` for a version
     that is not registered, 409 `MODEL_VERSION_STATUS_CONFLICT` for one the gate rejected.
     """
-    active = await run_in_threadpool(services_of(request).activate_model, _version(version))
+    active = await run_in_threadpool(
+        services_of(request).activate_model, version_from_path(version)
+    )
     return xml_response(model_document(active))
-
-
-def _version(text: str) -> ModelVersionId:
-    try:
-        return ModelVersionId(text)
-    except ValueError as error:
-        # A tag that cannot exist names no registered version.
-        raise LoadvisionError(ErrorCode.MODEL_VERSION_NOT_FOUND, "malformed version") from error

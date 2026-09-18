@@ -43,3 +43,12 @@ def format_utc(value: datetime) -> str:
     """
     ensure_aware(value, "value")
     return value.astimezone(UTC).isoformat().replace("+00:00", "Z")
+
+
+def format_utc_seconds(value: datetime) -> str:
+    """Writes a timestamp like `format_utc`, but to the second: for tables and pages.
+
+    Raises:
+        ValueError: If `value` has no UTC offset.
+    """
+    return format_utc(value.replace(microsecond=0))
