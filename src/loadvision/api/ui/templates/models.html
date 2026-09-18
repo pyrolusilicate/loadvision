@@ -7,13 +7,12 @@
   <h1>Версии модели</h1>
   <form method="post" action="{{ ui }}/models/rollback">
     <input type="hidden" name="csrf" value="{{ session.csrf }}">
-    <button type="submit" class="ghost" title="Включить версию, которая работала до текущей">Откатить на предыдущую</button>
+    <button type="submit" class="ghost" title="Включить версию, которая работала до текущей">Вернуть предыдущую модель</button>
   </form>
 </div>
 <p class="muted">Включённая версия подгружается в фоне: пока она грузится, сервис отвечает прежней.</p>
 {% if model_failure %}
-<p class="note bad" role="alert">Последняя загрузка модели не удалась: <code>{{ model_failure }}</code>.
-  Сервис отвечает версией из шапки; без неё оценка фото вернёт 503.</p>
+<p class="note bad" role="alert">Последняя загрузка модели не удалась: <code>{{ model_failure }}</code>.</p>
 {% endif %}
 {% if not versions %}
 <p class="note">Версий пока нет. Сервис зарегистрирует начальную при первом запуске.</p>

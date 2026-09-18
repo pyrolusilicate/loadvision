@@ -3,8 +3,7 @@
 {% block content %}
 <section class="card narrow">
   <h1>Loadvision</h1>
-  <p class="muted">Проверка загрузки кузова по фото. Аккаунт выдаёт администратор командой
-    <code>loadvision operators add</code>.</p>
+  <p class="muted">Проверка загрузки кузова по фото.</p>
   {% if error %}<p class="note bad" role="alert">{{ error }}</p>{% endif %}
   <form method="post" action="{{ ui }}/login" class="stack">
     <input type="hidden" name="next" value="{{ next }}">
