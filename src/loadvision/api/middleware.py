@@ -1,6 +1,8 @@
-"""Request id and body size limit middleware; request logging comes with structlog (4.4)."""
+"""Request id, body size limit and one log line per request."""
 
+import logging
 import re
+import time
 import uuid
 from typing import Final
 
@@ -9,19 +11,26 @@ from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
 from loadvision.api.errors import error_response
 from loadvision.errors import ErrorCode
+from loadvision.observability.events import Event
 
 # Repeated in the XSD as RequestIdType; tests/contract/test_xsd.py checks both are the same.
 REQUEST_ID_PATTERN: Final = "[A-Za-z0-9._-]{1,128}"
 
 _REQUEST_ID_RE: Final = re.compile(REQUEST_ID_PATTERN)
+# Status of a request whose exception is answered by the server error handler outside.
+_UNHANDLED_STATUS: Final = 500
+
+_logger = logging.getLogger(__name__)
 
 
 class RequestContextMiddleware:
-    """Gives every request an id and refuses a body over the limit before the app reads it.
+    """Gives every request an id, refuses a body over the limit and logs how the request went.
 
     A client id in the header is kept if it matches `REQUEST_ID_PATTERN`, otherwise a new one
     is issued; either way the response carries it in the same header. The body is read into
-    memory up to the limit, so a route never sees a partial body.
+    memory up to the limit, so a route never sees a partial body. Every request ends with one
+    `request.finished` line: id, method, path, status and time. The body itself never reaches
+    the log, because a photo in base64 would fill it.
 
     Args:
         app: The wrapped application.
@@ -41,12 +50,46 @@ class RequestContextMiddleware:
         headers = Headers(scope=scope)
         request_id = self._request_id(headers.get(self._header))
         scope.setdefault("state", {})["request_id"] = request_id
+        started = time.perf_counter()
+        status: int | None = None
 
         async def send_with_id(message: Message) -> None:
+            nonlocal status
             if message["type"] == "http.response.start":
                 MutableHeaders(scope=message)[self._header] = request_id
+                status = message["status"]
             await send(message)
 
+        try:
+            await self._handle(scope, receive, send_with_id, request_id, headers)
+        except Exception:
+            status = _UNHANDLED_STATUS
+            raise
+        finally:
+            _logger.info(
+                "%s %s %s",
+                scope["method"],
+                scope["path"],
+                status,
+                extra={
+                    "event": Event.REQUEST_FINISHED.value,
+                    "request_id": request_id,
+                    "method": scope["method"],
+                    "path": scope["path"],
+                    # None when the client went away before an answer was sent.
+                    "status": status,
+                    "duration_ms": round((time.perf_counter() - started) * 1000),
+                },
+            )
+
+    async def _handle(
+        self,
+        scope: Scope,
+        receive: Receive,
+        send_with_id: Send,
+        request_id: str,
+        headers: Headers,
+    ) -> None:
         if self._declared_too_large(headers.get("content-length")):
             await error_response(ErrorCode.PAYLOAD_TOO_LARGE, request_id)(
                 scope, receive, send_with_id

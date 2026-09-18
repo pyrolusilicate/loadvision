@@ -33,6 +33,7 @@ from loadvision.infrastructure.storage.local_storage import LocalImageStorage
 from loadvision.ml.inference.active_model import ActiveModel
 from loadvision.ml.inference.predictor import PackagePredictor
 from loadvision.ml.packaging.model_package import ModelPackage
+from loadvision.observability.logging import configure_logging
 from loadvision.settings import Settings, database_url, load_settings
 
 
@@ -49,7 +50,9 @@ def create_service_app() -> FastAPI:
         pydantic.ValidationError: If a setting is missing, unknown or out of range.
         ValueError: If `model.version` is not a valid version tag.
     """
-    return build_service_app(load_settings(), create_database_engine(database_url()))
+    settings = load_settings()
+    configure_logging(settings.logging.format, settings.logging.level)
+    return build_service_app(settings, create_database_engine(database_url()))
 
 
 def build_service_app(settings: Settings, engine: Engine) -> FastAPI:

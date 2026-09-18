@@ -30,6 +30,7 @@ from loadvision.infrastructure.db.session import PostgresUnitOfWork, create_data
 from loadvision.infrastructure.storage.local_storage import LocalImageStorage
 from loadvision.ml.packaging.model_store import place_package
 from loadvision.ml.training.runner import PipelineTrainingRunner
+from loadvision.observability.logging import configure_logging
 from loadvision.settings import Settings, database_url, load_settings
 
 _logger = logging.getLogger(__name__)
@@ -50,9 +51,8 @@ def main(argv: Sequence[str] | None = None) -> int:
     )
     parser.add_argument("--once", action="store_true", help="run one job, then exit")
     args = parser.parse_args(argv)
-    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
-
     settings = load_settings()
+    configure_logging(settings.logging.format, settings.logging.level)
     engine = create_database_engine(database_url())
     try:
         run_job = build_worker(settings, engine)
@@ -182,7 +182,7 @@ class ActivePackageRunner:
             config=self._config,
             data_dir=training.data_dir,
             runs_dir=self._settings.runs.dir,
-            cache_dir=self._settings.runs.dir / "cache",
+            cache_dir=self._settings.runs.cache_dir,
             storage=self._storage,
             clock=utc_now,
             active_package=active,

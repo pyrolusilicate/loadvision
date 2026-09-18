@@ -28,4 +28,5 @@ ENV PATH="/app/.venv/bin:${PATH}" \
     PYTHONUNBUFFERED=1
 USER loadvision
 EXPOSE 8000
-CMD ["uvicorn", "--factory", "loadvision.api.main:create_service_app", "--host", "0.0.0.0", "--port", "8000"]
+# The service writes its own line for every request, with the request id; uvicorn's would repeat it.
+CMD ["uvicorn", "--factory", "loadvision.api.main:create_service_app", "--host", "0.0.0.0", "--port", "8000", "--no-access-log"]
