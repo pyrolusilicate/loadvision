@@ -3,15 +3,12 @@
 import argparse
 import logging
 import uuid
-from datetime import datetime
-from typing import Final
 
-from loadvision.application.start_training import StartTraining
+from loadvision.application.training_jobs import DEFAULT_LIMIT, StartTraining
 from loadvision.cli.database import unit_of_work_factory
-from loadvision.domain.timestamps import format_utc, utc_now
+from loadvision.cli.values import short_utc
+from loadvision.domain.timestamps import utc_now
 from loadvision.domain.training_job import TrainingJob, TrainingMode
-
-DEFAULT_LIMIT: Final = 10
 
 _logger = logging.getLogger(__name__)
 
@@ -89,7 +86,7 @@ def list_jobs(args: argparse.Namespace) -> int:
             "%-38s%-12s%-22s%-24s%s",
             job.id,
             job.status.value,
-            _time(job.created_at),
+            short_utc(job.created_at),
             _result(job),
             _gate(job),
         )
@@ -106,7 +103,3 @@ def _gate(job: TrainingJob) -> str:
     if job.gate_passed is None:
         return "-"
     return "passed" if job.gate_passed else "rejected"
-
-
-def _time(value: datetime) -> str:
-    return format_utc(value.replace(microsecond=0))

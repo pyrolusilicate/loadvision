@@ -9,7 +9,7 @@ from sqlalchemy import Engine
 from loadvision.application.model_versions import ActivateModel, RegisterModel
 from loadvision.application.ports import UnitOfWorkFactory
 from loadvision.application.run_training_job import RunTrainingJob
-from loadvision.application.start_training import StartTraining
+from loadvision.application.training_jobs import StartTraining
 from loadvision.domain.model_version import ModelVersionId
 from loadvision.domain.training_job import TrainingJob, TrainingJobStatus
 from loadvision.errors import ErrorCode, LoadvisionError

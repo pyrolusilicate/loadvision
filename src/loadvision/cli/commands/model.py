@@ -2,7 +2,6 @@
 
 import argparse
 import logging
-from datetime import datetime
 from pathlib import Path
 from typing import Final
 
@@ -11,8 +10,8 @@ from loadvision.cli.database import unit_of_work_factory
 from loadvision.cli.errors import CommandError
 from loadvision.cli.options import add_data_option
 from loadvision.cli.provenance import dataset_hash, git_commit
-from loadvision.domain.model_version import ModelVersionId
-from loadvision.domain.timestamps import format_utc, utc_now
+from loadvision.cli.values import short_utc, version_of
+from loadvision.domain.timestamps import utc_now
 from loadvision.ml.inference.predictor import PackagePredictor
 from loadvision.ml.packaging.baseline_package import build_baseline_package
 from loadvision.ml.packaging.model_package import ModelPackage
@@ -107,7 +106,7 @@ def build_baseline(args: argparse.Namespace) -> int:
     """
     settings = load_settings()
     tag = settings.model.version if args.version is None else args.version
-    version = _version(tag)
+    version = version_of(tag)
     out_dir = settings.storage.models_dir / version.value
     # A version is never rebuilt in place: the database and past assessments refer to it.
     if out_dir.exists():
@@ -168,16 +167,14 @@ def activate_version(args: argparse.Namespace) -> int:
         Exit code 0.
 
     Raises:
-        CommandError: If the version tag is invalid or the version is not registered.
-        LoadvisionError: If a rejected version is activated.
+        CommandError: If the version tag is invalid.
+        LoadvisionError: `MODEL_VERSION_NOT_FOUND` if the version is not registered;
+            `MODEL_VERSION_STATUS_CONFLICT` if it was rejected.
         RuntimeError: If `DATABASE_URL` is not set.
     """
-    version = _version(args.version)
+    version = version_of(args.version)
     with unit_of_work_factory() as uow_factory:
-        try:
-            active = ActivateModel(uow_factory=uow_factory, clock=utc_now)(version)
-        except ValueError as error:
-            raise CommandError(str(error)) from error
+        active = ActivateModel(uow_factory=uow_factory, clock=utc_now)(version)
     _logger.info("active version is %s", active.version.value)
     _logger.info("restart the service to load it")
     return 0
@@ -190,16 +187,13 @@ def rollback_version(_args: argparse.Namespace) -> int:
         Exit code 0.
 
     Raises:
-        CommandError: If no version has been retired yet.
-        LoadvisionError: If that version cannot be activated again.
+        LoadvisionError: `MODEL_VERSION_NOT_FOUND` if nothing has been retired yet;
+            `MODEL_VERSION_STATUS_CONFLICT` if that version cannot be activated again.
         RuntimeError: If `DATABASE_URL` is not set.
     """
     with unit_of_work_factory() as uow_factory:
         activate = ActivateModel(uow_factory=uow_factory, clock=utc_now)
-        try:
-            active = RollbackModel(uow_factory=uow_factory, activate=activate)()
-        except ValueError as error:
-            raise CommandError(str(error)) from error
+        active = RollbackModel(uow_factory=uow_factory, activate=activate)()
     _logger.info("rolled back to %s", active.version.value)
     _logger.info("restart the service to load it")
     return 0
@@ -225,19 +219,7 @@ def list_versions(_args: argparse.Namespace) -> int:
             "%-24s%-12s%-22s%s",
             version.version.value,
             version.status.value,
-            _time(version.created_at),
-            "-" if version.activated_at is None else _time(version.activated_at),
+            short_utc(version.created_at),
+            "-" if version.activated_at is None else short_utc(version.activated_at),
         )
     return 0
-
-
-def _version(tag: str) -> ModelVersionId:
-    try:
-        return ModelVersionId(tag)
-    except ValueError as error:
-        raise CommandError(f"invalid version {tag!r}: {error}") from error
-
-
-def _time(value: datetime) -> str:
-    # Seconds are enough in a table, and microseconds would not fit the column.
-    return format_utc(value.replace(microsecond=0))

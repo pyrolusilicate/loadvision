@@ -80,8 +80,9 @@ def test_activating_the_active_version_changes_nothing(
 
 @pytest.mark.unit
 def test_unregistered_version_is_not_activated(store: InMemoryStore, clock: FixedClock) -> None:
-    with pytest.raises(ValueError, match="not registered"):
+    with pytest.raises(LoadvisionError) as raised:
         activate(store, clock)(V1)
+    assert raised.value.code is ErrorCode.MODEL_VERSION_NOT_FOUND
     assert store.model_versions == {}
 
 
@@ -130,5 +131,6 @@ def test_rollback_without_a_retired_version_is_refused(
     activate(store, clock)(V1)
 
     rollback = RollbackModel(uow_factory=store.unit_of_work, activate=activate(store, clock))
-    with pytest.raises(ValueError, match="no retired version"):
+    with pytest.raises(LoadvisionError) as raised:
         rollback()
+    assert raised.value.code is ErrorCode.MODEL_VERSION_NOT_FOUND

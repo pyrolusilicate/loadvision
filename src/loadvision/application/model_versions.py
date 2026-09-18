@@ -5,6 +5,7 @@ from datetime import datetime
 
 from loadvision.application.ports import Clock, UnitOfWork, UnitOfWorkFactory
 from loadvision.domain.model_version import ModelVersion, ModelVersionId, ModelVersionStatus
+from loadvision.errors import ErrorCode, LoadvisionError
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
@@ -44,6 +45,22 @@ class RegisterModel:
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
+class ListModelVersions:
+    """Reads the registered versions, newest registration first.
+
+    Attributes:
+        uow_factory: Opens database transactions.
+    """
+
+    uow_factory: UnitOfWorkFactory
+
+    def __call__(self) -> list[ModelVersion]:
+        """Returns every registered version."""
+        with self.uow_factory() as uow:
+            return uow.model_versions.list_all()
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
 class ActivateModel:
     """Makes a version the one the service answers with; the previous one retires.
 
@@ -71,9 +88,9 @@ class ActivateModel:
             The active version.
 
         Raises:
-            ValueError: If the version is not registered and `register` is False.
-            LoadvisionError: `MODEL_VERSION_STATUS_CONFLICT` if the version was rejected by the
-                gate; a rejected version never answers.
+            LoadvisionError: `MODEL_VERSION_NOT_FOUND` if the version is not registered and
+                `register` is False; `MODEL_VERSION_STATUS_CONFLICT` if the version was
+                rejected by the gate, because a rejected version never answers.
         """
         now = self.clock()
         with self.uow_factory() as uow:
@@ -108,9 +125,9 @@ class RollbackModel:
             The version brought back.
 
         Raises:
-            ValueError: If no version has been retired yet, so there is nothing to go back to.
-            LoadvisionError: `MODEL_VERSION_STATUS_CONFLICT` if that version cannot be
-                activated again.
+            LoadvisionError: `MODEL_VERSION_NOT_FOUND` if no version has been retired yet, so
+                there is nothing to go back to; `MODEL_VERSION_STATUS_CONFLICT` if that version
+                cannot be activated again.
         """
         with self.uow_factory() as uow:
             retired = [
@@ -119,7 +136,9 @@ class RollbackModel:
                 if version.status is ModelVersionStatus.RETIRED and version.activated_at
             ]
         if not retired:
-            raise ValueError("no retired version to roll back to")
+            raise LoadvisionError(
+                ErrorCode.MODEL_VERSION_NOT_FOUND, "no retired version to roll back to"
+            )
         _, previous = max(retired, key=_activation_time)
         return self.activate(previous.version)
 
@@ -131,7 +150,9 @@ def _stored(
     if stored is not None:
         return stored
     if not register:
-        raise ValueError(f"model version {version.value} is not registered")
+        raise LoadvisionError(
+            ErrorCode.MODEL_VERSION_NOT_FOUND, f"{version.value} is not registered"
+        )
     registered = ModelVersion(version=version, status=ModelVersionStatus.CANDIDATE, created_at=now)
     uow.model_versions.add(registered)
     return registered

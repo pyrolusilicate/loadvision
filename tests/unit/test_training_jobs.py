@@ -3,7 +3,7 @@ from uuid import UUID
 
 import pytest
 
-from loadvision.application.start_training import StartTraining
+from loadvision.application.training_jobs import GetTrainingJob, ListTrainingJobs, StartTraining
 from loadvision.domain.training_job import TrainingJobStatus, TrainingMode
 from loadvision.errors import ErrorCode, LoadvisionError
 from tests.builders import T0
@@ -78,3 +78,42 @@ def test_a_new_job_is_queued_once_the_previous_one_ended() -> None:
 
     assert second.id == UUID(int=2)
     assert len(store.training_jobs) == 2
+
+
+@pytest.mark.unit
+def test_recent_jobs_come_back_newest_first() -> None:
+    store = InMemoryStore()
+    clock = FixedClock(T0)
+    ids = SequentialIds()
+    first = start(store, clock, ids)()
+    with store.unit_of_work() as uow:
+        uow.training_jobs.update(
+            first.started(at=T0, base_version=None).failed(
+                at=T0, run_id="run-1", error_code=ErrorCode.INTERNAL_ERROR
+            )
+        )
+        uow.commit()
+    clock.advance(timedelta(minutes=1))
+    second = start(store, clock, ids)()
+
+    jobs = ListTrainingJobs(uow_factory=store.unit_of_work)()
+
+    assert [job.id for job in jobs] == [second.id, first.id]
+    assert ListTrainingJobs(uow_factory=store.unit_of_work)(1) == [second]
+
+
+@pytest.mark.unit
+def test_a_job_is_read_by_id() -> None:
+    store = InMemoryStore()
+    job = start(store, FixedClock(T0), SequentialIds())()
+
+    assert GetTrainingJob(uow_factory=store.unit_of_work)(job.id) == job
+
+
+@pytest.mark.unit
+def test_an_unknown_job_is_not_found() -> None:
+    store = InMemoryStore()
+
+    with pytest.raises(LoadvisionError) as raised:
+        GetTrainingJob(uow_factory=store.unit_of_work)(UUID(int=404))
+    assert raised.value.code is ErrorCode.TRAINING_JOB_NOT_FOUND

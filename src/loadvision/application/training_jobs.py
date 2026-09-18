@@ -1,10 +1,14 @@
-"""Use case: put a retraining into the queue."""
+"""Use cases for the retraining queue: queue a job, read what the queue has been doing."""
 
 from dataclasses import dataclass
+from typing import Final
+from uuid import UUID
 
 from loadvision.application.ports import Clock, IdFactory, UnitOfWorkFactory
 from loadvision.domain.training_job import TrainingJob, TrainingMode
 from loadvision.errors import ErrorCode, LoadvisionError
+
+DEFAULT_LIMIT: Final = 20
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
@@ -46,4 +50,43 @@ class StartTraining:
             job = TrainingJob.queued(job_id=self.new_id(), mode=mode, at=self.clock())
             uow.training_jobs.add(job)
             uow.commit()
+        return job
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class ListTrainingJobs:
+    """Reads the recent jobs, newest first.
+
+    Attributes:
+        uow_factory: Opens database transactions.
+    """
+
+    uow_factory: UnitOfWorkFactory
+
+    def __call__(self, limit: int = DEFAULT_LIMIT) -> list[TrainingJob]:
+        """Returns at most `limit` jobs, newest first."""
+        with self.uow_factory() as uow:
+            return uow.training_jobs.list_recent(limit)
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class GetTrainingJob:
+    """Reads one job by id.
+
+    Attributes:
+        uow_factory: Opens database transactions.
+    """
+
+    uow_factory: UnitOfWorkFactory
+
+    def __call__(self, job_id: UUID) -> TrainingJob:
+        """Returns the job.
+
+        Raises:
+            LoadvisionError: `TRAINING_JOB_NOT_FOUND` if the job is unknown.
+        """
+        with self.uow_factory() as uow:
+            job = uow.training_jobs.get(job_id)
+        if job is None:
+            raise LoadvisionError(ErrorCode.TRAINING_JOB_NOT_FOUND, str(job_id))
         return job
