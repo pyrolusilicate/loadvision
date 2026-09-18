@@ -2,6 +2,7 @@
 
 from uuid import UUID
 
+from loadvision.domain.model_version import ModelVersionId
 from loadvision.errors import ErrorCode, LoadvisionError
 
 
@@ -28,3 +29,15 @@ def uuid_from_path(text: str, not_found: ErrorCode) -> UUID:
     if value is None or str(value) != text.lower():
         raise LoadvisionError(not_found, "malformed id")
     return value
+
+
+def version_from_path(text: str) -> ModelVersionId:
+    """Reads a model version tag from a URL path.
+
+    Raises:
+        LoadvisionError: `MODEL_VERSION_NOT_FOUND` for a malformed tag; no version has one.
+    """
+    try:
+        return ModelVersionId(text)
+    except ValueError as error:
+        raise LoadvisionError(ErrorCode.MODEL_VERSION_NOT_FOUND, "malformed version") from error

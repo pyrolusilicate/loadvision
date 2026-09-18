@@ -31,6 +31,7 @@ from sqlalchemy.dialects.postgresql import ARRAY, JSONB
 from loadvision.domain.assessment import SHA256_HEX_PATTERN, ReviewReason
 from loadvision.domain.confirmed_label import LabelSource
 from loadvision.domain.model_version import MODEL_VERSION_PATTERN, ModelVersionStatus
+from loadvision.domain.operator import OPERATOR_LOGIN_PATTERN
 from loadvision.domain.shipment import SHIPMENT_ID_PATTERN
 from loadvision.domain.training_job import TrainingJobStatus, TrainingMode
 from loadvision.imaging.prepared_image import MediaType
@@ -215,4 +216,36 @@ training_jobs: Final = Table(
         unique=True,
         postgresql_where=text("status = 'running'"),
     ),
+)
+
+operators: Final = Table(
+    "operators",
+    metadata,
+    Column("login", Text, primary_key=True),
+    Column("password_hash", Text, nullable=False),
+    Column("active", Boolean, nullable=False),
+    _aware("created_at"),
+    Column("failed_sign_ins", Integer, nullable=False),
+    _aware("first_failure_at", nullable=True),
+    CheckConstraint(_matches("login", OPERATOR_LOGIN_PATTERN), name="login_format"),
+    CheckConstraint("failed_sign_ins >= 0", name="failed_sign_ins_non_negative"),
+    # The same rule as in the domain Operator: a failure window starts with the first failure.
+    CheckConstraint(
+        "(failed_sign_ins = 0) = (first_failure_at IS NULL)", name="failure_window_matches_count"
+    ),
+)
+
+operator_sessions: Final = Table(
+    "operator_sessions",
+    metadata,
+    # The hash of the token, never the token itself: a copy of the table lets nobody in.
+    Column("token_hash", Text, primary_key=True),
+    Column("login", Text, ForeignKey(operators.c.login), nullable=False),
+    Column("csrf", Text, nullable=False),
+    _aware("created_at"),
+    _aware("expires_at"),
+    CheckConstraint(_matches("token_hash", SHA256_HEX_PATTERN), name="token_hash_format"),
+    CheckConstraint("expires_at > created_at", name="expires_after_created"),
+    # Disabling an account or changing its password ends every session of it.
+    Index("ix_operator_sessions_login", "login"),
 )
