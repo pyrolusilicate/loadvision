@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<TrainingJob xmlns="urn:loadvision:api:v1" id="145ee47a-0861-442e-a662-4459a94abfd9"
+             status="succeeded" mode="fast" createdAt="2026-09-20T09:21:23Z"
+             startedAt="2026-09-20T09:21:28Z" finishedAt="2026-09-20T09:29:11Z">
+  <Result runId="run_20260920_092128_ab12" baseVersion="2026-09-19.1" version="2026-09-20.1"
+          gatePassed="true"/>
+</TrainingJob>
