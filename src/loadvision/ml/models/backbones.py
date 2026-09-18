@@ -2,6 +2,7 @@
 
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Final, cast
 
 import numpy as np
@@ -152,12 +153,15 @@ class Backbone:
         return total / len(self.views)
 
 
-def load_backbone(name: str, device: str) -> Backbone:
+def load_backbone(name: str, device: str, weights: Path | None = None) -> Backbone:
     """Loads a pretrained encoder from the registry.
 
     Args:
         name: Registry key from `loadvision.ml.registry.BACKBONES`.
         device: Torch device, such as "mps", "cuda" or "cpu".
+        weights: Checkpoint file to read instead of downloading the one timm names. A model
+            package passes its own copy, so the service needs no network and runs exactly the
+            weights whose hash the package verified.
 
     Returns:
         Encoder ready for `embed_images`.
@@ -166,11 +170,15 @@ def load_backbone(name: str, device: str) -> Backbone:
         KeyError: If the name is not in the registry.
     """
     spec: BackboneSpec = BACKBONES[name]
+    # timm reads a file given this way through the same filters as a download, including the
+    # resize of position embeddings to the input box.
+    overlay = None if weights is None else {"file": str(weights)}
     module = timm.create_model(
         spec.timm_name,
         pretrained=True,
         num_classes=0,
         img_size=(spec.height, spec.width),
+        pretrained_cfg_overlay=overlay,
     )
     module.eval().to(device)
     for parameter in module.parameters():

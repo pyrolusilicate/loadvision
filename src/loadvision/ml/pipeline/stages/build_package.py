@@ -1,6 +1,7 @@
 """Stage that packs the trained ensemble into the model package the service loads."""
 
 import csv
+import os
 import shutil
 import subprocess
 from collections.abc import Mapping, Sequence
@@ -17,6 +18,7 @@ from loadvision.ml.data.manifest import load_split
 from loadvision.ml.evaluation.metrics import mae_by_range, summary
 from loadvision.ml.inference.ood import OodReference
 from loadvision.ml.models.backbones import Backbone, load_backbone
+from loadvision.ml.packaging.checkpoints import place_checkpoint
 from loadvision.ml.packaging.manifest import (
     CvMetrics,
     FoldsRef,
@@ -41,12 +43,12 @@ from loadvision.ml.pipeline.stages.train_folds import Member as MemberSpec
 from loadvision.ml.training.embedding_cache import embed_samples
 from loadvision.ml.training.head_trainer import fit_head
 from loadvision.ml.training.postprocess_fit import fit_chain
+from loadvision.settings import GIT_COMMIT_ENV
 
 PACKAGE_DIR: Final = "package"
 
 LICENSES_DIR: Final = Path("licenses")
 
-_CHECKPOINT_FILE: Final = "model.safetensors"
 _NOTICE_FILE: Final = "NOTICE.md"
 
 # Averaging ten neighbours: one nearest photo is noisy, a hundred washes the score out.
@@ -133,7 +135,7 @@ class BuildPackage:
             fit_head(spec.head, features, labels, spec.params).save(head_path)
             # Members that name the same checkpoint share its file, so an ensemble of four
             # carries two sets of weights rather than four copies of the same bytes.
-            checkpoint = weights.get(backbone.spec.timm_name) or _place_checkpoint(
+            checkpoint = weights.get(backbone.spec.timm_name) or place_checkpoint(
                 root, backbone.spec.timm_name
             )
             weights[backbone.spec.timm_name] = checkpoint
@@ -335,29 +337,6 @@ class BuildPackage:
         }
 
 
-def _place_checkpoint(root: Path, timm_name: str) -> Path:
-    """Copies the pretrained checkpoint into the package, the way `model pull` will.
-
-    The file is the untouched timm checkpoint, so a clean clone can fetch it again by name and
-    verify it against the hash the manifest records.
-
-    Args:
-        root: Package folder.
-        timm_name: Checkpoint name in the timm model hub.
-
-    Returns:
-        Path of the copy inside the package.
-    """
-    from huggingface_hub import hf_hub_download
-
-    source = Path(hf_hub_download(f"timm/{timm_name}", _CHECKPOINT_FILE))
-    target = root / "weights" / f"{timm_name}.safetensors"
-    target.parent.mkdir(parents=True, exist_ok=True)
-    if not target.is_file():
-        shutil.copyfile(source, target)
-    return target
-
-
 def _member(backbone: Backbone, head: Path, weights: Path, weight: float) -> Member:
     return Member.model_validate(
         {
@@ -381,9 +360,16 @@ def _read_raw(path: Path) -> NDArray[np.float64]:
 
 
 def _git_commit() -> str:
-    result = subprocess.run(
-        ["git", "rev-parse", "HEAD"], capture_output=True, text=True, check=False
-    )
+    # An image has no checkout and no git; its build records the commit in the environment.
+    built_from = os.environ.get(GIT_COMMIT_ENV)
+    if built_from:
+        return built_from
+    try:
+        result = subprocess.run(
+            ["git", "rev-parse", "HEAD"], capture_output=True, text=True, check=False
+        )
+    except FileNotFoundError:
+        return "0" * 40
     return result.stdout.strip() or "0" * 40
 
 

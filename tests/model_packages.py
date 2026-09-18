@@ -11,6 +11,7 @@ import numpy as np
 from loadvision.ml.packaging.baseline_package import build_baseline_package
 from loadvision.ml.packaging.manifest import Manifest
 from loadvision.ml.packaging.model_package import ModelPackage, hash_package_files, write_package
+from loadvision.ml.registry import BACKBONES
 
 HEAD_BYTES = b"ridge head"
 BASELINE_FEATURES = 233
@@ -111,3 +112,46 @@ def build_package(
     data = manifest_data(**overrides)
     data["files"] = hash_package_files(root)
     return write_package(root, Manifest.model_validate(data))
+
+
+# A package that travels without its encoder weights, and the hub that gives them back.
+DINOV2 = BACKBONES["dinov2_vitb14"].timm_name
+SIGLIP = BACKBONES["siglip2_vitb16_grid4x3"].timm_name
+WEIGHTS = {DINOV2: b"dinov2 weights", SIGLIP: b"siglip weights"}
+
+
+class Hub:
+    """Stands in for Hugging Face: serves checkpoint bytes and records what was asked for."""
+
+    def __init__(self, folder: Path, files: dict[str, bytes]) -> None:
+        self._folder = folder
+        self.files = dict(files)
+        self.asked: list[str] = []
+
+    def __call__(self, timm_name: str) -> Path:
+        self.asked.append(timm_name)
+        path = self._folder / f"{timm_name}.download"
+        path.write_bytes(self.files[timm_name])
+        return path
+
+
+def path_of(timm_name: str) -> str:
+    """Package path a built package gives the checkpoint."""
+    return f"weights/{timm_name}.safetensors"
+
+
+def travelling_package(root: Path) -> Path:
+    """A package of three torch members, two sharing one checkpoint, with its weights removed."""
+    members = [
+        member_data(backbone=backbone, runtime="torch", weights=path_of(timm_name), weight=weight)
+        for backbone, timm_name, weight in (
+            ("dinov2_vitb14", DINOV2, 0.4),
+            ("siglip2_vitb16_grid4x3", SIGLIP, 0.3),
+            ("siglip2_vitb16", SIGLIP, 0.3),
+        )
+    ]
+    files = {"head.npz": HEAD_BYTES} | {path_of(name): data for name, data in WEIGHTS.items()}
+    build_package(root, files, members=members)
+    for name in WEIGHTS:
+        (root / path_of(name)).unlink()
+    return root

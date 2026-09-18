@@ -7,14 +7,23 @@ from pathlib import Path
 import numpy as np
 import pytest
 
+from loadvision.cli.commands import model as model_commands
 from loadvision.cli.main import main
 from loadvision.imaging.prepared_image import MediaType, PreparedImage
 from loadvision.ml.inference.predictor import PackagePredictor
+from loadvision.ml.packaging.checkpoints import fetch_checkpoints
 from loadvision.ml.packaging.model_package import ModelPackage
 from tests.fakes.in_memory_db import InMemoryStore
 from tests.memory_database import use_memory_database
 from tests.ml.test_dataset_manifest import write_split
-from tests.model_packages import build_numpy_package, write_baseline_weights
+from tests.model_packages import (
+    DINOV2,
+    WEIGHTS,
+    Hub,
+    build_numpy_package,
+    travelling_package,
+    write_baseline_weights,
+)
 from tests.settings_files import use_settings
 
 INITIAL_VERSION = "baseline-v0"
@@ -329,3 +338,47 @@ def test_list_shows_registered_versions(
     # Four columns, so no value ran into the next one.
     assert row.split()[:2] == ["v1", "active"]
     assert len(row.split()) == 4
+
+
+def use_hub(monkeypatch: pytest.MonkeyPatch, hub: Hub) -> None:
+    """Makes `model fetch` download from the fake hub."""
+
+    def fetch(path: Path) -> list[str]:
+        return fetch_checkpoints(path, hub)
+
+    monkeypatch.setattr(model_commands, "fetch_checkpoints", fetch)
+
+
+@pytest.mark.unit
+def test_fetch_makes_a_travelling_package_whole(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    root = travelling_package(tmp_path / "package")
+    hub = Hub(tmp_path, WEIGHTS)
+    use_hub(monkeypatch, hub)
+
+    with caplog.at_level(logging.INFO):
+        code = main(["model", "fetch", str(root)])
+
+    assert code == 0
+    assert "package baseline-v0 is complete: every file matches its hash (2 downloaded)" in (
+        caplog.text
+    )
+    ModelPackage.load(root)
+
+
+@pytest.mark.unit
+def test_fetch_refuses_weights_that_changed_upstream_in_one_line(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    root = travelling_package(tmp_path / "package")
+    hub = Hub(tmp_path, WEIGHTS | {DINOV2: b"retrained upstream"})
+    use_hub(monkeypatch, hub)
+
+    with caplog.at_level(logging.INFO):
+        code = main(["model", "fetch", str(root)])
+
+    assert code == 1
+    [error] = [record for record in caplog.records if record.levelno >= logging.ERROR]
+    assert f"timm/{DINOV2} now has sha256" in error.getMessage()
+    assert error.exc_info is None

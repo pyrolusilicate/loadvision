@@ -15,6 +15,8 @@ from loadvision.imaging.validator import ImageLimits
 DATABASE_URL_ENV: Final = "DATABASE_URL"
 # Path of the settings file, for a deployment that keeps it outside the repository.
 CONFIG_PATH_ENV: Final = "LOADVISION_CONFIG"
+# Commit the code was built from, for an image that has no git checkout inside.
+GIT_COMMIT_ENV: Final = "LOADVISION_GIT_COMMIT"
 DEFAULT_CONFIG_PATH: Final = Path("configs/app.yaml")
 # Cache kept between runs, such as embeddings, inside the runs folder but outside every run.
 RUNS_CACHE_SUBDIR: Final = "cache"

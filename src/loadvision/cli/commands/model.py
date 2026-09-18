@@ -14,6 +14,7 @@ from loadvision.cli.values import version_of
 from loadvision.domain.timestamps import format_utc_seconds, utc_now
 from loadvision.ml.inference.predictor import PackagePredictor
 from loadvision.ml.packaging.baseline_package import build_baseline_package
+from loadvision.ml.packaging.checkpoints import fetch_checkpoints
 from loadvision.ml.packaging.model_package import ModelPackage
 from loadvision.ml.packaging.model_store import place_package
 from loadvision.settings import load_settings
@@ -67,12 +68,24 @@ def add_commands(groups: "argparse._SubParsersAction[argparse.ArgumentParser]") 
     )
     register.set_defaults(run=register_package)
 
+    fetch = commands.add_parser(
+        "fetch",
+        help="download the encoder weights a package lists but does not hold",
+        description=(
+            "Downloads every encoder checkpoint the manifest lists from Hugging Face and keeps it "
+            "only if its hash matches the manifest. A package travels without its gigabyte of "
+            "public weights; this makes it whole again."
+        ),
+    )
+    fetch.add_argument("package", type=Path, help="package folder")
+    fetch.set_defaults(run=fetch_weights)
+
     activate = commands.add_parser(
         "activate",
         help="make a registered version the one the service answers with",
         description=(
             "The previously active version retires, so `rollback` can bring it back. The "
-            "service picks the new version up when it starts."
+            "service switches to the new version within model.check_seconds."
         ),
     )
     activate.add_argument("version", help="registered version")
@@ -122,6 +135,29 @@ def build_baseline(args: argparse.Namespace) -> int:
         created_at=utc_now(),
     )
     _logger.info("built model package %s in %s", package.version.value, package.root)
+    return 0
+
+
+def fetch_weights(args: argparse.Namespace) -> int:
+    """Downloads the checkpoints a package misses, then verifies the whole package.
+
+    Returns:
+        Exit code 0.
+
+    Raises:
+        ModelPackageError: If the manifest is invalid, a downloaded checkpoint has another hash
+            than the manifest records, or the package still does not verify.
+        OSError: If a file cannot be written.
+    """
+    fetched = fetch_checkpoints(args.package)
+    for name in fetched:
+        _logger.info("fetched %s", name)
+    package = ModelPackage.load(args.package)
+    _logger.info(
+        "package %s is complete: every file matches its hash (%d downloaded)",
+        package.version.value,
+        len(fetched),
+    )
     return 0
 
 
