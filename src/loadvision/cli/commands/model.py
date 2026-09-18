@@ -135,10 +135,10 @@ def register_package(args: argparse.Namespace) -> int:
         Exit code 0.
 
     Raises:
-        CommandError: If the models folder already holds this version or it is registered.
+        CommandError: If the models folder already holds this version, it is registered, or
+            `DATABASE_URL` is not set.
         ModelPackageError: If the package is missing, invalid or not supported.
         OSError: If the package cannot be copied.
-        RuntimeError: If `DATABASE_URL` is not set.
     """
     package = ModelPackage.load(args.package)
     version = package.version
@@ -167,10 +167,9 @@ def activate_version(args: argparse.Namespace) -> int:
         Exit code 0.
 
     Raises:
-        CommandError: If the version tag is invalid.
+        CommandError: If the version tag is invalid or `DATABASE_URL` is not set.
         LoadvisionError: `MODEL_VERSION_NOT_FOUND` if the version is not registered;
             `MODEL_VERSION_STATUS_CONFLICT` if it was rejected.
-        RuntimeError: If `DATABASE_URL` is not set.
     """
     version = version_of(args.version)
     with unit_of_work_factory() as uow_factory:
@@ -189,7 +188,7 @@ def rollback_version(_args: argparse.Namespace) -> int:
     Raises:
         LoadvisionError: `MODEL_VERSION_NOT_FOUND` if nothing has been retired yet;
             `MODEL_VERSION_STATUS_CONFLICT` if that version cannot be activated again.
-        RuntimeError: If `DATABASE_URL` is not set.
+        CommandError: If `DATABASE_URL` is not set.
     """
     with unit_of_work_factory() as uow_factory:
         activate = ActivateModel(uow_factory=uow_factory, clock=utc_now)
@@ -206,7 +205,7 @@ def list_versions(_args: argparse.Namespace) -> int:
         Exit code 0.
 
     Raises:
-        RuntimeError: If `DATABASE_URL` is not set.
+        CommandError: If `DATABASE_URL` is not set.
     """
     with unit_of_work_factory() as uow_factory, uow_factory() as uow:
         versions = uow.model_versions.list_all()

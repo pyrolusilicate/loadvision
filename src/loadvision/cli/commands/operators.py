@@ -61,9 +61,8 @@ def add_operator(args: argparse.Namespace) -> int:
         Exit code 0.
 
     Raises:
-        CommandError: If the login is malformed or taken, or the passwords are too short or
-            differ.
-        RuntimeError: If `DATABASE_URL` is not set.
+        CommandError: If the login is malformed or taken, the passwords are too short or
+            differ, or `DATABASE_URL` is not set.
     """
     password = _new_password()
     with unit_of_work_factory() as uow_factory:
@@ -82,8 +81,8 @@ def set_password(args: argparse.Namespace) -> int:
         Exit code 0.
 
     Raises:
-        CommandError: If there is no such account, or the passwords are too short or differ.
-        RuntimeError: If `DATABASE_URL` is not set.
+        CommandError: If there is no such account, the passwords are too short or differ, or
+            `DATABASE_URL` is not set.
     """
     password = _new_password()
     with unit_of_work_factory() as uow_factory:
@@ -102,8 +101,7 @@ def disable_operator(args: argparse.Namespace) -> int:
         Exit code 0.
 
     Raises:
-        CommandError: If there is no such account.
-        RuntimeError: If `DATABASE_URL` is not set.
+        CommandError: If there is no such account or `DATABASE_URL` is not set.
     """
     with unit_of_work_factory() as uow_factory:
         try:
@@ -121,7 +119,7 @@ def list_operators(_args: argparse.Namespace) -> int:
         Exit code 0.
 
     Raises:
-        RuntimeError: If `DATABASE_URL` is not set.
+        CommandError: If `DATABASE_URL` is not set.
     """
     with unit_of_work_factory() as uow_factory:
         operators = ListOperators(uow_factory=uow_factory)()
