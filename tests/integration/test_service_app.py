@@ -87,6 +87,13 @@ def test_service_assesses_labels_and_reports_on_postgres(
         )
         read = client.get(f"/api/v1/assessments/{assessment_id}")
         shipment = client.get("/api/v1/shipments/RP-1")
+        models = client.get("/api/v1/models")
+        queued = client.post(
+            "/api/v1/training-jobs",
+            content=f'<TrainingJobRequest xmlns="{NAMESPACE}"/>'.encode(),
+            headers=XML,
+        )
+        jobs = client.get("/api/v1/training-jobs")
 
     assert (created.status_code, repeated.status_code, label.status_code) == (201, 200, 200)
     assert document(repeated).get("id") == assessment_id
@@ -94,6 +101,13 @@ def test_service_assesses_labels_and_reports_on_postgres(
     assert child(document(read), "ConfirmedLabel").get("loadPct") == "60.0"
     assert child(document(shipment), "Current").get("confirmedLoadPct") == "60.0"
     assert (settings.storage.images_dir / PHOTO_SHA256[:2] / PHOTO_SHA256).read_bytes() == PHOTO
+    # The version the service started with is registered and active, and the queue answers.
+    [model] = document(models).findall(f"{{{NAMESPACE}}}Model")
+    assert (model.get("version"), model.get("status")) == (VERSION, "active")
+    assert queued.status_code == 201
+    assert document(queued).get("status") == "queued"
+    [job] = document(jobs).findall(f"{{{NAMESPACE}}}TrainingJob")
+    assert job.get("id") == document(queued).get("id")
     with PostgresUnitOfWork(engine) as uow:
         active = uow.model_versions.get_active()
     assert active is not None

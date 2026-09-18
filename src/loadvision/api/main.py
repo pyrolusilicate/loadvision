@@ -18,8 +18,14 @@ from loadvision.application.assess_photo import AssessPhoto
 from loadvision.application.get_assessment import GetAssessment
 from loadvision.application.get_shipment import GetShipment
 from loadvision.application.load_served_model import LoadServedModel
+from loadvision.application.model_versions import ActivateModel, ListModelVersions
 from loadvision.application.ports import UnitOfWorkFactory
 from loadvision.application.submit_label import SubmitLabel
+from loadvision.application.training_jobs import (
+    GetTrainingJob,
+    ListTrainingJobs,
+    StartTraining,
+)
 from loadvision.domain.model_version import ModelVersionId
 from loadvision.domain.timestamps import utc_now
 from loadvision.infrastructure.db.session import PostgresUnitOfWork, create_database_engine
@@ -75,6 +81,11 @@ def build_service_app(settings: Settings, engine: Engine) -> FastAPI:
         get_assessment=GetAssessment(uow_factory=uow_factory),
         submit_label=SubmitLabel(uow_factory=uow_factory, clock=utc_now),
         get_shipment=GetShipment(uow_factory=uow_factory),
+        list_models=ListModelVersions(uow_factory=uow_factory),
+        activate_model=ActivateModel(uow_factory=uow_factory, clock=utc_now),
+        start_training=StartTraining(uow_factory=uow_factory, clock=utc_now, new_id=uuid.uuid4),
+        list_training_jobs=ListTrainingJobs(uow_factory=uow_factory),
+        get_training_job=GetTrainingJob(uow_factory=uow_factory),
         model=model,
         request_id_header=settings.api.request_id_header,
         max_body_bytes=settings.api.max_body_bytes,
