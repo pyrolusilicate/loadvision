@@ -17,6 +17,28 @@ BASELINE_FEATURES = 233
 _BUILT_AT = datetime(2026, 9, 16, 12, 0, tzinfo=UTC)
 
 
+def write_baseline_weights(folder: Path, *, load: float, features: int = BASELINE_FEATURES) -> Path:
+    """Writes the organizers' weight file with a head that predicts `load` for every photo.
+
+    Args:
+        folder: Folder to write `model.npz` into; created if missing.
+        load: What the head predicts.
+        features: Size the head expects; another number makes weights the service refuses.
+
+    Returns:
+        The folder, ready to be the baseline folder of a command.
+    """
+    folder.mkdir(parents=True, exist_ok=True)
+    np.savez(
+        folder / "model.npz",
+        mean=np.zeros(features),
+        scale=np.ones(features),
+        weights=np.zeros(features),
+        intercept=np.asarray(load),
+    )
+    return folder
+
+
 def build_numpy_package(
     root: Path, *, load: float, version: str = "baseline-v0", features: int = BASELINE_FEATURES
 ) -> Path:
@@ -31,15 +53,7 @@ def build_numpy_package(
     Returns:
         The package folder.
     """
-    baseline = root / "baseline"
-    baseline.mkdir(parents=True)
-    np.savez(
-        baseline / "model.npz",
-        mean=np.zeros(features),
-        scale=np.ones(features),
-        weights=np.zeros(features),
-        intercept=np.asarray(load),
-    )
+    baseline = write_baseline_weights(root / "baseline", load=load, features=features)
     package = root / "package"
     build_baseline_package(
         baseline,

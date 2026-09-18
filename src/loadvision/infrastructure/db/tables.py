@@ -107,7 +107,8 @@ model_versions: Final = Table(
     Column("status", Text, nullable=False),
     _aware("created_at"),
     _aware("activated_at", nullable=True),
-    # Filled by `model register` (task 4.10); the domain version does not carry them yet.
+    # Empty for now: the service finds a package by its version tag. Kept for the metrics a
+    # models list may show; the domain version does not carry them.
     Column("package_uri", Text),
     Column("manifest", JSONB),
     Column("cv_mae", Double),

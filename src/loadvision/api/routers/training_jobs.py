@@ -1,12 +1,11 @@
 """Routes for the retraining queue."""
 
-from uuid import UUID
-
 from fastapi import APIRouter
 from starlette.concurrency import run_in_threadpool
 from starlette.requests import Request
 from starlette.responses import Response
 
+from loadvision.api.path_params import uuid_from_path
 from loadvision.api.services import services_of
 from loadvision.api.xml.parser import check_content_type, parse_document
 from loadvision.api.xml.response import xml_response
@@ -15,7 +14,7 @@ from loadvision.api.xml.training import (
     training_job_document,
     training_jobs_document,
 )
-from loadvision.errors import ErrorCode, LoadvisionError
+from loadvision.errors import ErrorCode
 
 router = APIRouter()
 
@@ -44,15 +43,8 @@ async def list_training_jobs(request: Request) -> Response:
 @router.get("/api/v1/training-jobs/{job_id}")
 async def get_training_job(request: Request, job_id: str) -> Response:
     """Answers 200 with the job, or 404 `TRAINING_JOB_NOT_FOUND` for an unknown id."""
-    job = await run_in_threadpool(services_of(request).get_training_job, _job_id(job_id))
+    job = await run_in_threadpool(
+        services_of(request).get_training_job,
+        uuid_from_path(job_id, ErrorCode.TRAINING_JOB_NOT_FOUND),
+    )
     return xml_response(training_job_document(job))
-
-
-def _job_id(text: str) -> UUID:
-    try:
-        job_id = UUID(text)
-    except ValueError:
-        job_id = None
-    if job_id is None or str(job_id) != text.lower():
-        raise LoadvisionError(ErrorCode.TRAINING_JOB_NOT_FOUND, "malformed job id")
-    return job_id

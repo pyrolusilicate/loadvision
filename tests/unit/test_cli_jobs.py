@@ -1,29 +1,20 @@
 import logging
-from collections.abc import Iterator
-from contextlib import contextmanager
 from datetime import timedelta
 from uuid import UUID
 
 import pytest
 
-from loadvision.application.ports import UnitOfWorkFactory
 from loadvision.cli.main import main
 from loadvision.domain.training_job import TrainingJobStatus, TrainingMode
 from loadvision.errors import ErrorCode
 from tests.builders import T0, make_job
 from tests.fakes.in_memory_db import InMemoryStore
+from tests.memory_database import use_memory_database
 
 
 @pytest.fixture
 def store(monkeypatch: pytest.MonkeyPatch) -> InMemoryStore:
-    store = InMemoryStore()
-
-    @contextmanager
-    def factory() -> Iterator[UnitOfWorkFactory]:
-        yield store.unit_of_work
-
-    monkeypatch.setattr("loadvision.cli.commands.jobs.unit_of_work_factory", factory)
-    return store
+    return use_memory_database(monkeypatch, "loadvision.cli.commands.jobs")
 
 
 @pytest.mark.unit

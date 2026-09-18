@@ -10,6 +10,7 @@ from loadvision.cli.dataset import split_samples
 from loadvision.cli.errors import CommandError
 from loadvision.cli.options import add_data_option, add_device_option
 from loadvision.cli.paths import SUBMISSIONS_DIR, runs_dir
+from loadvision.cli.values import version_of
 from loadvision.domain.model_version import ModelVersionId
 from loadvision.imaging.prepared_image import PreparedImage
 from loadvision.ml.data.manifest import Sample
@@ -117,11 +118,7 @@ def _package_dir(args: argparse.Namespace) -> Path:
     if args.package is not None:
         return args.package
     settings = load_settings()
-    tag = settings.model.version if args.version is None else args.version
-    try:
-        version = ModelVersionId(tag)
-    except ValueError as error:
-        raise CommandError(f"invalid version {tag!r}: {error}") from error
+    version = version_of(settings.model.version if args.version is None else args.version)
     return settings.storage.models_dir / version.value
 
 

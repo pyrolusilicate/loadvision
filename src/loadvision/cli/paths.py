@@ -4,9 +4,8 @@ from pathlib import Path
 from typing import Final
 
 from loadvision.ml.pipeline.stages.extract_embeddings import EMBEDDINGS_DIR
-from loadvision.settings import load_settings
+from loadvision.settings import RUNS_CACHE_SUBDIR, load_settings
 
-CACHE_SUBDIR: Final = "cache"
 PROBES_FILE: Final = Path("probes/encoders.jsonl")
 OOF_HEADS_FILE: Final = Path("oof/history.jsonl")
 OOF_POSTPROCESS_FILE: Final = Path("oof/postprocess.jsonl")
@@ -26,7 +25,7 @@ def runs_dir(override: Path | None = None) -> Path:
 
 def cache_dir(runs: Path) -> Path:
     """Returns the cache kept between runs, outside every run folder."""
-    return runs / CACHE_SUBDIR
+    return runs / RUNS_CACHE_SUBDIR
 
 
 def embeddings_cache(runs: Path) -> Path:

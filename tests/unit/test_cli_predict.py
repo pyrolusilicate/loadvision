@@ -12,7 +12,6 @@ from tests import image_files
 from tests.model_packages import build_numpy_package
 from tests.settings_files import use_settings
 
-FEATURES = 233
 LOAD = 55.0
 VERSION = "baseline-v0"
 TEST_PHOTOS = ("img_a", "img_b", "img_c")

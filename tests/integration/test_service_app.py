@@ -1,7 +1,6 @@
 import time
 from pathlib import Path
 
-import numpy as np
 import pytest
 import yaml
 from fastapi import FastAPI
@@ -13,10 +12,9 @@ from loadvision.api.services import ApiServices
 from loadvision.api.xml.parser import NAMESPACE
 from loadvision.domain.model_version import ModelVersionId
 from loadvision.infrastructure.db.session import PostgresUnitOfWork
-from loadvision.ml.packaging.baseline_package import build_baseline_package
 from loadvision.settings import DEFAULT_CONFIG_PATH, Settings
 from tests.api.service import PHOTO, PHOTO_SHA256, XML, child, document, request_body
-from tests.builders import T0
+from tests.model_packages import build_numpy_package
 
 VERSION = "baseline-v0"
 READY_SECONDS = 30.0
@@ -32,24 +30,10 @@ def settings(tmp_path: Path) -> Settings:
 
 
 def build_package(settings: Settings, tmp_path: Path) -> None:
-    """Writes a baseline package whose head predicts 55 for every photo."""
-    baseline = tmp_path / "baseline"
-    baseline.mkdir()
-    features = 233
-    np.savez(
-        baseline / "model.npz",
-        mean=np.zeros(features),
-        scale=np.ones(features),
-        weights=np.zeros(features),
-        intercept=np.asarray(55.0),
-    )
-    build_baseline_package(
-        baseline,
-        settings.storage.models_dir / VERSION,
-        version=VERSION,
-        git_commit="0" * 40,
-        data_hash="d" * 64,
-        created_at=T0,
+    """Puts a package whose head predicts 55 for every photo into the models folder."""
+    settings.storage.models_dir.mkdir(parents=True)
+    build_numpy_package(tmp_path / "build", load=55.0, version=VERSION).rename(
+        settings.storage.models_dir / VERSION
     )
 
 

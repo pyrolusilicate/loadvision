@@ -165,7 +165,8 @@ class AssessPhoto:
             raise LoadvisionError(
                 ErrorCode.MODEL_INFERENCE_FAILED, f"{type(error).__name__}: {error}"
             ) from error
-        # Brightness, sharpness (task 7.7) and the review policy are not implemented yet.
+        # Brightness and sharpness (imaging/quality.py) and the review policy are not wired in
+        # yet, so every assessment goes out without review reasons.
         return _Estimate(load_pct=prediction.load_pct, signals=signals, review_reasons=frozenset())
 
 

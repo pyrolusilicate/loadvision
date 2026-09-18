@@ -1,25 +1,22 @@
 import logging
 import shutil
 import subprocess
-from collections.abc import Iterator
-from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
 
 import numpy as np
 import pytest
 
-from loadvision.application.ports import UnitOfWorkFactory
 from loadvision.cli.main import main
 from loadvision.imaging.prepared_image import MediaType, PreparedImage
 from loadvision.ml.inference.predictor import PackagePredictor
 from loadvision.ml.packaging.model_package import ModelPackage
 from tests.fakes.in_memory_db import InMemoryStore
+from tests.memory_database import use_memory_database
 from tests.ml.test_dataset_manifest import write_split
-from tests.model_packages import build_numpy_package
+from tests.model_packages import build_numpy_package, write_baseline_weights
 from tests.settings_files import use_settings
 
-FEATURES = 233
 INITIAL_VERSION = "baseline-v0"
 
 
@@ -52,15 +49,7 @@ def workspace(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Workspace:
         model={"version": INITIAL_VERSION},
     )
 
-    baseline_dir = tmp_path / "baseline"
-    baseline_dir.mkdir()
-    np.savez(
-        baseline_dir / "model.npz",
-        mean=np.zeros(FEATURES),
-        scale=np.ones(FEATURES),
-        weights=np.zeros(FEATURES),
-        intercept=np.asarray(55.0),
-    )
+    baseline_dir = write_baseline_weights(tmp_path / "baseline", load=55.0)
 
     data_dir = tmp_path / "data"
     write_split(data_dir, "train", [("img_a", "10.0")], groups=[("img_a", "grp_1")])
@@ -210,15 +199,7 @@ def test_unknown_command_exits_with_usage_error() -> None:
 
 @pytest.fixture
 def store(monkeypatch: pytest.MonkeyPatch) -> InMemoryStore:
-    """Replaces the service database with one in memory for the whole command."""
-    store = InMemoryStore()
-
-    @contextmanager
-    def factory() -> Iterator[UnitOfWorkFactory]:
-        yield store.unit_of_work
-
-    monkeypatch.setattr("loadvision.cli.commands.model.unit_of_work_factory", factory)
-    return store
+    return use_memory_database(monkeypatch, "loadvision.cli.commands.model")
 
 
 def versions(store: InMemoryStore) -> dict[str, str]:
