@@ -6,9 +6,17 @@ from loadvision.application.ports import LoadPredictor
 from loadvision.domain.model_version import ModelVersionId, ModelVersionStatus
 from loadvision.domain.training_job import TrainingJobStatus, TrainingMode
 from loadvision.errors import ERROR_CATALOG, ErrorCode
+from loadvision.ml.training.gate import DEFAULT_RULES
 from tests.api.service import Service, make_service
 from tests.api.ui_pages import get, page, sign_in, submit, text_of
-from tests.builders import FIRST_JOB_ID, T0, make_job, make_model_version
+from tests.builders import (
+    FIRST_JOB_ID,
+    T0,
+    make_image_record,
+    make_job,
+    make_label,
+    make_model_version,
+)
 
 
 def register(service: Service, *versions: tuple[str, ModelVersionStatus]) -> None:
@@ -20,6 +28,16 @@ def register(service: Service, *versions: tuple[str, ModelVersionStatus]) -> Non
             uow.model_versions.add(
                 make_model_version(tag, status=status, created_at=at, activated_at=activated)
             )
+        uow.commit()
+
+
+def confirm_loads(service: Service, count: int = 1) -> None:
+    """Stores photos with a confirmed load, the material of a retraining."""
+    with service.store.unit_of_work() as uow:
+        for number in range(count):
+            raw = f"photo-{number}".encode()
+            uow.images.add(make_image_record(raw))
+            uow.labels.save(make_label(raw))
         uow.commit()
 
 
@@ -130,6 +148,7 @@ def test_model_forms_without_the_session_token_change_nothing(service: Service, 
 @pytest.mark.api
 def test_retraining_is_queued_and_listed(service: Service) -> None:
     token = sign_in(service)
+    confirm_loads(service)
 
     response = submit(service, "/ui/jobs", csrf=token)
 
@@ -143,6 +162,7 @@ def test_retraining_is_queued_and_listed(service: Service) -> None:
 @pytest.mark.api
 def test_a_second_retraining_waits_for_the_first(service: Service) -> None:
     token = sign_in(service)
+    confirm_loads(service)
     submit(service, "/ui/jobs", csrf=token)
 
     response = submit(service, "/ui/jobs", csrf=token)
@@ -203,3 +223,36 @@ def test_the_header_tells_a_failed_first_load_from_a_slow_one() -> None:
     service.model.load_in_background(missing_package).join()
 
     assert "модель не загрузилась" in text_of(get(service, "/ui/"))
+
+
+@pytest.mark.api
+def test_without_a_confirmed_load_retraining_is_refused(service: Service) -> None:
+    token = sign_in(service)
+
+    response = submit(service, "/ui/jobs", csrf=token)
+
+    assert response.status_code == 400
+    assert "Дообучать не на чем." in text_of(response)
+    assert service.store.training_jobs == {}
+    assert page(get(service, "/ui/jobs")).xpath("//form[@action='/ui/jobs']/button/@disabled")
+
+
+@pytest.mark.api
+def test_the_page_counts_confirmed_loads_against_what_the_gate_needs(service: Service) -> None:
+    sign_in(service)
+    confirm_loads(service, 3)
+
+    text = text_of(get(service, "/ui/jobs"))
+
+    needed = DEFAULT_RULES.min_new_labels
+    assert "Подтверждённых загрузок: 3." in text
+    assert f"Новая версия может пройти проверку, если их не меньше {needed}." in text
+
+
+@pytest.mark.api
+def test_a_queued_job_says_it_waits_for_the_worker(service: Service) -> None:
+    token = sign_in(service)
+    confirm_loads(service)
+    submit(service, "/ui/jobs", csrf=token)
+
+    assert "Задача ждёт воркер" in text_of(get(service, "/ui/jobs"))

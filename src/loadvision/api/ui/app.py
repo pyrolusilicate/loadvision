@@ -13,8 +13,14 @@ from starlette.responses import RedirectResponse, Response
 from starlette.staticfiles import StaticFiles
 
 from loadvision.api.services import request_id_of
-from loadvision.api.ui import auth_routes, model_routes, review_routes, shipment_routes
-from loadvision.api.ui.pages import page
+from loadvision.api.ui import (
+    assess_routes,
+    auth_routes,
+    model_routes,
+    review_routes,
+    shipment_routes,
+)
+from loadvision.api.ui.pages import catalog_error, page
 from loadvision.api.ui.services import UiServices
 from loadvision.api.ui.session import FormRejectedError, SignInRequiredError
 from loadvision.api.ui.templates import UI_PREFIX
@@ -48,7 +54,7 @@ def create_ui_app(services: UiServices) -> FastAPI:
     )
     app.state.ui_services = services
     app.mount("/static", StaticFiles(directory=_STATIC), name="static")
-    for routes in (auth_routes, review_routes, shipment_routes, model_routes):
+    for routes in (auth_routes, assess_routes, review_routes, shipment_routes, model_routes):
         app.include_router(routes.router)
     app.add_exception_handler(SignInRequiredError, _to_sign_in)
     app.add_exception_handler(FormRejectedError, _form_rejected)
@@ -77,10 +83,8 @@ async def _catalog_error(request: Request, error: Exception) -> Response:
         error.detail,
         extra={"request_id": request_id_of(request)},
     )
-    spec = ERROR_CATALOG[error.code]
-    if spec.http_status is None:
-        spec = ERROR_CATALOG[ErrorCode.INTERNAL_ERROR]
-    return _error_page(request, spec.http_status or 500, spec.message, spec.hint)
+    status, message, hint = catalog_error(error.code)
+    return _error_page(request, status, message, hint)
 
 
 async def _http_error(request: Request, error: Exception) -> Response:

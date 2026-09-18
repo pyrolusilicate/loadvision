@@ -23,7 +23,7 @@ from tests.builders import T0
 def test_the_bare_address_opens_the_pages(service: Service) -> None:
     response = get(service, "/")
 
-    assert (response.status_code, response.headers["location"]) == (303, "/ui/")
+    assert (response.status_code, response.headers["location"]) == (303, "/ui/assess")
 
 
 @pytest.mark.api
@@ -83,7 +83,7 @@ def test_signing_in_never_leaves_the_pages(service: Service, target: str) -> Non
 
     response = log_in(service, next=target)
 
-    assert response.headers["location"] == "/ui/"
+    assert response.headers["location"] == "/ui/assess"
 
 
 @pytest.mark.api

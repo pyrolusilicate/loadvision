@@ -1,4 +1,4 @@
-"""Rendering a page with what every page shows: the operator, the form token and the model."""
+"""Rendering pages: what every page shows, and the words of a catalog error."""
 
 from typing import Any
 
@@ -8,6 +8,19 @@ from starlette.responses import Response
 from loadvision.api.ui.services import ui_services_of
 from loadvision.api.ui.templates import templates
 from loadvision.domain.operator import OperatorSession
+from loadvision.errors import ERROR_CATALOG, ErrorCode
+
+
+def catalog_error(code: ErrorCode) -> tuple[int, str, str]:
+    """Returns the HTTP status, message and hint a page shows for a catalog error.
+
+    A code without an HTTP status never reaches a person as is: it is shown as
+    `INTERNAL_ERROR`, the same as in the XML answers.
+    """
+    spec = ERROR_CATALOG[code]
+    if spec.http_status is None:
+        spec = ERROR_CATALOG[ErrorCode.INTERNAL_ERROR]
+    return spec.http_status or 500, spec.message, spec.hint
 
 
 def page(

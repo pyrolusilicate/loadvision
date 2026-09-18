@@ -54,6 +54,7 @@ button {
 }
 button:hover { filter: brightness(1.12); }
 button.ghost { background: transparent; color: var(--accent); }
+button:disabled { opacity: 0.45; cursor: not-allowed; filter: none; }
 button.warn { background: var(--surface); border-color: var(--bad); color: var(--bad); }
 input[type="text"], input[type="password"] {
   font: inherit; width: 100%; padding: 7px 10px; border: 1px solid var(--line);
@@ -68,6 +69,8 @@ label { font-weight: 600; font-size: 14px; }
 /* Blocks. */
 .card { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); padding: 20px; display: grid; gap: 12px; align-content: start; }
 .narrow { max-width: 440px; width: 100%; margin: 40px auto 0; }
+.form-page { max-width: 600px; width: 100%; }
+input[type="file"] { font: inherit; padding: 10px; border: 1px dashed var(--line); border-radius: var(--radius); background: var(--surface); }
 .row { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px; }
 .row form { margin: 0; }
 .note { padding: 10px 12px; border-radius: var(--radius); background: var(--surface); border: 1px solid var(--line); }

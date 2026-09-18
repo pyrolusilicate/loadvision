@@ -4,11 +4,18 @@
 <form method="get" action="{{ ui }}/shipments" class="search">
   <label for="number">Номер перевозки</label>
   <input id="number" name="number" type="text" placeholder="RP-2026-000123"
-         value="{{ history.shipment_id.value if history else '' }}" {% if not history %}autofocus{% endif %}>
+         value="{{ number }}" {% if not history %}autofocus{% endif %}>
   <button type="submit">Найти</button>
 </form>
+{% if error %}
+<p class="note bad" role="alert"><strong>{{ error[0] }}</strong> {{ error[1] }}
+  {% if unknown %}<a href="{{ ui }}/assess?number={{ number|urlencode }}">Оценить фото для перевозки {{ number }}</a>{% endif %}</p>
+{% endif %}
 {% if history %}
-<h1>Перевозка {{ history.shipment_id.value }}</h1>
+<div class="row">
+  <h1>Перевозка {{ history.shipment_id.value }}</h1>
+  <a href="{{ ui }}/assess?number={{ history.shipment_id.value|urlencode }}">Оценить ещё фото этой перевозки</a>
+</div>
 <p class="muted">Оценок: {{ history.assessments|length }}. Текущая — самая новая.</p>
 <div class="scroll">
 <table>

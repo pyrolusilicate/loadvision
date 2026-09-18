@@ -9,7 +9,8 @@
   </div>
 </div>
 {% if not items %}
-<p class="note">{% if show_all %}Оценок пока нет.{% else %}Всё проверено: у каждого фото есть метка.{% endif %}</p>
+<p class="note">{% if show_all %}Оценок пока нет.{% else %}Всё проверено.{% endif %}
+  <a href="{{ ui }}/assess">Оценить фото</a></p>
 {% else %}
 <div class="grid">
   {% for item in items %}

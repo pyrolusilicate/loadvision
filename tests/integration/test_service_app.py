@@ -20,6 +20,7 @@ from loadvision.infrastructure.db.session import PostgresUnitOfWork
 from loadvision.settings import DEFAULT_CONFIG_PATH, Settings
 from tests.api.service import PHOTO, PHOTO_SHA256, XML, child, document, request_body
 from tests.api.ui_pages import LOGIN, PASSWORD, form_token
+from tests.image_files import png
 from tests.model_packages import build_numpy_package
 
 VERSION = "baseline-v0"
@@ -168,6 +169,13 @@ def test_operator_labels_a_photo_and_switches_the_model_on_postgres(
             follow_redirects=False,
         )
         read = client.get(f"/api/v1/assessments/{assessment_id}")
+        uploaded = client.post(
+            "/ui/assess",
+            data={"csrf": token, "shipment_id": "RP-3"},
+            files={"photo": ("kuzov.png", png(), "image/png")},
+            follow_redirects=False,
+        )
+        shipment = client.get("/api/v1/shipments/RP-3")
         switched = client.post(
             f"/ui/models/{CANDIDATE}/activate", data={"csrf": token}, follow_redirects=False
         )
@@ -176,6 +184,10 @@ def test_operator_labels_a_photo_and_switches_the_model_on_postgres(
         again = client.post("/api/v1/assessments", content=request_body("RP-2"), headers=XML)
 
     assert (signed.status_code, labelled.status_code, switched.status_code) == (303, 303, 303)
+    assert (uploaded.status_code, shipment.status_code) == (303, 200)
+    current = child(document(shipment), "Current").get("id")
+    assert current is not None
+    assert current in uploaded.headers["location"]
     label = child(document(read), "ConfirmedLabel")
     assert (label.get("loadPct"), label.get("author")) == ("62.5", LOGIN)
     assert services_of(app).model.failure is None

@@ -7,9 +7,19 @@
   <h1>Дообучение</h1>
   <form method="post" action="{{ ui }}/jobs">
     <input type="hidden" name="csrf" value="{{ session.csrf }}">
-    <button type="submit" title="Головы на замороженных энкодерах, минуты счёта">Дообучить на подтверждённых метках</button>
+    <button type="submit" title="Головы на замороженных энкодерах, минуты счёта" {% if not labels %}disabled{% endif %}>Дообучить на подтверждённых метках</button>
   </form>
 </div>
+<p class="muted">Подтверждённых загрузок: {{ labels }}. Новая версия может пройти проверку, если их не меньше {{ needed }}.</p>
+{% if error %}
+<p class="note bad" role="alert"><strong>{{ error[0] }}</strong> {{ error[1] }}</p>
+{% elif not labels %}
+<p class="note">Дообучать пока не на чем: подтвердите загрузку на фото в <a href="{{ ui }}/">очереди проверки</a>.</p>
+{% endif %}
+{% if jobs and jobs[0].status.value == 'queued' %}
+<p class="note warn">Задача ждёт воркер, а он запускается отдельно от сервиса: <code>just worker</code>
+  или <code>uv run --env-file .env loadvision-worker</code>.</p>
+{% endif %}
 {% if not jobs %}
 <p class="note">Задач ещё не было.</p>
 {% else %}

@@ -23,7 +23,12 @@ from loadvision.application.operators import Authenticate, SignIn, SignOut
 from loadvision.application.ports import ImageStorage, LoadPredictor
 from loadvision.application.review_queue import ReviewQueue
 from loadvision.application.submit_label import SubmitLabel
-from loadvision.application.training_jobs import GetTrainingJob, ListTrainingJobs, StartTraining
+from loadvision.application.training_jobs import (
+    CountTrainingLabels,
+    GetTrainingJob,
+    ListTrainingJobs,
+    StartTraining,
+)
 from loadvision.errors import ERROR_CATALOG, ErrorCode
 from loadvision.imaging.prepared_image import MediaType
 from loadvision.imaging.validator import ImageLimits, prepare_image
@@ -110,6 +115,7 @@ def make_service(
         sign_in=SignIn(uow_factory=store.unit_of_work, clock=clock),
         authenticate=Authenticate(uow_factory=store.unit_of_work, clock=clock),
         sign_out=SignOut(uow_factory=store.unit_of_work),
+        assess_photo=services.assess_photo,
         review_queue=ReviewQueue(uow_factory=store.unit_of_work),
         get_assessment=services.get_assessment,
         submit_label=services.submit_label,
@@ -122,6 +128,7 @@ def make_service(
         reload_model=reloads,
         start_training=services.start_training,
         list_training_jobs=services.list_training_jobs,
+        count_training_labels=CountTrainingLabels(uow_factory=store.unit_of_work),
         storage=storage if photos is None else photos,
         model=model,
     )

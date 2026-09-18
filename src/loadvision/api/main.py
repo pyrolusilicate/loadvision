@@ -29,6 +29,7 @@ from loadvision.application.ports import UnitOfWorkFactory
 from loadvision.application.review_queue import ReviewQueue
 from loadvision.application.submit_label import SubmitLabel
 from loadvision.application.training_jobs import (
+    CountTrainingLabels,
     GetTrainingJob,
     ListTrainingJobs,
     StartTraining,
@@ -120,6 +121,7 @@ def build_service_app(settings: Settings, engine: Engine) -> FastAPI:
         sign_in=SignIn(uow_factory=uow_factory, clock=utc_now),
         authenticate=Authenticate(uow_factory=uow_factory, clock=utc_now),
         sign_out=SignOut(uow_factory=uow_factory),
+        assess_photo=services.assess_photo,
         review_queue=ReviewQueue(uow_factory=uow_factory),
         get_assessment=services.get_assessment,
         submit_label=services.submit_label,
@@ -130,6 +132,7 @@ def build_service_app(settings: Settings, engine: Engine) -> FastAPI:
         reload_model=follower.check,
         start_training=services.start_training,
         list_training_jobs=services.list_training_jobs,
+        count_training_labels=CountTrainingLabels(uow_factory=uow_factory),
         storage=storage,
         model=model,
     )

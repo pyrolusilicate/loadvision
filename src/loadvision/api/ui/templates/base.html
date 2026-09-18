@@ -10,8 +10,9 @@
 {% if session %}
 {% set here = request.url.path %}
 <header>
-  <a href="{{ ui }}/" class="logo">Loadvision</a>
+  <a href="{{ ui }}/assess" class="logo">Loadvision</a>
   <nav>
+    <a href="{{ ui }}/assess" class="section {% if here == ui ~ '/assess' %}on{% endif %}">Оценить фото</a>
     <a href="{{ ui }}/" class="section {% if here == ui ~ '/' or here.startswith(ui ~ '/assessments') %}on{% endif %}">Очередь</a>
     <a href="{{ ui }}/shipments" class="section {% if here.startswith(ui ~ '/shipments') %}on{% endif %}">Перевозки</a>
     <a href="{{ ui }}/models" class="section {% if here.startswith(ui ~ '/models') %}on{% endif %}">Модели</a>

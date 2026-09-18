@@ -18,7 +18,7 @@ from loadvision.api.routers import (
 from loadvision.api.services import ApiServices
 from loadvision.api.ui.app import create_ui_app
 from loadvision.api.ui.services import UiServices
-from loadvision.api.ui.templates import UI_PREFIX
+from loadvision.api.ui.templates import HOME_PAGE, UI_PREFIX
 
 
 def create_app(
@@ -62,4 +62,4 @@ def create_app(
 
 async def _open_ui() -> Response:
     # The bare address of the service is what a person types, so it opens the pages.
-    return RedirectResponse(f"{UI_PREFIX}/", status_code=303)
+    return RedirectResponse(HOME_PAGE, status_code=303)

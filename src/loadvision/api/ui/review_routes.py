@@ -9,6 +9,7 @@ from starlette.requests import Request
 from starlette.responses import RedirectResponse, Response
 
 from loadvision.api.path_params import uuid_from_path
+from loadvision.api.ui.assess_routes import NEW_RESULT, REUSED_RESULT
 from loadvision.api.ui.pages import page
 from loadvision.api.ui.services import ui_services_of
 from loadvision.api.ui.session import SignedIn, checked_form
@@ -39,13 +40,26 @@ async def queue(
 
 
 @router.get("/assessments/{assessment_id}")
-async def assessment(request: Request, session: SignedIn, assessment_id: str) -> Response:
-    """Shows one assessment: the photo, the prediction and the form for the verdict."""
+async def assessment(
+    request: Request, session: SignedIn, assessment_id: str, result: str = ""
+) -> Response:
+    """Shows one assessment: the photo, the prediction and the form for the verdict.
+
+    `result` comes from the photo form and says whether the photo was just assessed or had
+    been assessed for this shipment before.
+    """
     details = await run_in_threadpool(
         ui_services_of(request).get_assessment,
         uuid_from_path(assessment_id, ErrorCode.ASSESSMENT_NOT_FOUND),
     )
-    return page(request, "assessment.html", session, details=details)
+    return page(
+        request,
+        "assessment.html",
+        session,
+        details=details,
+        created=result == NEW_RESULT,
+        reused=result == REUSED_RESULT,
+    )
 
 
 @router.post("/assessments/{assessment_id}/label")

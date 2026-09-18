@@ -70,6 +70,22 @@ class ListTrainingJobs:
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
+class CountTrainingLabels:
+    """Counts the confirmed labels a retraining would learn from.
+
+    Attributes:
+        uow_factory: Opens database transactions.
+    """
+
+    uow_factory: UnitOfWorkFactory
+
+    def __call__(self) -> int:
+        """Returns how many photos have a confirmed load; unusable photos do not count."""
+        with self.uow_factory() as uow:
+            return len(uow.labels.list_for_training())
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
 class GetTrainingJob:
     """Reads one job by id.
 

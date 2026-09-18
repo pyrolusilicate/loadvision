@@ -1,0 +1,22 @@
+{% extends "base.html" %}
+{% block title %}Оценить фото{% endblock %}
+{% block content %}
+<section class="card form-page">
+  <h1>Оценить фото кузова</h1>
+  <p class="muted">Модель оценит загрузку от 0 до 100% и сохранит оценку в перевозке. То же фото
+    в той же перевозке второй раз не считается: откроется сохранённая оценка.</p>
+  {% if error %}
+  <p class="note bad" role="alert"><strong>{{ error[0] }}</strong> {{ error[1] }}</p>
+  {% endif %}
+  <form method="post" action="{{ ui }}/assess" enctype="multipart/form-data" class="stack">
+    <input type="hidden" name="csrf" value="{{ session.csrf }}">
+    <label for="shipment_id">Номер перевозки</label>
+    <input id="shipment_id" name="shipment_id" type="text" value="{{ number }}"
+           placeholder="RP-2026-000123" required {% if not number %}autofocus{% endif %}>
+    <label for="photo">Фото грузового отсека</label>
+    <input id="photo" name="photo" type="file" accept="{{ accept }}" required>
+    <p class="muted">{{ formats }}, до {{ max_mb }} МБ, короткая сторона не меньше {{ min_side }} px.</p>
+    <button type="submit">Оценить загрузку</button>
+  </form>
+</section>
+{% endblock %}

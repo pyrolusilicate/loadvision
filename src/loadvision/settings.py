@@ -21,7 +21,7 @@ DEFAULT_CONFIG_PATH: Final = Path("configs/app.yaml")
 # Cache kept between runs, such as embeddings, inside the runs folder but outside every run.
 RUNS_CACHE_SUBDIR: Final = "cache"
 
-_MEBIBYTE: Final = 1024 * 1024
+MEBIBYTE: Final = 1024 * 1024
 _MEGAPIXEL: Final = 1_000_000
 _FORMATS: Final = {"jpeg": MediaType.JPEG, "png": MediaType.PNG, "webp": MediaType.WEBP}
 
@@ -47,7 +47,7 @@ class ApiSettings(_Section):
     @property
     def max_body_bytes(self) -> int:
         """Largest accepted request body, in bytes."""
-        return self.max_body_mb * _MEBIBYTE
+        return self.max_body_mb * MEBIBYTE
 
 
 class ImageSettings(_Section):
@@ -68,7 +68,7 @@ class ImageSettings(_Section):
     def limits(self) -> ImageLimits:
         """Returns the limits in the units the image validator works with."""
         return ImageLimits(
-            max_bytes=self.max_decoded_mb * _MEBIBYTE,
+            max_bytes=self.max_decoded_mb * MEBIBYTE,
             max_pixels=self.max_megapixels * _MEGAPIXEL,
             min_side=self.min_side_px,
             media_types=frozenset(_FORMATS[name] for name in self.allowed_formats),

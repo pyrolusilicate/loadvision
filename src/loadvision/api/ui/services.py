@@ -6,6 +6,7 @@ from typing import cast
 
 from starlette.requests import Request
 
+from loadvision.application.assess_photo import AssessPhoto
 from loadvision.application.get_assessment import GetAssessment
 from loadvision.application.get_shipment import GetShipment
 from loadvision.application.model_versions import ActivateModel, ListModelVersions, RollbackModel
@@ -13,7 +14,11 @@ from loadvision.application.operators import Authenticate, SignIn, SignOut
 from loadvision.application.ports import ImageStorage
 from loadvision.application.review_queue import ReviewQueue
 from loadvision.application.submit_label import SubmitLabel
-from loadvision.application.training_jobs import ListTrainingJobs, StartTraining
+from loadvision.application.training_jobs import (
+    CountTrainingLabels,
+    ListTrainingJobs,
+    StartTraining,
+)
 from loadvision.ml.inference.active_model import ActiveModel
 
 
@@ -25,6 +30,7 @@ class UiServices:
         sign_in: Checks a password and opens a session.
         authenticate: Finds the session of a browser.
         sign_out: Ends a session.
+        assess_photo: Assesses an uploaded photo and stores it with its shipment.
         review_queue: Assessments waiting for a confirmed load.
         get_assessment: One assessment with its photo and label.
         submit_label: Stores the verdict of an operator.
@@ -35,6 +41,7 @@ class UiServices:
         reload_model: Starts loading the active version now rather than at the next check.
         start_training: Queues a retraining.
         list_training_jobs: Recent retrainings.
+        count_training_labels: Confirmed loads a retraining would learn from.
         storage: Photo bytes, shown on the pages.
         model: The model the service answers with, for the header.
     """
@@ -42,6 +49,7 @@ class UiServices:
     sign_in: SignIn
     authenticate: Authenticate
     sign_out: SignOut
+    assess_photo: AssessPhoto
     review_queue: ReviewQueue
     get_assessment: GetAssessment
     submit_label: SubmitLabel
@@ -52,6 +60,7 @@ class UiServices:
     reload_model: Callable[[], object]
     start_training: StartTraining
     list_training_jobs: ListTrainingJobs
+    count_training_labels: CountTrainingLabels
     storage: ImageStorage
     model: ActiveModel
 

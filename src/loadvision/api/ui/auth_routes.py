@@ -1,6 +1,6 @@
 """Signing in and out of the operator pages."""
 
-from typing import Annotated, Final
+from typing import Annotated
 
 from fastapi import APIRouter, Query
 from starlette.concurrency import run_in_threadpool
@@ -10,17 +10,17 @@ from starlette.responses import RedirectResponse, Response
 from loadvision.api.ui.pages import page
 from loadvision.api.ui.services import ui_services_of
 from loadvision.api.ui.session import SESSION_COOKIE, SignedIn, checked_form
-from loadvision.api.ui.templates import UI_PREFIX, human_time
+from loadvision.api.ui.templates import HOME_PAGE, UI_PREFIX, human_time
 from loadvision.application.operators import SignInLockedError, SignInRefusedError
 from loadvision.domain.operator import SESSION_LIFETIME
 
 router = APIRouter()
 
-_QUEUE: Final = f"{UI_PREFIX}/"
-
 
 @router.get("/login")
-def login_form(request: Request, target: Annotated[str, Query(alias="next")] = _QUEUE) -> Response:
+def login_form(
+    request: Request, target: Annotated[str, Query(alias="next")] = HOME_PAGE
+) -> Response:
     """Shows the sign-in form; `next` is the page to return to."""
     return page(request, "login.html", None, next=_safe_next(target))
 
@@ -35,7 +35,7 @@ async def log_in(request: Request) -> Response:
     form = await request.form()
     login = str(form.get("login", "")).strip()
     password = str(form.get("password", ""))
-    target = _safe_next(str(form.get("next", _QUEUE)))
+    target = _safe_next(str(form.get("next", HOME_PAGE)))
     try:
         signed = await run_in_threadpool(ui_services_of(request).sign_in, login, password)
     except SignInRefusedError:
@@ -88,4 +88,4 @@ def _safe_next(target: str) -> str:
     # A target under the prefix starts with one slash, so it never names another host.
     if target.startswith(f"{UI_PREFIX}/"):
         return target
-    return _QUEUE
+    return HOME_PAGE

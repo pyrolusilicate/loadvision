@@ -11,6 +11,8 @@ from loadvision.api.xml.schemas import LOAD_PCT_PLACES, format_decimal
 from loadvision.domain.timestamps import format_utc_seconds
 
 UI_PREFIX: Final = "/ui"
+# Where an operator lands: assessing a photo is the first thing the service is for.
+HOME_PAGE: Final = f"{UI_PREFIX}/assess"
 
 _HERE: Final = Path(__file__).parent
 _STYLESHEET: Final = _HERE / "static" / "panel.css"

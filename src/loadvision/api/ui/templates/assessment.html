@@ -8,7 +8,15 @@
     <figcaption class="muted">{{ details.image.width }}×{{ details.image.height }} · {{ details.image.media_type.value }}</figcaption>
   </figure>
   <section class="card">
-    <p class="muted"><a href="{{ ui }}/shipments/{{ a.shipment_id.value|urlencode }}">Перевозка {{ a.shipment_id.value }}</a></p>
+    {% if created %}
+    <p class="note ok">Фото оценено и сохранено в перевозке {{ a.shipment_id.value }}.</p>
+    {% elif reused %}
+    <p class="note">Это фото уже было в перевозке {{ a.shipment_id.value }}: показана сохранённая оценка, модель её не пересчитывала.</p>
+    {% endif %}
+    <div class="row">
+      <a href="{{ ui }}/shipments/{{ a.shipment_id.value|urlencode }}">Перевозка {{ a.shipment_id.value }}</a>
+      <a href="{{ ui }}/assess?number={{ a.shipment_id.value|urlencode }}">Оценить ещё фото этой перевозки</a>
+    </div>
     <h1><span class="load">{{ a.load_pct.value|load }}%</span> <span class="muted">прогноз модели</span></h1>
     <dl>
       <dt>Модель</dt><dd>{{ a.model_version.value }}</dd>
