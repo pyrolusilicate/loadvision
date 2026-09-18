@@ -10,6 +10,7 @@ import numpy as np
 from numpy.typing import NDArray
 
 from loadvision.ml.data.manifest import load_split
+from loadvision.ml.data.submission import COLUMNS, SUBMISSION_FILE, write_submission
 from loadvision.ml.models.backbones import Backbone, load_backbone
 from loadvision.ml.pipeline.stage import RunContext, StageCheckError, StageResult
 from loadvision.ml.pipeline.stages.extract_embeddings import EMBEDDINGS_DIR
@@ -18,11 +19,8 @@ from loadvision.ml.training.embedding_cache import embed_samples
 from loadvision.ml.training.head_trainer import fit_head
 from loadvision.ml.training.postprocess_fit import fit_chain
 
-SUBMISSION_FILE: Final = "submission.csv"
-
 _MIN_LOAD: Final = 0.0
 _MAX_LOAD: Final = 100.0
-_DECIMALS: Final = 1
 
 
 @dataclass(frozen=True, slots=True)
@@ -98,7 +96,7 @@ class PredictTest:
             predictions = fitted(predictions, read_facts(ctx, test))
 
         path = ctx.run_dir / SUBMISSION_FILE
-        _write(path, [sample.image_id for sample in test], predictions)
+        write_submission(path, [sample.image_id for sample in test], predictions)
         return StageResult(
             artifacts={"submission": path},
             counts={"test": len(test), "members": len(self.members)},
@@ -121,7 +119,7 @@ class PredictTest:
             raise StageCheckError(f"{self.name}: submission was not written")
         with path.open(newline="", encoding="utf-8") as file:
             reader = csv.DictReader(file)
-            if reader.fieldnames != ["image_id", "load_pct"]:
+            if reader.fieldnames != list(COLUMNS):
                 raise StageCheckError(f"{self.name}: header is {reader.fieldnames}")
             rows = list(reader)
         expected = [sample.image_id for sample in load_split(ctx.data_dir, "test")]
@@ -142,12 +140,3 @@ def _read_oof(path: Path) -> tuple[NDArray[np.float64], NDArray[np.float64]]:
     raw = np.array([float(row["raw"]) for row in rows])
     labels = np.array([float(row["label"]) for row in rows])
     return raw, labels
-
-
-def _write(path: Path, image_ids: Sequence[str], predictions: NDArray[np.float64]) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    with path.open("w", newline="", encoding="utf-8") as file:
-        writer = csv.writer(file)
-        writer.writerow(("image_id", "load_pct"))
-        for image_id, value in zip(image_ids, predictions, strict=True):
-            writer.writerow([image_id, f"{float(value):.{_DECIMALS}f}"])

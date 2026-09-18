@@ -5,13 +5,14 @@ from starlette.concurrency import run_in_threadpool
 from starlette.requests import Request
 from starlette.responses import Response
 
-from loadvision.api.routers.assessments import assessment_id_from_path
+from loadvision.api.path_params import uuid_from_path
 from loadvision.api.services import services_of
 from loadvision.api.xml.parser import check_content_type, parse_document
 from loadvision.api.xml.response import xml_response
 from loadvision.api.xml.schemas import label_document, read_label_request
 from loadvision.application.submit_label import SubmitLabelRequest
 from loadvision.domain.confirmed_label import LabelSource
+from loadvision.errors import ErrorCode
 
 router = APIRouter()
 
@@ -24,7 +25,7 @@ async def put_label(request: Request, assessment_id: str) -> Response:
     photo, so every assessment of the same photo shows it.
     """
     services = services_of(request)
-    target = assessment_id_from_path(assessment_id)
+    target = uuid_from_path(assessment_id, ErrorCode.ASSESSMENT_NOT_FOUND)
     check_content_type(request.headers.get("content-type"))
     message = read_label_request(parse_document(await request.body(), "LabelRequest"))
     result = await run_in_threadpool(

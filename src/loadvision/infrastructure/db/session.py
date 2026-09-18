@@ -12,6 +12,9 @@ from loadvision.infrastructure.db.repositories.model_versions import (
     PostgresModelVersionRepository,
 )
 from loadvision.infrastructure.db.repositories.shipments import PostgresShipmentRepository
+from loadvision.infrastructure.db.repositories.training_jobs import (
+    PostgresTrainingJobRepository,
+)
 
 
 def create_database_engine(url: str) -> Engine:
@@ -57,6 +60,10 @@ class PostgresUnitOfWork:
     @property
     def labels(self) -> PostgresLabelRepository:
         return PostgresLabelRepository(self._open())
+
+    @property
+    def training_jobs(self) -> PostgresTrainingJobRepository:
+        return PostgresTrainingJobRepository(self._open())
 
     def __enter__(self) -> Self:
         self._connection = self._engine.connect()

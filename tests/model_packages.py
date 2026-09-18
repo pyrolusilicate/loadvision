@@ -2,13 +2,68 @@
 
 import hashlib
 from collections.abc import Mapping
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+import numpy as np
+
+from loadvision.ml.packaging.baseline_package import build_baseline_package
 from loadvision.ml.packaging.manifest import Manifest
 from loadvision.ml.packaging.model_package import ModelPackage, hash_package_files, write_package
 
 HEAD_BYTES = b"ridge head"
+BASELINE_FEATURES = 233
+_BUILT_AT = datetime(2026, 9, 16, 12, 0, tzinfo=UTC)
+
+
+def write_baseline_weights(folder: Path, *, load: float, features: int = BASELINE_FEATURES) -> Path:
+    """Writes the organizers' weight file with a head that predicts `load` for every photo.
+
+    Args:
+        folder: Folder to write `model.npz` into; created if missing.
+        load: What the head predicts.
+        features: Size the head expects; another number makes weights the service refuses.
+
+    Returns:
+        The folder, ready to be the baseline folder of a command.
+    """
+    folder.mkdir(parents=True, exist_ok=True)
+    np.savez(
+        folder / "model.npz",
+        mean=np.zeros(features),
+        scale=np.ones(features),
+        weights=np.zeros(features),
+        intercept=np.asarray(load),
+    )
+    return folder
+
+
+def build_numpy_package(
+    root: Path, *, load: float, version: str = "baseline-v0", features: int = BASELINE_FEATURES
+) -> Path:
+    """Writes a package of baseline features whose head predicts `load` for every photo.
+
+    Args:
+        root: Folder to work in; the package lands in `root/package`.
+        load: What the head predicts.
+        version: Package version.
+        features: Size the head expects; another number makes a package the service refuses.
+
+    Returns:
+        The package folder.
+    """
+    baseline = write_baseline_weights(root / "baseline", load=load, features=features)
+    package = root / "package"
+    build_baseline_package(
+        baseline,
+        package,
+        version=version,
+        git_commit="0" * 40,
+        data_hash="d" * 64,
+        created_at=_BUILT_AT,
+    )
+    return package
 
 
 def member_data(**overrides: Any) -> dict[str, Any]:

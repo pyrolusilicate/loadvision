@@ -5,7 +5,15 @@ from starlette.types import Lifespan
 
 from loadvision.api.errors import install_error_handlers
 from loadvision.api.middleware import RequestContextMiddleware
-from loadvision.api.routers import assessments, health, labels, schema, shipments
+from loadvision.api.routers import (
+    assessments,
+    health,
+    labels,
+    models,
+    schema,
+    shipments,
+    training_jobs,
+)
 from loadvision.api.services import ApiServices
 
 
@@ -28,6 +36,8 @@ def create_app(services: ApiServices, lifespan: Lifespan[FastAPI] | None = None)
     app.include_router(assessments.router)
     app.include_router(labels.router)
     app.include_router(shipments.router)
+    app.include_router(models.router)
+    app.include_router(training_jobs.router)
     app.include_router(schema.router)
     app.include_router(health.router)
     app.add_middleware(

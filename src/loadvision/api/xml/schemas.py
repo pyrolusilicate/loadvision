@@ -78,10 +78,10 @@ def read_label_request(root: etree._Element) -> LabelRequestMessage:
     Returns:
         The request fields.
     """
-    text = root.findtext(_name("LoadPct"))
+    text = root.findtext(qualified("LoadPct"))
     # The XSD accepts "-0" as zero; adding 0.0 turns -0.0 into 0.0, which is written as "0.0".
     load_pct = None if text is None else LoadPercent(float(text) + 0.0)
-    return LabelRequestMessage(load_pct=load_pct, author=root.findtext(_name("Author")))
+    return LabelRequestMessage(load_pct=load_pct, author=root.findtext(qualified("Author")))
 
 
 def decode_base64(text: str) -> bytes:
@@ -118,16 +118,16 @@ def assessment_document(
     attributes = {"id": str(assessment.id), "shipmentId": assessment.shipment_id.value}
     if reused is not None:
         attributes["reused"] = _boolean(reused)
-    root = etree.Element(_name("Assessment"), attributes, nsmap={None: NAMESPACE})
-    etree.SubElement(root, _name("LoadPct")).text = format_decimal(
+    root = etree.Element(qualified("Assessment"), attributes, nsmap={None: NAMESPACE})
+    etree.SubElement(root, qualified("LoadPct")).text = format_decimal(
         assessment.load_pct.value, LOAD_PCT_PLACES
     )
     # Review is written only when there are reasons: until the review policy exists, an empty
     # set means "not checked", and needed="false" would claim more than the service knows.
     if assessment.review_reasons:
-        review = etree.SubElement(root, _name("Review"), needed="true")
+        review = etree.SubElement(root, qualified("Review"), needed="true")
         for reason in sorted(assessment.review_reasons):
-            etree.SubElement(review, _name("Reason")).text = reason.value
+            etree.SubElement(review, qualified("Reason")).text = reason.value
     signals = assessment.signals
     known = {
         name: format_decimal(value, SIGNAL_PLACES)
@@ -140,66 +140,68 @@ def assessment_document(
         if value is not None
     }
     if known:
-        etree.SubElement(root, _name("Signals"), known)
+        etree.SubElement(root, qualified("Signals"), known)
     if label is not None:
-        etree.SubElement(root, _name("ConfirmedLabel"), _label_attributes(label))
+        etree.SubElement(root, qualified("ConfirmedLabel"), _label_attributes(label))
     etree.SubElement(
         root,
-        _name("Image"),
+        qualified("Image"),
         sha256=image.sha256,
         mediaType=image.media_type.value,
         width=str(image.width),
         height=str(image.height),
     )
-    etree.SubElement(root, _name("Model"), version=assessment.model_version.value)
-    etree.SubElement(root, _name("ProcessingMs")).text = str(assessment.processing_ms)
-    etree.SubElement(root, _name("CreatedAt")).text = format_utc(assessment.created_at)
+    etree.SubElement(root, qualified("Model"), version=assessment.model_version.value)
+    etree.SubElement(root, qualified("ProcessingMs")).text = str(assessment.processing_ms)
+    etree.SubElement(root, qualified("CreatedAt")).text = format_utc(assessment.created_at)
     return root
 
 
 def shipment_document(history: ShipmentHistory) -> etree._Element:
     """Builds `Shipment` with the current assessment and the history, newest first."""
-    root = etree.Element(_name("Shipment"), nsmap={None: NAMESPACE}, id=history.shipment_id.value)
-    etree.SubElement(root, _name("Current"), _summary(history.current))
-    past = etree.SubElement(root, _name("History"), count=str(len(history.assessments)))
+    root = etree.Element(
+        qualified("Shipment"), nsmap={None: NAMESPACE}, id=history.shipment_id.value
+    )
+    etree.SubElement(root, qualified("Current"), _summary(history.current))
+    past = etree.SubElement(root, qualified("History"), count=str(len(history.assessments)))
     for item in history.assessments:
-        etree.SubElement(past, _name("Assessment"), _summary(item))
+        etree.SubElement(past, qualified("Assessment"), _summary(item))
     return root
 
 
 def label_document(label: ConfirmedLabel, assessment_id: UUID) -> etree._Element:
     """Builds `Label` for the label stored through an assessment."""
     root = etree.Element(
-        _name("Label"),
+        qualified("Label"),
         nsmap={None: NAMESPACE},
         assessmentId=str(assessment_id),
         imageSha256=label.image_sha256,
     )
     if label.load_pct is None:
-        etree.SubElement(root, _name("Unusable"))
+        etree.SubElement(root, qualified("Unusable"))
     else:
-        etree.SubElement(root, _name("LoadPct")).text = format_decimal(
+        etree.SubElement(root, qualified("LoadPct")).text = format_decimal(
             label.load_pct.value, LOAD_PCT_PLACES
         )
     if label.author is not None:
-        etree.SubElement(root, _name("Author")).text = label.author
-    etree.SubElement(root, _name("UpdatedAt")).text = format_utc(label.updated_at)
+        etree.SubElement(root, qualified("Author")).text = label.author
+    etree.SubElement(root, qualified("UpdatedAt")).text = format_utc(label.updated_at)
     return root
 
 
 def health_document(version: ModelVersionId) -> etree._Element:
     """Builds `Health` for a service with a loaded model."""
-    return etree.Element(_name("Health"), nsmap={None: NAMESPACE}, modelVersion=version.value)
+    return etree.Element(qualified("Health"), nsmap={None: NAMESPACE}, modelVersion=version.value)
 
 
 def error_document(code: ErrorCode, request_id: str) -> etree._Element:
     """Builds `Error` with the message and hint of the catalog."""
     spec = ERROR_CATALOG[code]
     root = etree.Element(
-        _name("Error"), nsmap={None: NAMESPACE}, code=code.value, requestId=request_id
+        qualified("Error"), nsmap={None: NAMESPACE}, code=code.value, requestId=request_id
     )
-    etree.SubElement(root, _name("Message")).text = spec.message
-    etree.SubElement(root, _name("Hint")).text = spec.hint
+    etree.SubElement(root, qualified("Message")).text = spec.message
+    etree.SubElement(root, qualified("Hint")).text = spec.hint
     return root
 
 
@@ -249,12 +251,13 @@ def _label_attributes(label: ConfirmedLabel) -> dict[str, str]:
     return attributes
 
 
-def _name(local: str) -> str:
+def qualified(local: str) -> str:
+    """Returns the element name in the API namespace."""
     return f"{{{NAMESPACE}}}{local}"
 
 
 def _text(root: etree._Element, local: str) -> str:
-    return root.findtext(_name(local)) or ""
+    return root.findtext(qualified(local)) or ""
 
 
 def _boolean(value: bool) -> str:

@@ -14,11 +14,13 @@ from loadvision.domain.assessment import Assessment, LoadPercent, ReviewReason, 
 from loadvision.domain.confirmed_label import LabelSource
 from loadvision.domain.model_version import ModelVersionId, ModelVersionStatus
 from loadvision.domain.shipment import ShipmentId
+from loadvision.errors import ErrorCode
 from tests.builders import (
     T0,
     make_assessment,
     make_image,
     make_image_record,
+    make_job,
     make_label,
     make_model_version,
     make_shipment,
@@ -230,6 +232,98 @@ class UnitOfWorkContract:
         with uow_factory() as uow:
             assert uow.model_versions.get_active() == new.activate(T0 + timedelta(hours=2))
             assert uow.model_versions.get(old.version) == old.retire()
+
+    def test_job_is_stored_with_its_outcome_and_read_back(
+        self, uow_factory: UnitOfWorkFactory
+    ) -> None:
+        version = make_model_version("v1")
+        finished = (
+            make_job()
+            .started(at=T0 + timedelta(minutes=1), base_version=version.version)
+            .succeeded(
+                at=T0 + timedelta(minutes=9),
+                run_id="run_20260918_101500_ab12",
+                result_version=version.version,
+                gate_passed=True,
+            )
+        )
+        with uow_factory() as uow:
+            uow.model_versions.add(version)
+            uow.training_jobs.add(make_job())
+            uow.training_jobs.update(finished)
+            uow.commit()
+        with uow_factory() as uow:
+            assert uow.training_jobs.get(finished.id) == finished
+            assert uow.training_jobs.get(UUID(int=404)) is None
+
+    def test_failed_job_keeps_its_error_code(self, uow_factory: UnitOfWorkFactory) -> None:
+        failed = (
+            make_job()
+            .started(at=T0, base_version=None)
+            .failed(at=T0, run_id=None, error_code=ErrorCode.STAGE_CHECK_FAILED)
+        )
+        with uow_factory() as uow:
+            uow.training_jobs.add(make_job())
+            uow.training_jobs.update(failed)
+            uow.commit()
+        with uow_factory() as uow:
+            assert uow.training_jobs.get(failed.id) == failed
+
+    def test_the_oldest_queued_job_is_claimed_first(self, uow_factory: UnitOfWorkFactory) -> None:
+        older = make_job(UUID(int=1), at=T0)
+        newer = make_job(UUID(int=2), at=T0 + timedelta(minutes=5))
+        with uow_factory() as uow:
+            uow.training_jobs.add(newer)
+            uow.training_jobs.add(older)
+            uow.commit()
+        with uow_factory() as uow:
+            assert uow.training_jobs.claim_next() == older
+
+    def test_nothing_is_claimed_while_a_job_is_running(
+        self, uow_factory: UnitOfWorkFactory
+    ) -> None:
+        with uow_factory() as uow:
+            uow.training_jobs.add(make_job(UUID(int=1)))
+            uow.training_jobs.update(make_job(UUID(int=1)).started(at=T0, base_version=None))
+            uow.training_jobs.add(make_job(UUID(int=2), at=T0 + timedelta(minutes=5)))
+            uow.commit()
+        with uow_factory() as uow:
+            assert uow.training_jobs.claim_next() is None
+
+    def test_an_empty_queue_claims_nothing(self, uow_factory: UnitOfWorkFactory) -> None:
+        with uow_factory() as uow:
+            assert uow.training_jobs.claim_next() is None
+            assert uow.training_jobs.find_unfinished() is None
+
+    def test_a_job_is_unfinished_until_it_ends(self, uow_factory: UnitOfWorkFactory) -> None:
+        job = make_job()
+        with uow_factory() as uow:
+            uow.training_jobs.add(job)
+            uow.commit()
+        with uow_factory() as uow:
+            assert uow.training_jobs.find_unfinished() == job
+            uow.training_jobs.update(
+                job.started(at=T0, base_version=None).failed(
+                    at=T0, run_id="run-1", error_code=ErrorCode.INTERNAL_ERROR
+                )
+            )
+            uow.commit()
+        with uow_factory() as uow:
+            assert uow.training_jobs.find_unfinished() is None
+
+    def test_recent_jobs_come_newest_first(self, uow_factory: UnitOfWorkFactory) -> None:
+        jobs = [make_job(UUID(int=n), at=T0 + timedelta(minutes=n)) for n in range(1, 4)]
+        with uow_factory() as uow:
+            for job in jobs:
+                uow.training_jobs.add(job)
+            uow.commit()
+        with uow_factory() as uow:
+            assert uow.training_jobs.list_recent(2) == [jobs[2], jobs[1]]
+            assert uow.training_jobs.list_recent(10) == list(reversed(jobs))
+
+    def test_updating_an_unstored_job_fails(self, uow_factory: UnitOfWorkFactory) -> None:
+        with uow_factory() as uow, pytest.raises(ValueError, match="not stored"):
+            uow.training_jobs.update(make_job().started(at=T0, base_version=None))
 
     def test_updating_an_unregistered_model_version_fails(
         self, uow_factory: UnitOfWorkFactory

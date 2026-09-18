@@ -13,8 +13,10 @@ from loadvision.api.xml.parser import NAMESPACE, schema_bytes
 from loadvision.application.assess_photo import AssessPhoto
 from loadvision.application.get_assessment import GetAssessment
 from loadvision.application.get_shipment import GetShipment
+from loadvision.application.model_versions import ActivateModel, ListModelVersions
 from loadvision.application.ports import LoadPredictor
 from loadvision.application.submit_label import SubmitLabel
+from loadvision.application.training_jobs import GetTrainingJob, ListTrainingJobs, StartTraining
 from loadvision.errors import ERROR_CATALOG, ErrorCode
 from loadvision.imaging.prepared_image import MediaType
 from loadvision.imaging.validator import ImageLimits, prepare_image
@@ -63,6 +65,13 @@ def make_service(
         get_assessment=GetAssessment(uow_factory=store.unit_of_work),
         submit_label=SubmitLabel(uow_factory=store.unit_of_work, clock=clock),
         get_shipment=GetShipment(uow_factory=store.unit_of_work),
+        list_models=ListModelVersions(uow_factory=store.unit_of_work),
+        activate_model=ActivateModel(uow_factory=store.unit_of_work, clock=clock),
+        start_training=StartTraining(
+            uow_factory=store.unit_of_work, clock=clock, new_id=SequentialIds()
+        ),
+        list_training_jobs=ListTrainingJobs(uow_factory=store.unit_of_work),
+        get_training_job=GetTrainingJob(uow_factory=store.unit_of_work),
         model=model,
         request_id_header="X-Request-ID",
         max_body_bytes=MAX_BODY_BYTES,

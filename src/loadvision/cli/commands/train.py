@@ -9,10 +9,11 @@ from typing import Final
 
 from loadvision.cli.errors import CommandError
 from loadvision.cli.options import add_data_option, add_device_option
-from loadvision.cli.paths import CACHE_SUBDIR, cache_dir, runs_dir
+from loadvision.cli.paths import cache_dir, runs_dir
 from loadvision.ml.pipeline.runner import PipelineRunner, RunStatus
 from loadvision.ml.pipeline.stage import RunContext, new_run_id
 from loadvision.ml.pipeline.stages import build_pipeline
+from loadvision.settings import RUNS_CACHE_SUBDIR
 
 DEFAULT_SEED: Final = 0
 
@@ -47,7 +48,7 @@ def add_commands(groups: "argparse._SubParsersAction[argparse.ArgumentParser]") 
     parser.add_argument(
         "--cache-dir",
         type=Path,
-        help=f"cache kept between runs, such as embeddings (default: <runs-dir>/{CACHE_SUBDIR})",
+        help=f"cache kept between runs (default: <runs-dir>/{RUNS_CACHE_SUBDIR})",
     )
     parser.add_argument(
         "--seed", type=int, default=DEFAULT_SEED, help="seed of the run (default: %(default)s)"

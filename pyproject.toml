@@ -19,6 +19,7 @@ dependencies = [
 
 [project.scripts]
 loadvision = "loadvision.cli.main:main"
+loadvision-worker = "loadvision.worker.main:main"
 
 [build-system]
 requires = ["uv_build>=0.12.13,<0.13"]

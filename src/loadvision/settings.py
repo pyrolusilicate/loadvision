@@ -16,6 +16,8 @@ DATABASE_URL_ENV: Final = "DATABASE_URL"
 # Path of the settings file, for a deployment that keeps it outside the repository.
 CONFIG_PATH_ENV: Final = "LOADVISION_CONFIG"
 DEFAULT_CONFIG_PATH: Final = Path("configs/app.yaml")
+# Cache kept between runs, such as embeddings, inside the runs folder but outside every run.
+RUNS_CACHE_SUBDIR: Final = "cache"
 
 _MEBIBYTE: Final = 1024 * 1024
 _MEGAPIXEL: Final = 1_000_000
@@ -104,6 +106,11 @@ class RunsSettings(_Section):
 
     dir: Path
 
+    @property
+    def cache_dir(self) -> Path:
+        """Cache kept between runs, outside every run folder."""
+        return self.dir / RUNS_CACHE_SUBDIR
+
 
 class ModelSettings(_Section):
     """Model the service starts with.
@@ -117,6 +124,22 @@ class ModelSettings(_Section):
     version: str = Field(min_length=1)
 
 
+class TrainingSettings(_Section):
+    """Retraining the worker runs.
+
+    Attributes:
+        config: Experiment config the worker retrains with.
+        data_dir: Base dataset the confirmed labels are added to.
+        device: Torch device the encoders run on.
+        poll_seconds: How long the worker waits before looking for a job again.
+    """
+
+    config: Path
+    data_dir: Path
+    device: str = Field(min_length=1)
+    poll_seconds: float = Field(gt=0)
+
+
 class Settings(_Section):
     """All settings of `configs/app.yaml`."""
 
@@ -126,6 +149,7 @@ class Settings(_Section):
     logging: LoggingSettings
     runs: RunsSettings
     model: ModelSettings
+    training: TrainingSettings
 
 
 def load_settings(path: Path | None = None) -> Settings:

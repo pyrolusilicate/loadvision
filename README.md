@@ -47,6 +47,7 @@ git config core.hooksPath .githooks    # или just hooks
 ```bash
 uv run loadvision model build-baseline                       # пакет модели в storage/models/
 uv run loadvision train configs/experiments/<имя>.json       # весь пайплайн обучения
+uv run loadvision predict submission                         # прогноз пакетом модели
 uv run loadvision data folds --check                         # проверить configs/splits/folds.json
 uv run loadvision eval heads                                 # сравнение энкодеров и голов по OOF
 uv run loadvision eval errors                                # отчёт об ошибках в runs/eda/
@@ -65,6 +66,14 @@ just up                                   # Postgres, миграции и API н
 ## CI
 
 На GitLab хакатона нет раннеров, поэтому пайплайн не создаётся и проверки идут локально в хуке. Когда раннер появится, в Settings -> CI/CD -> Variables добавьте переменную `RUN_CI` со значением `true`: CI запустит тот же `scripts/check.sh`.
+
+## Документация
+
+| Файл | Что внутри |
+|---|---|
+| `docs/running.md` | запуск сервиса, все команды, примеры запросов к API, тесты |
+| `docs/architecture.md` | сущности, каталог ошибок, принятые решения и причины |
+| `docs/README.md` | оглавление остальной документации и журналов |
 
 ## Структура
 
