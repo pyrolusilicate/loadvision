@@ -29,11 +29,11 @@ async def models(request: Request, session: SignedIn) -> Response:
 
 @router.post("/models/{version}/activate")
 async def activate(request: Request, session: SignedIn, version: str) -> Response:
-    """Makes a version active and starts loading it, so the service answers with it soon."""
+    """Makes a version active and starts loading it; until then the previous one answers."""
     await checked_form(request, session)
     services = ui_services_of(request)
     await run_in_threadpool(services.activate_model, version_from_path(version))
-    services.reload_model()
+    await run_in_threadpool(services.reload_model)
     return RedirectResponse(_MODELS, status_code=303)
 
 
@@ -43,7 +43,7 @@ async def rollback(request: Request, session: SignedIn) -> Response:
     await checked_form(request, session)
     services = ui_services_of(request)
     await run_in_threadpool(services.rollback_model)
-    services.reload_model()
+    await run_in_threadpool(services.reload_model)
     return RedirectResponse(_MODELS, status_code=303)
 
 

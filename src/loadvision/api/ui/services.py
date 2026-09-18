@@ -32,8 +32,7 @@ class UiServices:
         list_models: Registered model versions.
         activate_model: Makes a version the active one.
         rollback_model: Brings back the previous version.
-        reload_model: Starts loading the active version, so the service answers with it without
-            a restart.
+        reload_model: Starts loading the active version now rather than at the next check.
         start_training: Queues a retraining.
         list_training_jobs: Recent retrainings.
         storage: Photo bytes, shown on the pages.

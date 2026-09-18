@@ -113,15 +113,20 @@ class RunsSettings(_Section):
 
 
 class ModelSettings(_Section):
-    """Model the service starts with.
+    """Model the service starts with and how it follows the active version.
 
     Attributes:
         version: Version the service activates while the database has no active version; once
             one is active, the database decides. The package is the folder of that name in the
             models folder.
+        check_seconds: How often the service compares the version it answers with to the
+            active one and loads the active one if they differ.
+        retry_seconds: Pause before a version whose package failed to load is tried again.
     """
 
     version: str = Field(min_length=1)
+    check_seconds: float = Field(gt=0)
+    retry_seconds: float = Field(gt=0)
 
 
 class TrainingSettings(_Section):

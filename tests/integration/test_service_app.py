@@ -11,7 +11,7 @@ from sqlalchemy import Engine
 from loadvision.api.main import build_service_app
 from loadvision.api.services import ApiServices
 from loadvision.api.xml.parser import NAMESPACE
-from loadvision.application.model_versions import RegisterModel
+from loadvision.application.model_versions import ActivateModel, RegisterModel
 from loadvision.application.operators import AddOperator
 from loadvision.domain.confirmed_label import LabelSource
 from loadvision.domain.model_version import ModelVersionId
@@ -26,13 +26,20 @@ VERSION = "baseline-v0"
 CANDIDATE = "candidate-v1"
 READY_SECONDS = 30.0
 POLL_SECONDS = 0.05
+# The service checks the active version this often in these tests, and retries a failed one.
+CHECK_SECONDS = 0.05
+RETRY_SECONDS = 0.2
 
 
 @pytest.fixture
 def settings(tmp_path: Path) -> Settings:
     data = yaml.safe_load(DEFAULT_CONFIG_PATH.read_text(encoding="utf-8"))
     data["storage"] = {"images_dir": tmp_path / "images", "models_dir": tmp_path / "models"}
-    data["model"] = {"version": VERSION}
+    data["model"] = {
+        "version": VERSION,
+        "check_seconds": CHECK_SECONDS,
+        "retry_seconds": RETRY_SECONDS,
+    }
     return Settings.model_validate(data)
 
 
@@ -53,14 +60,17 @@ def services_of(app: FastAPI) -> ApiServices:
 
 
 def wait_for_model(app: FastAPI, version: str | None = None) -> None:
-    """Waits until a model is loaded, or `version` if given, or the loading has failed."""
+    """Waits until `version` answers or, without one, until any model loads or loading fails.
+
+    A failure does not end the wait for a given version: the service tries it again.
+    """
     model = services_of(app).model
 
     def settled() -> bool:
         current = model.current()
-        if model.failure is not None:
-            return True
-        return current is not None and (version is None or current.version.value == version)
+        if version is not None:
+            return current is not None and current.version.value == version
+        return current is not None or model.failure is not None
 
     deadline = time.monotonic() + READY_SECONDS
     while not settled():
@@ -178,3 +188,40 @@ def test_operator_labels_a_photo_and_switches_the_model_on_postgres(
     assert active.version == ModelVersionId(CANDIDATE)
     assert stored is not None
     assert stored.source is LabelSource.UI
+
+
+@pytest.mark.integration
+def test_a_version_activated_in_the_database_is_followed_without_a_restart(
+    settings: Settings, engine: Engine, tmp_path: Path
+) -> None:
+    build_package(settings, tmp_path)
+    build_package(settings, tmp_path, version=CANDIDATE, load=30.0)
+    uow_factory = functools.partial(PostgresUnitOfWork, engine)
+    RegisterModel(uow_factory=uow_factory, clock=utc_now)(ModelVersionId(CANDIDATE))
+    app = build_service_app(settings, engine)
+
+    with TestClient(app) as client:
+        wait_for_model(app, VERSION)
+        # What `loadvision model activate` and the worker do: they change only the database.
+        ActivateModel(uow_factory=uow_factory, clock=utc_now)(ModelVersionId(CANDIDATE))
+        wait_for_model(app, CANDIDATE)
+        health = client.get("/health")
+
+    assert document(health).get("modelVersion") == CANDIDATE
+
+
+@pytest.mark.integration
+def test_a_package_put_in_place_later_is_picked_up(
+    settings: Settings, engine: Engine, tmp_path: Path
+) -> None:
+    app = build_service_app(settings, engine)
+
+    with TestClient(app) as client:
+        wait_for_model(app)
+        missing = client.get("/health")
+        build_package(settings, tmp_path)
+        wait_for_model(app, VERSION)
+        ready = client.get("/health")
+
+    assert (missing.status_code, ready.status_code) == (503, 200)
+    assert services_of(app).model.failure is None

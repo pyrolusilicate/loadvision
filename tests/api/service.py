@@ -82,6 +82,7 @@ def make_service(
     if predictor is not None:
         model.activate(predictor)
     clock = FixedClock(T0)
+    reloads = ReloadCounter()
     services = ApiServices(
         assess_photo=AssessPhoto(
             uow_factory=store.unit_of_work,
@@ -101,10 +102,10 @@ def make_service(
         list_training_jobs=ListTrainingJobs(uow_factory=store.unit_of_work),
         get_training_job=GetTrainingJob(uow_factory=store.unit_of_work),
         model=model,
+        reload_model=reloads,
         request_id_header="X-Request-ID",
         max_body_bytes=MAX_BODY_BYTES,
     )
-    reloads = ReloadCounter()
     ui = UiServices(
         sign_in=SignIn(uow_factory=store.unit_of_work, clock=clock),
         authenticate=Authenticate(uow_factory=store.unit_of_work, clock=clock),

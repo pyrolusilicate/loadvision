@@ -24,10 +24,11 @@ async def list_models(request: Request) -> Response:
 async def activate_model(request: Request, version: str) -> Response:
     """Makes a registered version the one the service answers with.
 
-    Answers 200 with the active version. Errors: 404 `MODEL_VERSION_NOT_FOUND` for a version
-    that is not registered, 409 `MODEL_VERSION_STATUS_CONFLICT` for one the gate rejected.
+    Answers 200 with the active version and starts loading it; until it has loaded, the
+    previous version answers. Errors: 404 `MODEL_VERSION_NOT_FOUND` for a version that is not
+    registered, 409 `MODEL_VERSION_STATUS_CONFLICT` for one the gate rejected.
     """
-    active = await run_in_threadpool(
-        services_of(request).activate_model, version_from_path(version)
-    )
+    services = services_of(request)
+    active = await run_in_threadpool(services.activate_model, version_from_path(version))
+    await run_in_threadpool(services.reload_model)
     return xml_response(model_document(active))

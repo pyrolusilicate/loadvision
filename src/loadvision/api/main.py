@@ -38,6 +38,7 @@ from loadvision.domain.timestamps import utc_now
 from loadvision.infrastructure.db.session import PostgresUnitOfWork, create_database_engine
 from loadvision.infrastructure.storage.local_storage import LocalImageStorage
 from loadvision.ml.inference.active_model import ActiveModel
+from loadvision.ml.inference.model_follower import ModelFollower
 from loadvision.ml.inference.predictor import PackagePredictor
 from loadvision.ml.packaging.model_package import ModelPackage
 from loadvision.observability.logging import configure_logging
@@ -66,9 +67,9 @@ def build_service_app(settings: Settings, engine: Engine) -> FastAPI:
     """Wires the use cases to Postgres, the photo folder and the model packages.
 
     The service answers as soon as it starts. The model loads in the background, and until it
-    is ready assessments and `/health` answer 503. A version activated on the operator pages
-    loads the same way while the previous one keeps answering. The engine is closed when the
-    service stops.
+    is ready assessments and `/health` answer 503. Afterwards the service follows the version
+    the database names active: a newly activated one loads in the background while the
+    previous one keeps answering. The engine is closed when the service stops.
 
     Args:
         settings: Service settings.
@@ -82,6 +83,17 @@ def build_service_app(settings: Settings, engine: Engine) -> FastAPI:
     """
     uow_factory: UnitOfWorkFactory = functools.partial(PostgresUnitOfWork, engine)
     model = ActiveModel()
+    follower = ModelFollower(
+        model,
+        LoadServedModel(
+            uow_factory=uow_factory,
+            clock=utc_now,
+            load_package=functools.partial(load_package, settings.storage.models_dir),
+            initial_version=ModelVersionId(settings.model.version),
+        ),
+        check_seconds=settings.model.check_seconds,
+        retry_seconds=settings.model.retry_seconds,
+    )
     storage = LocalImageStorage(settings.storage.images_dir)
     services = ApiServices(
         assess_photo=AssessPhoto(
@@ -100,14 +112,9 @@ def build_service_app(settings: Settings, engine: Engine) -> FastAPI:
         list_training_jobs=ListTrainingJobs(uow_factory=uow_factory),
         get_training_job=GetTrainingJob(uow_factory=uow_factory),
         model=model,
+        reload_model=follower.check,
         request_id_header=settings.api.request_id_header,
         max_body_bytes=settings.api.max_body_bytes,
-    )
-    load_model = LoadServedModel(
-        uow_factory=uow_factory,
-        clock=utc_now,
-        load_package=functools.partial(load_package, settings.storage.models_dir),
-        initial_version=ModelVersionId(settings.model.version),
     )
     ui = UiServices(
         sign_in=SignIn(uow_factory=uow_factory, clock=utc_now),
@@ -120,7 +127,7 @@ def build_service_app(settings: Settings, engine: Engine) -> FastAPI:
         list_models=services.list_models,
         activate_model=services.activate_model,
         rollback_model=RollbackModel(uow_factory=uow_factory, activate=services.activate_model),
-        reload_model=lambda: model.load_in_background(load_model),
+        reload_model=follower.check,
         start_training=services.start_training,
         list_training_jobs=services.list_training_jobs,
         storage=storage,
@@ -129,10 +136,11 @@ def build_service_app(settings: Settings, engine: Engine) -> FastAPI:
 
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
-        model.load_in_background(load_model)
+        follower.start()
         try:
             yield
         finally:
+            follower.stop()
             engine.dispose()
 
     return create_app(services, lifespan, ui)
