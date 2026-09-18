@@ -4,7 +4,12 @@ from types import TracebackType
 from typing import Self
 from uuid import UUID
 
-from loadvision.application.ports import AssessmentAlreadyExistsError, ImageRecord
+from loadvision.application.ports import (
+    AssessmentAlreadyExistsError,
+    AssessmentOrder,
+    ImageRecord,
+    ReviewStatus,
+)
 from loadvision.domain.assessment import Assessment
 from loadvision.domain.confirmed_label import ConfirmedLabel
 from loadvision.domain.model_version import ModelVersion, ModelVersionId, ModelVersionStatus
@@ -97,13 +102,45 @@ class InMemoryAssessmentRepository:
         rows = [row for row in self._table.rows() if row.shipment_id == shipment_id]
         return sorted(rows, key=lambda row: row.created_at, reverse=True)
 
-    def list_recent(self, limit: int, *, unlabeled_only: bool = False) -> list[Assessment]:
-        rows = [
-            row
-            for row in self._table.rows()
-            if not unlabeled_only or self._labels.get(row.image_sha256) is None
-        ]
-        return sorted(rows, key=lambda row: row.created_at, reverse=True)[:limit]
+    def list_page(
+        self,
+        *,
+        order: AssessmentOrder,
+        offset: int,
+        limit: int,
+        status: ReviewStatus = ReviewStatus.ALL,
+    ) -> list[Assessment]:
+        newest = sorted(
+            self._filtered(status),
+            key=lambda row: (row.created_at, str(row.id)),
+            reverse=True,
+        )
+        # Sorting is stable, so rows with the same load stay newest first, as in Postgres.
+        ordered = {
+            AssessmentOrder.NEWEST: newest,
+            AssessmentOrder.OLDEST: list(reversed(newest)),
+            AssessmentOrder.FULLEST: sorted(newest, key=lambda row: -row.load_pct.value),
+            AssessmentOrder.EMPTIEST: sorted(newest, key=lambda row: row.load_pct.value),
+        }[order]
+        return ordered[offset : offset + limit]
+
+    def count(self, *, status: ReviewStatus = ReviewStatus.ALL) -> int:
+        return len(self._filtered(status))
+
+    def _filtered(self, status: ReviewStatus) -> list[Assessment]:
+        def wanted(row: Assessment) -> bool:
+            label = self._labels.get(row.image_sha256)
+            match status:
+                case ReviewStatus.ALL:
+                    return True
+                case ReviewStatus.WAITING:
+                    return label is None
+                case ReviewStatus.CONFIRMED:
+                    return label is not None and not label.unusable
+                case ReviewStatus.UNUSABLE:
+                    return label is not None and label.unusable
+
+        return [row for row in self._table.rows() if wanted(row)]
 
 
 class InMemoryImageRepository:
@@ -157,9 +194,12 @@ class InMemoryTrainingJobRepository:
             return None
         return next(iter(self._by_status(TrainingJobStatus.QUEUED)), None)
 
-    def list_recent(self, limit: int) -> list[TrainingJob]:
+    def list_recent(self, limit: int, offset: int = 0) -> list[TrainingJob]:
         newest = sorted(self._table.rows(), key=lambda row: (row.created_at, str(row.id)))
-        return list(reversed(newest))[:limit]
+        return list(reversed(newest))[offset : offset + limit]
+
+    def count(self) -> int:
+        return len(self._table.rows())
 
     def update(self, job: TrainingJob) -> None:
         if self._table.get(job.id) is None:

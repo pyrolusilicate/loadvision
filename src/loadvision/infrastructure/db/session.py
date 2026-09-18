@@ -21,17 +21,21 @@ from loadvision.infrastructure.db.repositories.training_jobs import (
 )
 
 
-def create_database_engine(url: str) -> Engine:
+def create_database_engine(url: str, application_name: str = "") -> Engine:
     """Creates the engine of the service database.
 
     Args:
         url: Connection string, such as ``postgresql+psycopg://user:password@host/db``.
+        application_name: Name the connections show in pg_stat_activity; the worker sets it so
+            the service can tell it is running.
 
     Returns:
         Engine with a connection pool. A pooled connection is checked before use, so a
         database restart does not fail the next request.
     """
-    return create_engine(url, pool_pre_ping=True)
+    return create_engine(
+        url, pool_pre_ping=True, connect_args={"application_name": application_name}
+    )
 
 
 class PostgresUnitOfWork:

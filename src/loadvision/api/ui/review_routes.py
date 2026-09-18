@@ -1,7 +1,9 @@
 """The review queue: photos waiting for a confirmed load, one assessment, and its photo."""
 
+import functools
 import re
 from typing import Annotated, Final
+from urllib.parse import urlencode
 
 from fastapi import APIRouter, Query
 from starlette.concurrency import run_in_threadpool
@@ -11,9 +13,11 @@ from starlette.responses import RedirectResponse, Response
 from loadvision.api.path_params import uuid_from_path
 from loadvision.api.ui.assess_routes import NEW_RESULT, REUSED_RESULT
 from loadvision.api.ui.pages import page
+from loadvision.api.ui.pagination import TILES_PER_PAGE, pager
 from loadvision.api.ui.services import ui_services_of
 from loadvision.api.ui.session import SignedIn, checked_form
 from loadvision.api.ui.templates import UI_PREFIX
+from loadvision.application.ports import AssessmentOrder, ReviewStatus
 from loadvision.application.submit_label import SubmitLabelRequest
 from loadvision.domain.assessment import SHA256_HEX_PATTERN, LoadPercent
 from loadvision.domain.confirmed_label import LabelSource
@@ -26,17 +30,58 @@ _SHA256_RE: Final = re.compile(SHA256_HEX_PATTERN)
 # A photo never changes under its hash, so a browser may keep it for a day.
 _PHOTO_CACHE: Final = "private, max-age=86400, immutable"
 _UNUSABLE_ACTION: Final = "unusable"
+_QUEUE: Final = f"{UI_PREFIX}/"
+# Filters and orders of the queue in the words of the page.
+_STATUSES: Final = (
+    (ReviewStatus.WAITING, "На рассмотрении"),
+    (ReviewStatus.CONFIRMED, "Подтверждённые"),
+    (ReviewStatus.UNUSABLE, "Непригодные"),
+    (ReviewStatus.ALL, "Все"),
+)
+_ORDERS: Final = (
+    (AssessmentOrder.NEWEST, "Сначала новые"),
+    (AssessmentOrder.OLDEST, "Сначала старые"),
+    (AssessmentOrder.FULLEST, "Сначала полные"),
+    (AssessmentOrder.EMPTIEST, "Сначала пустые"),
+)
 
 
 @router.get("/")
 async def queue(
-    request: Request, session: SignedIn, show_all: Annotated[bool, Query(alias="all")] = False
+    request: Request,
+    session: SignedIn,
+    status: ReviewStatus = ReviewStatus.WAITING,
+    order: AssessmentOrder = AssessmentOrder.NEWEST,
+    number: Annotated[int, Query(alias="page")] = 1,
 ) -> Response:
-    """Shows the newest assessments, by default only those whose photo nobody confirmed."""
-    items = await run_in_threadpool(
-        ui_services_of(request).review_queue, unlabeled_only=not show_all
+    """Shows one page of assessments, by default those whose photo nobody labelled yet."""
+    shown = await run_in_threadpool(
+        functools.partial(
+            ui_services_of(request).review_queue,
+            page=number,
+            size=TILES_PER_PAGE,
+            order=order,
+            status=status,
+        )
     )
-    return page(request, "queue.html", session, items=items, show_all=show_all)
+    return page(
+        request,
+        "queue.html",
+        session,
+        items=shown.items,
+        status=status.value,
+        status_label=dict(_STATUSES)[status],
+        order_label=dict(_ORDERS)[order],
+        statuses=[
+            (label, _queue_address(status=choice, order=order), choice is status)
+            for choice, label in _STATUSES
+        ],
+        orders=[
+            (label, _queue_address(status=status, order=choice), choice is order)
+            for choice, label in _ORDERS
+        ],
+        pager=pager(shown, _QUEUE, **_queue_params(status=status, order=order)),
+    )
 
 
 @router.get("/assessments/{assessment_id}")
@@ -109,6 +154,21 @@ async def photo(request: Request, _session: SignedIn, sha256: str) -> Response:
     if raw is None or media_type is None:
         raise LoadvisionError(ErrorCode.ROUTE_NOT_FOUND, f"photo {sha256} is not stored")
     return Response(raw, media_type=media_type.value, headers={"Cache-Control": _PHOTO_CACHE})
+
+
+def _queue_params(*, status: ReviewStatus, order: AssessmentOrder) -> dict[str, str]:
+    # Defaults stay out of the address, so the plain queue keeps its plain address.
+    params: dict[str, str] = {}
+    if status is not ReviewStatus.WAITING:
+        params["status"] = status.value
+    if order is not AssessmentOrder.NEWEST:
+        params["order"] = order.value
+    return params
+
+
+def _queue_address(*, status: ReviewStatus, order: AssessmentOrder) -> str:
+    params = _queue_params(status=status, order=order)
+    return f"{_QUEUE}?{urlencode(params)}" if params else _QUEUE
 
 
 def _load(text: str) -> LoadPercent | None:

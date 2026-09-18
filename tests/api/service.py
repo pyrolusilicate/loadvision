@@ -26,6 +26,7 @@ from loadvision.application.submit_label import SubmitLabel
 from loadvision.application.training_jobs import (
     CountTrainingLabels,
     GetTrainingJob,
+    ListTrainingJobPage,
     ListTrainingJobs,
     StartTraining,
 )
@@ -59,6 +60,16 @@ class ReloadCounter:
         self.calls += 1
 
 
+class WorkerSwitch:
+    """Stands in for the check whether a worker is connected; tests turn it off."""
+
+    def __init__(self) -> None:
+        self.online = True
+
+    def __call__(self) -> bool:
+        return self.online
+
+
 @dataclass
 class Service:
     client: TestClient
@@ -67,6 +78,7 @@ class Service:
     clock: FixedClock
     model: ActiveModel
     reloads: ReloadCounter
+    worker: WorkerSwitch
 
 
 def make_service(
@@ -111,6 +123,7 @@ def make_service(
         request_id_header="X-Request-ID",
         max_body_bytes=MAX_BODY_BYTES,
     )
+    worker = WorkerSwitch()
     ui = UiServices(
         sign_in=SignIn(uow_factory=store.unit_of_work, clock=clock),
         authenticate=Authenticate(uow_factory=store.unit_of_work, clock=clock),
@@ -127,14 +140,21 @@ def make_service(
         ),
         reload_model=reloads,
         start_training=services.start_training,
-        list_training_jobs=services.list_training_jobs,
+        training_job_page=ListTrainingJobPage(uow_factory=store.unit_of_work),
         count_training_labels=CountTrainingLabels(uow_factory=store.unit_of_work),
+        worker_online=worker,
         storage=storage if photos is None else photos,
         model=model,
     )
     client = TestClient(create_app(services, ui=ui), raise_server_exceptions=False)
     return Service(
-        client=client, store=store, storage=storage, clock=clock, model=model, reloads=reloads
+        client=client,
+        store=store,
+        storage=storage,
+        clock=clock,
+        model=model,
+        reloads=reloads,
+        worker=worker,
     )
 
 

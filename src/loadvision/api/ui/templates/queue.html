@@ -2,14 +2,25 @@
 {% block title %}Очередь{% endblock %}
 {% block content %}
 <div class="row">
-  <h1>{% if show_all %}Последние оценки{% else %}Ждут проверки{% endif %}</h1>
-  <div class="tabs">
-    <a href="{{ ui }}/" class="{% if not show_all %}on{% endif %}">Без метки</a>
-    <a href="{{ ui }}/?all=true" class="{% if show_all %}on{% endif %}">Все</a>
+  <h1>{{ status_label }}</h1>
+  <div class="filters">
+    <details class="menu">
+      <summary><span class="menu-name">Статус</span> {{ status_label }}</summary>
+      <div class="menu-list">
+        {% for label, address, on in statuses %}<a href="{{ address }}"{% if on %} class="on" aria-current="true"{% endif %}>{{ label }}</a>{% endfor %}
+      </div>
+    </details>
+    <details class="menu">
+      <summary><span class="menu-name">Порядок</span> {{ order_label }}</summary>
+      <div class="menu-list">
+        {% for label, address, on in orders %}<a href="{{ address }}"{% if on %} class="on" aria-current="true"{% endif %}>{{ label }}</a>{% endfor %}
+      </div>
+    </details>
   </div>
 </div>
 {% if not items %}
-<p class="note">{% if show_all %}Оценок пока нет.{% else %}Всё проверено.{% endif %}
+<p class="note">
+  {% if status == 'review' %}Всё проверено.{% elif status == 'confirmed' %}Подтверждённых оценок пока нет.{% elif status == 'unusable' %}Непригодных фото нет.{% else %}Оценок пока нет.{% endif %}
   <a href="{{ ui }}/assess">Оценить фото</a></p>
 {% else %}
 <div class="grid">
@@ -30,5 +41,6 @@
   </a>
   {% endfor %}
 </div>
+{% include "_pager.html" %}
 {% endif %}
 {% endblock %}

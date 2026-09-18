@@ -16,7 +16,7 @@ from loadvision.application.review_queue import ReviewQueue
 from loadvision.application.submit_label import SubmitLabel
 from loadvision.application.training_jobs import (
     CountTrainingLabels,
-    ListTrainingJobs,
+    ListTrainingJobPage,
     StartTraining,
 )
 from loadvision.ml.inference.active_model import ActiveModel
@@ -40,8 +40,9 @@ class UiServices:
         rollback_model: Brings back the previous version.
         reload_model: Starts loading the active version now rather than at the next check.
         start_training: Queues a retraining.
-        list_training_jobs: Recent retrainings.
+        training_job_page: One page of retrainings, newest first.
         count_training_labels: Confirmed loads a retraining would learn from.
+        worker_online: Whether a worker is running to take a retraining from the queue.
         storage: Photo bytes, shown on the pages.
         model: The model the service answers with, for the header.
     """
@@ -59,8 +60,9 @@ class UiServices:
     rollback_model: RollbackModel
     reload_model: Callable[[], object]
     start_training: StartTraining
-    list_training_jobs: ListTrainingJobs
+    training_job_page: ListTrainingJobPage
     count_training_labels: CountTrainingLabels
+    worker_online: Callable[[], bool]
     storage: ImageStorage
     model: ActiveModel
 

@@ -137,6 +137,24 @@ class ShipmentRepository(Protocol):
         ...
 
 
+class ReviewStatus(StrEnum):
+    """What a person said about the photo of an assessment; the values go into page addresses."""
+
+    WAITING = "review"
+    CONFIRMED = "confirmed"
+    UNUSABLE = "unusable"
+    ALL = "all"
+
+
+class AssessmentOrder(StrEnum):
+    """Orders of the review queue; the values are what the page puts into its address."""
+
+    NEWEST = "new"
+    OLDEST = "old"
+    FULLEST = "full"
+    EMPTIEST = "empty"
+
+
 class AssessmentRepository(Protocol):
     """Assessments within the current unit of work."""
 
@@ -172,14 +190,30 @@ class AssessmentRepository(Protocol):
         """Returns all assessments of the shipment, newest `created_at` first."""
         ...
 
-    def list_recent(self, limit: int, *, unlabeled_only: bool = False) -> list[Assessment]:
-        """Returns the newest assessments first, at most `limit` of them.
+    def list_page(
+        self,
+        *,
+        order: AssessmentOrder,
+        offset: int,
+        limit: int,
+        status: ReviewStatus = ReviewStatus.ALL,
+    ) -> list[Assessment]:
+        """Returns one page of assessments in the given order.
+
+        Rows with equal keys are ordered by time and then by id, so the order is total and
+        two pages never share a row.
 
         Args:
+            order: Which assessments come first.
+            offset: Rows to skip.
             limit: Most rows to return.
-            unlabeled_only: Leave out assessments whose photo already has a label; what is
-                left is the work of the review queue.
+            status: Which labels the photos must have; `WAITING` leaves the photos nobody
+                labelled, the work of the review queue.
         """
+        ...
+
+    def count(self, *, status: ReviewStatus = ReviewStatus.ALL) -> int:
+        """Returns how many assessments `list_page` pages through."""
         ...
 
 
@@ -262,8 +296,12 @@ class TrainingJobRepository(Protocol):
         """
         ...
 
-    def list_recent(self, limit: int) -> list[TrainingJob]:
-        """Returns the newest jobs first, at most `limit` of them."""
+    def list_recent(self, limit: int, offset: int = 0) -> list[TrainingJob]:
+        """Returns the newest jobs first, at most `limit` of them after skipping `offset`."""
+        ...
+
+    def count(self) -> int:
+        """Returns how many jobs there are."""
         ...
 
     def update(self, job: TrainingJob) -> None:

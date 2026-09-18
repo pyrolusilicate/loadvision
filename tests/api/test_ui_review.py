@@ -47,14 +47,14 @@ def test_a_confirmed_photo_leaves_the_queue_but_stays_in_the_full_list(
     submit(service, f"{ASSESSMENT}/label", csrf=token, action="confirm", load_pct="60")
 
     assert "Всё проверено" in text_of(get(service, "/ui/"))
-    assert "подтверждено 60.0%" in text_of(get(service, "/ui/?all=true"))
+    assert "подтверждено 60.0%" in text_of(get(service, "/ui/?status=confirmed"))
 
 
 @pytest.mark.api
 def test_an_empty_list_says_there_is_nothing_yet(service: Service) -> None:
     sign_in(service)
 
-    assert "Оценок пока нет." in text_of(get(service, "/ui/?all=true"))
+    assert "Оценок пока нет." in text_of(get(service, "/ui/?status=all"))
 
 
 @pytest.mark.api

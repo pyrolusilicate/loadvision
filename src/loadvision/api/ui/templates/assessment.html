@@ -9,14 +9,11 @@
   </figure>
   <section class="card">
     {% if created %}
-    <p class="note ok">Фото оценено и сохранено в перевозке {{ a.shipment_id.value }}.</p>
+    <p class="note ok">Фото оценено и сохранено в перевозке.</p>
     {% elif reused %}
     <p class="note">Это фото уже было в перевозке {{ a.shipment_id.value }}: показана сохранённая оценка, модель её не пересчитывала.</p>
     {% endif %}
-    <div class="row">
-      <a href="{{ ui }}/shipments/{{ a.shipment_id.value|urlencode }}">Перевозка {{ a.shipment_id.value }}</a>
-      <a href="{{ ui }}/assess?number={{ a.shipment_id.value|urlencode }}">Оценить ещё фото этой перевозки</a>
-    </div>
+    <p><a href="{{ ui }}/shipments/{{ a.shipment_id.value|urlencode }}">Перевозка {{ a.shipment_id.value }}</a></p>
     <h1><span class="load">{{ a.load_pct.value|load }}%</span> <span class="muted">прогноз модели</span></h1>
     <dl>
       <dt>Модель</dt><dd>{{ a.model_version.value }}</dd>
@@ -24,7 +21,6 @@
       <dt>Время расчёта</dt><dd>{{ a.processing_ms }} мс</dd>
       {% if a.signals.uncertainty is not none %}<dt>Разброс ансамбля</dt><dd>{{ a.signals.uncertainty|load }} п.п.</dd>{% endif %}
       {% if a.signals.ood_score is not none %}<dt>Непохожесть на обучающие</dt><dd>{{ '%.3f'|format(a.signals.ood_score) }}</dd>{% endif %}
-      {% if a.request_id %}<dt>Запрос</dt><dd><code>{{ a.request_id }}</code></dd>{% endif %}
     </dl>
     {% if a.review_reasons %}
     <p class="note warn">Модель просит проверить: {{ a.review_reasons|map(attribute='value')|join(', ') }}.</p>

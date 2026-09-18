@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from typing import Final
 from uuid import UUID
 
+from loadvision.application.paging import Page, page_number
 from loadvision.application.ports import Clock, IdFactory, UnitOfWorkFactory
 from loadvision.domain.training_job import TrainingJob, TrainingMode
 from loadvision.errors import ErrorCode, LoadvisionError
@@ -67,6 +68,25 @@ class ListTrainingJobs:
         """Returns at most `limit` jobs, newest first."""
         with self.uow_factory() as uow:
             return uow.training_jobs.list_recent(limit)
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class ListTrainingJobPage:
+    """Reads one page of jobs, newest first.
+
+    Attributes:
+        uow_factory: Opens database transactions.
+    """
+
+    uow_factory: UnitOfWorkFactory
+
+    def __call__(self, *, page: int, size: int) -> Page[TrainingJob]:
+        """Returns the page; a number past the end shows the last page."""
+        with self.uow_factory() as uow:
+            total = uow.training_jobs.count()
+            number = page_number(page, total, size)
+            jobs = uow.training_jobs.list_recent(size, (number - 1) * size)
+        return Page(items=tuple(jobs), number=number, size=size, total=total)
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)

@@ -3,6 +3,7 @@ from uuid import UUID
 import pytest
 from httpx2 import Response
 
+from loadvision.api.ui.pages import catalog_error
 from loadvision.errors import ERROR_CATALOG, ErrorCode
 from tests import image_files
 from tests.api.service import PHOTO, PHOTO_SHA256, Service, child, document, make_service
@@ -44,7 +45,7 @@ def test_a_photo_is_assessed_stored_with_its_shipment_and_shown(service: Service
     [stored] = service.store.assessments.values()
     assert (stored.shipment_id.value, stored.image_sha256) == ("RP-1", PHOTO_SHA256)
     result = text_of(get(service, response.headers["location"]))
-    assert "Фото оценено и сохранено в перевозке RP-1." in result
+    assert "Фото оценено и сохранено в перевозке." in result
     api = child(document(service.client.get("/api/v1/shipments/RP-1")), "Current")
     assert api.get("id") == str(UUID(int=1))
 
@@ -78,9 +79,9 @@ def test_a_refused_photo_returns_the_form_with_the_catalog_reason(
 
     response = upload(service, token, number=number, raw=raw)
 
-    spec = ERROR_CATALOG[code]
-    assert response.status_code == spec.http_status
-    assert f"{spec.message} {spec.hint}" in text_of(response)
+    status, message, hint = catalog_error(code)
+    assert response.status_code == status
+    assert f"{message} {hint}" in text_of(response)
     assert page(response).xpath("//input[@name='shipment_id']/@value") == [number]
     assert service.store.assessments == {}
 
@@ -141,12 +142,9 @@ def test_an_unknown_shipment_offers_to_assess_its_first_photo(service: Service) 
 
 
 @pytest.mark.api
-def test_a_result_links_to_the_next_photo_of_the_same_shipment(service: Service) -> None:
-    token = sign_in(service)
-    upload(service, token)
+def test_the_form_takes_the_shipment_number_from_the_address(service: Service) -> None:
+    sign_in(service)
 
-    links = page(get(service, FIRST)).xpath("//a/@href")
     form = page(get(service, "/ui/assess?number=RP-1"))
 
-    assert "/ui/assess?number=RP-1" in links
     assert form.xpath("//input[@name='shipment_id']/@value") == ["RP-1"]

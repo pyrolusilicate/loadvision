@@ -1,17 +1,19 @@
 """Looking up a shipment by its number."""
 
-from typing import Final
+from typing import Annotated, Final
 from urllib.parse import quote
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Query
 from starlette.concurrency import run_in_threadpool
 from starlette.requests import Request
 from starlette.responses import RedirectResponse, Response
 
 from loadvision.api.ui.pages import catalog_error, page
+from loadvision.api.ui.pagination import ROWS_PER_PAGE, pager
 from loadvision.api.ui.services import ui_services_of
 from loadvision.api.ui.session import SignedIn
 from loadvision.api.ui.templates import UI_PREFIX
+from loadvision.application.paging import slice_page
 from loadvision.errors import ErrorCode, LoadvisionError
 
 router = APIRouter()
@@ -31,7 +33,12 @@ def search(request: Request, session: SignedIn, number: str = "") -> Response:
 
 
 @router.get("/shipments/{shipment_id}")
-async def shipment(request: Request, session: SignedIn, shipment_id: str) -> Response:
+async def shipment(
+    request: Request,
+    session: SignedIn,
+    shipment_id: str,
+    number: Annotated[int, Query(alias="page")] = 1,
+) -> Response:
     """Shows every assessment of the shipment, newest first.
 
     An unknown or malformed number stays on the search page with the reason; an unknown one
@@ -53,6 +60,14 @@ async def shipment(request: Request, session: SignedIn, shipment_id: str) -> Res
             error=(message, hint),
             unknown=error.code is ErrorCode.SHIPMENT_NOT_FOUND,
         )
+    # A shipment holds a handful of photos, so its history is paged in memory.
+    rows = slice_page(history.assessments, number, ROWS_PER_PAGE)
     return page(
-        request, "shipments.html", session, history=history, number=history.shipment_id.value
+        request,
+        "shipments.html",
+        session,
+        history=history,
+        number=history.shipment_id.value,
+        rows=rows,
+        pager=pager(rows, f"{UI_PREFIX}/shipments/{quote(history.shipment_id.value, safe='')}"),
     )

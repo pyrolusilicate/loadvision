@@ -24,7 +24,7 @@ from loadvision.api.ui.pages import catalog_error, page
 from loadvision.api.ui.services import UiServices
 from loadvision.api.ui.session import FormRejectedError, SignInRequiredError
 from loadvision.api.ui.templates import UI_PREFIX
-from loadvision.errors import ERROR_CATALOG, ErrorCode, LoadvisionError
+from loadvision.errors import ErrorCode, LoadvisionError
 
 _STATIC: Final = Path(__file__).parent / "static"
 _FORM_REJECTED: Final = (
@@ -107,8 +107,8 @@ async def _malformed_address(request: Request, _error: Exception) -> Response:
 async def _unexpected_error(request: Request, _error: Exception) -> Response:
     # Not logged here: after the page is sent, Starlette raises the error again, and the handler
     # of the service application logs it with the request id.
-    spec = ERROR_CATALOG[ErrorCode.INTERNAL_ERROR]
-    return _error_page(request, 500, spec.message, spec.hint)
+    status, message, hint = catalog_error(ErrorCode.INTERNAL_ERROR)
+    return _error_page(request, status, message, hint)
 
 
 def _error_page(request: Request, status: int, message: str, hint: str) -> Response:

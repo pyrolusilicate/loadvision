@@ -1,11 +1,14 @@
-/* Operator pages: light, gray, one accent for actions. */
+/* Operator pages in the colours of pochta.ru: its blue for the header and actions, a pale
+   blue ground, dark ink. */
 :root {
-  --ground: #f4f5f6;
+  --ground: #f2f6fe;
   --surface: #ffffff;
-  --line: #dcdfe3;
-  --text: #1d2126;
-  --muted: #69707a;
-  --accent: #2f4d6e;
+  --line: #dfe1f4;
+  --text: #252630;
+  --muted: #62657a;
+  --accent: #1a34e8;
+  --accent-strong: #0a14a6;
+  --accent-soft: #f0f4ff;
   --accent-text: #ffffff;
   --ok: #2e6b3f;
   --ok-ground: #e6f1e8;
@@ -13,7 +16,7 @@
   --warn-ground: #f7efd9;
   --bad: #9a2f2f;
   --bad-ground: #f7e4e4;
-  --radius: 6px;
+  --radius: 10px;
   --gap: 16px;
   font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
   font-size: 15px;
@@ -32,30 +35,45 @@ a { color: var(--accent); }
 code { font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 13px; }
 img { max-width: 100%; display: block; }
 .muted { color: var(--muted); font-weight: normal; }
+.caption { color: var(--muted); font-size: 13px; }
 .num, .load { font-variant-numeric: tabular-nums; }
 
-/* Header: the sections, the model that answers now, who is signed in. */
+/* Header: the blue bar of pochta.ru with the sections, the model and who is signed in. */
 header {
   display: flex; flex-wrap: wrap; align-items: center; gap: 8px 24px;
-  padding: 10px 16px; background: var(--surface); border-bottom: 1px solid var(--line);
+  padding: 10px 16px; background: var(--accent); color: var(--accent-text);
 }
-.logo { font-weight: 600; color: var(--text); text-decoration: none; }
+.logo {
+  font-weight: 700; color: var(--accent-text); text-decoration: none;
+  padding: 3px 12px; border: 1.5px solid currentColor; border-radius: 999px;
+}
 nav { display: flex; flex-wrap: wrap; gap: 4px; }
-nav .section { padding: 6px 10px; border-radius: var(--radius); color: var(--muted); text-decoration: none; }
-nav .section:hover { color: var(--text); background: var(--ground); }
-nav .section.on { color: var(--text); background: var(--ground); font-weight: 600; }
+nav .section {
+  padding: 6px 12px; border-radius: 999px; color: var(--accent-text); opacity: 0.8;
+  text-decoration: none;
+}
+nav .section:hover { opacity: 1; background: rgb(255 255 255 / 0.12); }
+nav .section.on { opacity: 1; background: var(--surface); color: var(--accent); font-weight: 600; }
 .who { margin-left: auto; display: flex; align-items: center; gap: 12px; }
 .who form { margin: 0; }
+header .muted { color: var(--accent-text); opacity: 0.85; }
+header button.ghost { color: var(--accent-text); border-color: rgb(255 255 255 / 0.7); }
+header button.ghost:hover { background: rgb(255 255 255 / 0.12); }
+header .badge { border-color: transparent; }
 
 /* Controls. */
 button {
   font: inherit; cursor: pointer; padding: 7px 14px; border-radius: var(--radius);
   border: 1px solid var(--accent); background: var(--accent); color: var(--accent-text);
 }
-button:hover { filter: brightness(1.12); }
+button:hover { background: var(--accent-strong); border-color: var(--accent-strong); }
 button.ghost { background: transparent; color: var(--accent); }
-button:disabled { opacity: 0.45; cursor: not-allowed; filter: none; }
+button.ghost:hover { background: var(--accent-soft); }
+button:disabled, button:disabled:hover {
+  opacity: 0.45; cursor: not-allowed; background: var(--accent); border-color: var(--accent);
+}
 button.warn { background: var(--surface); border-color: var(--bad); color: var(--bad); }
+button.warn:hover { background: var(--bad-ground); border-color: var(--bad); }
 input[type="text"], input[type="password"] {
   font: inherit; width: 100%; padding: 7px 10px; border: 1px solid var(--line);
   border-radius: var(--radius); background: var(--surface); color: var(--text);
@@ -83,9 +101,33 @@ input[type="file"] { font: inherit; padding: 10px; border: 1px dashed var(--line
 .badge.bad { background: var(--bad-ground); color: var(--bad); border-color: transparent; }
 
 /* The queue: photo tiles. */
-.tabs { display: flex; gap: 4px; }
-.tabs a { padding: 5px 12px; border-radius: var(--radius); text-decoration: none; color: var(--muted); border: 1px solid var(--line); background: var(--surface); }
-.tabs a.on { color: var(--text); font-weight: 600; border-color: var(--text); }
+.pager { display: flex; flex-wrap: wrap; justify-content: center; align-items: baseline; gap: 8px 18px; }
+
+/* Drop-down menus of the queue: <details>, so they open without a script. */
+.filters { display: flex; flex-wrap: wrap; gap: 8px; }
+.menu { position: relative; }
+.menu summary {
+  list-style: none; cursor: pointer; display: inline-flex; align-items: center; gap: 8px;
+  padding: 7px 14px; border: 1px solid var(--line); border-radius: 999px;
+  background: var(--surface); font-size: 14px; user-select: none;
+}
+.menu summary::-webkit-details-marker { display: none; }
+.menu summary::after {
+  content: ""; width: 6px; height: 6px; margin-left: 2px;
+  border-right: 2px solid var(--muted); border-bottom: 2px solid var(--muted);
+  transform: translateY(-2px) rotate(45deg);
+}
+.menu[open] summary { border-color: var(--accent); }
+.menu[open] summary::after { transform: translateY(2px) rotate(225deg); }
+.menu-name { color: var(--muted); }
+.menu-list {
+  position: absolute; right: 0; top: calc(100% + 6px); z-index: 10; min-width: 210px;
+  display: grid; padding: 6px; background: var(--surface); border: 1px solid var(--line);
+  border-radius: 12px; box-shadow: 0 10px 28px rgb(10 20 166 / 0.14);
+}
+.menu-list a { padding: 8px 12px; border-radius: 8px; color: var(--text); text-decoration: none; }
+.menu-list a:hover { background: var(--accent-soft); }
+.menu-list a.on { color: var(--accent); font-weight: 600; }
 .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: var(--gap); }
 .tile { display: grid; background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); overflow: hidden; color: var(--text); text-decoration: none; }
 .tile:hover { border-color: var(--muted); }

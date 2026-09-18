@@ -18,6 +18,8 @@ from tests.builders import (
     make_model_version,
 )
 
+NEEDED = DEFAULT_RULES.min_new_labels
+
 
 def register(service: Service, *versions: tuple[str, ModelVersionStatus]) -> None:
     with service.store.unit_of_work() as uow:
@@ -148,7 +150,7 @@ def test_model_forms_without_the_session_token_change_nothing(service: Service, 
 @pytest.mark.api
 def test_retraining_is_queued_and_listed(service: Service) -> None:
     token = sign_in(service)
-    confirm_loads(service)
+    confirm_loads(service, NEEDED)
 
     response = submit(service, "/ui/jobs", csrf=token)
 
@@ -162,7 +164,7 @@ def test_retraining_is_queued_and_listed(service: Service) -> None:
 @pytest.mark.api
 def test_a_second_retraining_waits_for_the_first(service: Service) -> None:
     token = sign_in(service)
-    confirm_loads(service)
+    confirm_loads(service, NEEDED)
     submit(service, "/ui/jobs", csrf=token)
 
     response = submit(service, "/ui/jobs", csrf=token)
@@ -226,15 +228,32 @@ def test_the_header_tells_a_failed_first_load_from_a_slow_one() -> None:
 
 
 @pytest.mark.api
-def test_without_a_confirmed_load_retraining_is_refused(service: Service) -> None:
+def test_with_fewer_loads_than_the_gate_needs_retraining_is_refused(service: Service) -> None:
     token = sign_in(service)
+    confirm_loads(service, NEEDED - 1)
 
     response = submit(service, "/ui/jobs", csrf=token)
 
     assert response.status_code == 400
-    assert "Дообучать не на чем." in text_of(response)
+    assert "Подтверждённых загрузок пока мало." in text_of(response)
     assert service.store.training_jobs == {}
     assert page(get(service, "/ui/jobs")).xpath("//form[@action='/ui/jobs']/button/@disabled")
+
+
+@pytest.mark.api
+def test_without_a_running_worker_retraining_is_refused(service: Service) -> None:
+    token = sign_in(service)
+    confirm_loads(service, NEEDED)
+    service.worker.online = False
+
+    response = submit(service, "/ui/jobs", csrf=token)
+
+    assert response.status_code == 409
+    assert "Воркер не запущен." in text_of(response)
+    assert service.store.training_jobs == {}
+    jobs = page(get(service, "/ui/jobs"))
+    assert jobs.xpath("//form[@action='/ui/jobs']/button/@disabled")
+    assert jobs.xpath("//span[contains(@class, 'badge')]/text()")[-1] == "не запущен"
 
 
 @pytest.mark.api
@@ -244,15 +263,15 @@ def test_the_page_counts_confirmed_loads_against_what_the_gate_needs(service: Se
 
     text = text_of(get(service, "/ui/jobs"))
 
-    needed = DEFAULT_RULES.min_new_labels
     assert "Подтверждённых загрузок: 3." in text
-    assert f"Новая версия может пройти проверку, если их не меньше {needed}." in text
+    assert f"если подтверждённых загрузок не меньше {NEEDED}." in text
+    assert f"подтвердить загрузку минимум ещё на {NEEDED - 3} фото" in text
 
 
 @pytest.mark.api
 def test_a_queued_job_says_it_waits_for_the_worker(service: Service) -> None:
     token = sign_in(service)
-    confirm_loads(service)
+    confirm_loads(service, NEEDED)
     submit(service, "/ui/jobs", csrf=token)
 
-    assert "Задача ждёт воркер" in text_of(get(service, "/ui/jobs"))
+    assert "Задача ждёт запуск воркера." in text_of(get(service, "/ui/jobs"))

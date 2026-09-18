@@ -1,0 +1,7 @@
+{% if pager.pages > 1 %}
+<div class="pager">
+  {% if pager.previous %}<a href="{{ pager.previous }}">назад</a>{% endif %}
+  <span class="muted">Страница {{ pager.number }} из {{ pager.pages }} · всего {{ pager.total }}</span>
+  {% if pager.next %}<a href="{{ pager.next }}">вперёд</a>{% endif %}
+</div>
+{% endif %}

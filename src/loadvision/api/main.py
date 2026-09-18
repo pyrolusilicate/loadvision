@@ -31,11 +31,13 @@ from loadvision.application.submit_label import SubmitLabel
 from loadvision.application.training_jobs import (
     CountTrainingLabels,
     GetTrainingJob,
+    ListTrainingJobPage,
     ListTrainingJobs,
     StartTraining,
 )
 from loadvision.domain.model_version import ModelVersionId
 from loadvision.domain.timestamps import utc_now
+from loadvision.infrastructure.db.activity import worker_connected
 from loadvision.infrastructure.db.session import PostgresUnitOfWork, create_database_engine
 from loadvision.infrastructure.storage.local_storage import LocalImageStorage
 from loadvision.ml.inference.active_model import ActiveModel
@@ -131,8 +133,9 @@ def build_service_app(settings: Settings, engine: Engine) -> FastAPI:
         rollback_model=RollbackModel(uow_factory=uow_factory, activate=services.activate_model),
         reload_model=follower.check,
         start_training=services.start_training,
-        list_training_jobs=services.list_training_jobs,
+        training_job_page=ListTrainingJobPage(uow_factory=uow_factory),
         count_training_labels=CountTrainingLabels(uow_factory=uow_factory),
+        worker_online=functools.partial(worker_connected, engine),
         storage=storage,
         model=model,
     )

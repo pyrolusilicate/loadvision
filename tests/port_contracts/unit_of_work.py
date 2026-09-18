@@ -7,6 +7,8 @@ import pytest
 
 from loadvision.application.ports import (
     AssessmentAlreadyExistsError,
+    AssessmentOrder,
+    ReviewStatus,
     UnitOfWork,
     UnitOfWorkFactory,
 )
@@ -30,6 +32,7 @@ from tests.builders import (
 
 PHOTO_A = b"photo-a"
 PHOTO_B = b"photo-b"
+PHOTOS = (PHOTO_A, PHOTO_B, b"photo-c", b"photo-d")
 UNKNOWN_SHA256 = "0" * 64
 
 
@@ -214,36 +217,64 @@ class UnitOfWorkContract:
         with uow_factory() as uow:
             assert uow.assessments.list_by_shipment(ShipmentId("RP-1")) == [newer, older]
 
-    def test_recent_assessments_come_newest_first(self, uow_factory: UnitOfWorkFactory) -> None:
-        older = make_assessment(id=UUID(int=1), created_at=T0)
-        newer = make_assessment(
-            id=UUID(int=2),
-            image_sha256=make_image(PHOTO_B).sha256,
-            created_at=T0 + timedelta(hours=1),
-        )
+    def test_assessments_page_through_in_every_order(self, uow_factory: UnitOfWorkFactory) -> None:
+        # Loads 40, 80, 40 and 10 at hours 0 to 3: two share a load, so the ties show too.
+        stored = [
+            make_assessment(
+                id=UUID(int=number + 1),
+                image_sha256=make_image(PHOTOS[number]).sha256,
+                load_pct=LoadPercent(load),
+                created_at=T0 + timedelta(hours=number),
+            )
+            for number, load in enumerate((40.0, 80.0, 40.0, 10.0))
+        ]
         with uow_factory() as uow:
-            store_assessment(uow, older)
-            store_assessment(uow, newer, PHOTO_B)
+            for number, assessment in enumerate(stored):
+                store_assessment(uow, assessment, PHOTOS[number])
             uow.commit()
-        with uow_factory() as uow:
-            assert uow.assessments.list_recent(10) == [newer, older]
-            assert uow.assessments.list_recent(1) == [newer]
 
-    def test_the_review_queue_leaves_out_labelled_photos(
+        def ids(order: AssessmentOrder, offset: int = 0, limit: int = 10) -> list[int]:
+            with uow_factory() as uow:
+                rows = uow.assessments.list_page(order=order, offset=offset, limit=limit)
+            return [row.id.int for row in rows]
+
+        assert ids(AssessmentOrder.NEWEST) == [4, 3, 2, 1]
+        assert ids(AssessmentOrder.OLDEST) == [1, 2, 3, 4]
+        assert ids(AssessmentOrder.FULLEST) == [2, 3, 1, 4]
+        assert ids(AssessmentOrder.EMPTIEST) == [4, 3, 1, 2]
+        assert ids(AssessmentOrder.FULLEST, offset=1, limit=2) == [3, 1]
+        with uow_factory() as uow:
+            assert uow.assessments.count() == 4
+
+    def test_assessments_filter_by_what_a_person_said_about_the_photo(
         self, uow_factory: UnitOfWorkFactory
     ) -> None:
-        labelled = make_assessment(id=UUID(int=1), created_at=T0 + timedelta(hours=1))
-        waiting = make_assessment(
-            id=UUID(int=2), image_sha256=make_image(PHOTO_B).sha256, created_at=T0
+        confirmed, unusable, waiting = (
+            make_assessment(
+                id=UUID(int=number + 1),
+                image_sha256=make_image(PHOTOS[number]).sha256,
+                created_at=T0 + timedelta(hours=number),
+            )
+            for number in range(3)
         )
         with uow_factory() as uow:
-            store_assessment(uow, labelled)
-            store_assessment(uow, waiting, PHOTO_B)
-            uow.labels.save(make_label(PHOTO_A, 70.0))
+            for number, assessment in enumerate((confirmed, unusable, waiting)):
+                store_assessment(uow, assessment, PHOTOS[number])
+            uow.labels.save(make_label(PHOTOS[0], 70.0))
+            uow.labels.save(make_label(PHOTOS[1], None))
             uow.commit()
-        with uow_factory() as uow:
-            assert uow.assessments.list_recent(10, unlabeled_only=True) == [waiting]
-            assert uow.assessments.list_recent(10) == [labelled, waiting]
+
+        def shown(status: ReviewStatus) -> tuple[list[Assessment], int]:
+            with uow_factory() as uow:
+                rows = uow.assessments.list_page(
+                    order=AssessmentOrder.NEWEST, offset=0, limit=10, status=status
+                )
+                return rows, uow.assessments.count(status=status)
+
+        assert shown(ReviewStatus.WAITING) == ([waiting], 1)
+        assert shown(ReviewStatus.CONFIRMED) == ([confirmed], 1)
+        assert shown(ReviewStatus.UNUSABLE) == ([unusable], 1)
+        assert shown(ReviewStatus.ALL) == ([waiting, unusable, confirmed], 3)
 
     def test_model_versions_track_the_active_one_and_list_newest_first(
         self, uow_factory: UnitOfWorkFactory
@@ -353,6 +384,8 @@ class UnitOfWorkContract:
         with uow_factory() as uow:
             assert uow.training_jobs.list_recent(2) == [jobs[2], jobs[1]]
             assert uow.training_jobs.list_recent(10) == list(reversed(jobs))
+            assert uow.training_jobs.list_recent(2, 1) == [jobs[1], jobs[0]]
+            assert uow.training_jobs.count() == 3
 
     def test_updating_an_unstored_job_fails(self, uow_factory: UnitOfWorkFactory) -> None:
         with uow_factory() as uow, pytest.raises(ValueError, match="not stored"):

@@ -1,7 +1,10 @@
 import logging
+import re
 
 import pytest
 
+from loadvision.api.ui.pages import catalog_error
+from loadvision.domain.shipment import SHIPMENT_ID_PATTERN
 from loadvision.errors import ERROR_CATALOG, ErrorCode, LoadvisionError
 from loadvision.imaging.prepared_image import PreparedImage
 from tests.api.service import PHOTO_SHA256, Service, make_service
@@ -22,7 +25,7 @@ class BrokenStorage:
 
 
 @pytest.mark.api
-@pytest.mark.parametrize(("path", "status"), [("/ui/nope", 404), ("/ui/?all=maybe", 404)])
+@pytest.mark.parametrize(("path", "status"), [("/ui/nope", 404), ("/ui/?status=maybe", 404)])
 def test_a_page_that_does_not_exist_says_so_in_html(
     service: Service, path: str, status: int
 ) -> None:
@@ -92,3 +95,42 @@ def test_a_malformed_photo_hash_never_reaches_the_storage(sha256: str) -> None:
     sign_in(service)
 
     assert get(service, f"/ui/photos/{sha256}").status_code == 404
+
+
+@pytest.mark.api
+@pytest.mark.parametrize(
+    "code",
+    [
+        ErrorCode.INVALID_SHIPMENT_ID,
+        ErrorCode.PAYLOAD_TOO_LARGE,
+        ErrorCode.UNSUPPORTED_FORMAT,
+        ErrorCode.CORRUPTED_IMAGE,
+        ErrorCode.SHIPMENT_NOT_FOUND,
+        ErrorCode.ASSESSMENT_NOT_FOUND,
+        ErrorCode.MODEL_VERSION_NOT_FOUND,
+        ErrorCode.MODEL_VERSION_STATUS_CONFLICT,
+        ErrorCode.TRAINING_ALREADY_RUNNING,
+        ErrorCode.MODEL_NOT_READY,
+        ErrorCode.MODEL_INFERENCE_FAILED,
+        ErrorCode.STAGE_CHECK_FAILED,
+        ErrorCode.INTERNAL_ERROR,
+    ],
+)
+def test_a_page_hint_speaks_to_a_person_not_to_an_api_client(code: ErrorCode) -> None:
+    _, _, hint = catalog_error(code)
+
+    for api_word in ("/api/", "GET ", "POST ", "requestId", "/health", "XML"):
+        assert api_word not in hint
+
+
+@pytest.mark.api
+def test_a_malformed_number_is_explained_in_words() -> None:
+    status, message, hint = catalog_error(ErrorCode.INVALID_SHIPMENT_ID)
+
+    assert (status, message) == (400, ERROR_CATALOG[ErrorCode.INVALID_SHIPMENT_ID].message)
+    # The example in the hint is a valid number and the limit is the one of the pattern.
+    assert re.fullmatch(SHIPMENT_ID_PATTERN, "RP-2026-000123")
+    assert "RP-2026-000123" in hint
+    assert re.fullmatch(SHIPMENT_ID_PATTERN, "R" * 64)
+    assert not re.fullmatch(SHIPMENT_ID_PATTERN, "R" * 65)
+    assert "до 64 знаков" in hint
