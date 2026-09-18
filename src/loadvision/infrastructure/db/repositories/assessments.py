@@ -10,7 +10,7 @@ from loadvision.application.ports import AssessmentAlreadyExistsError
 from loadvision.domain.assessment import Assessment, LoadPercent, ReviewReason, Signals
 from loadvision.domain.model_version import ModelVersionId
 from loadvision.domain.shipment import ShipmentId
-from loadvision.infrastructure.db.tables import assessments
+from loadvision.infrastructure.db.tables import assessments, confirmed_labels
 
 
 class PostgresAssessmentRepository:
@@ -69,6 +69,15 @@ class PostgresAssessmentRepository:
             .order_by(assessments.c.created_at.desc())
         )
         return [_assessment(row) for row in rows]
+
+    def list_recent(self, limit: int, *, unlabeled_only: bool = False) -> list[Assessment]:
+        statement = select(assessments).order_by(assessments.c.created_at.desc()).limit(limit)
+        if unlabeled_only:
+            labelled = select(confirmed_labels.c.image_sha256).where(
+                confirmed_labels.c.image_sha256 == assessments.c.image_sha256
+            )
+            statement = statement.where(~labelled.exists())
+        return [_assessment(row) for row in self._connection.execute(statement)]
 
     def _first(self, statement: Select[Any]) -> Assessment | None:
         row = self._connection.execute(statement).first()

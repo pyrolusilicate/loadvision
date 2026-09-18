@@ -4,7 +4,7 @@ import argparse
 import logging
 from collections.abc import Sequence
 
-from loadvision.cli.commands import data, eval, features, jobs, model, predict, train
+from loadvision.cli.commands import data, eval, features, jobs, model, operators, predict, train
 from loadvision.cli.errors import CommandError
 from loadvision.errors import LoadvisionError
 
@@ -33,6 +33,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     train.add_commands(groups)
     model.add_commands(groups)
     jobs.add_commands(groups)
+    operators.add_commands(groups)
     predict.add_commands(groups)
     args = parser.parse_args(argv)
     logging.basicConfig(level=logging.INFO, format="%(message)s")

@@ -23,6 +23,8 @@ from tests.builders import (
     make_job,
     make_label,
     make_model_version,
+    make_operator,
+    make_session,
     make_shipment,
 )
 
@@ -212,6 +214,37 @@ class UnitOfWorkContract:
         with uow_factory() as uow:
             assert uow.assessments.list_by_shipment(ShipmentId("RP-1")) == [newer, older]
 
+    def test_recent_assessments_come_newest_first(self, uow_factory: UnitOfWorkFactory) -> None:
+        older = make_assessment(id=UUID(int=1), created_at=T0)
+        newer = make_assessment(
+            id=UUID(int=2),
+            image_sha256=make_image(PHOTO_B).sha256,
+            created_at=T0 + timedelta(hours=1),
+        )
+        with uow_factory() as uow:
+            store_assessment(uow, older)
+            store_assessment(uow, newer, PHOTO_B)
+            uow.commit()
+        with uow_factory() as uow:
+            assert uow.assessments.list_recent(10) == [newer, older]
+            assert uow.assessments.list_recent(1) == [newer]
+
+    def test_the_review_queue_leaves_out_labelled_photos(
+        self, uow_factory: UnitOfWorkFactory
+    ) -> None:
+        labelled = make_assessment(id=UUID(int=1), created_at=T0 + timedelta(hours=1))
+        waiting = make_assessment(
+            id=UUID(int=2), image_sha256=make_image(PHOTO_B).sha256, created_at=T0
+        )
+        with uow_factory() as uow:
+            store_assessment(uow, labelled)
+            store_assessment(uow, waiting, PHOTO_B)
+            uow.labels.save(make_label(PHOTO_A, 70.0))
+            uow.commit()
+        with uow_factory() as uow:
+            assert uow.assessments.list_recent(10, unlabeled_only=True) == [waiting]
+            assert uow.assessments.list_recent(10) == [labelled, waiting]
+
     def test_model_versions_track_the_active_one_and_list_newest_first(
         self, uow_factory: UnitOfWorkFactory
     ) -> None:
@@ -324,6 +357,55 @@ class UnitOfWorkContract:
     def test_updating_an_unstored_job_fails(self, uow_factory: UnitOfWorkFactory) -> None:
         with uow_factory() as uow, pytest.raises(ValueError, match="not stored"):
             uow.training_jobs.update(make_job().started(at=T0, base_version=None))
+
+    def test_operator_is_stored_and_read_back(self, uow_factory: UnitOfWorkFactory) -> None:
+        locked = make_operator("anna").failed(T0)
+        with uow_factory() as uow:
+            uow.operators.add(make_operator("petr"))
+            uow.operators.add(make_operator("anna"))
+            uow.operators.update(locked)
+            uow.commit()
+        with uow_factory() as uow:
+            assert uow.operators.get("anna") == locked
+            assert uow.operators.get("nobody") is None
+            assert [operator.login for operator in uow.operators.list_all()] == ["anna", "petr"]
+
+    def test_updating_an_unstored_operator_fails(self, uow_factory: UnitOfWorkFactory) -> None:
+        with uow_factory() as uow, pytest.raises(ValueError, match="not stored"):
+            uow.operators.update(make_operator())
+
+    def test_session_is_stored_read_and_ended(self, uow_factory: UnitOfWorkFactory) -> None:
+        session = make_session()
+        with uow_factory() as uow:
+            uow.operators.add(make_operator())
+            uow.operator_sessions.add(session)
+            uow.commit()
+        with uow_factory() as uow:
+            assert uow.operator_sessions.get(session.token_hash) == session
+            assert uow.operator_sessions.get("b" * 64) is None
+            uow.operator_sessions.delete(session.token_hash)
+            uow.operator_sessions.delete("b" * 64)
+            uow.commit()
+        with uow_factory() as uow:
+            assert uow.operator_sessions.get(session.token_hash) is None
+
+    def test_every_session_of_an_operator_ends_together(
+        self, uow_factory: UnitOfWorkFactory
+    ) -> None:
+        mine = [make_session("anna", token_hash=char * 64) for char in "ab"]
+        theirs = make_session("petr", token_hash="c" * 64)
+        with uow_factory() as uow:
+            uow.operators.add(make_operator("anna"))
+            uow.operators.add(make_operator("petr"))
+            for session in (*mine, theirs):
+                uow.operator_sessions.add(session)
+            uow.commit()
+        with uow_factory() as uow:
+            uow.operator_sessions.delete_for("anna")
+            uow.commit()
+        with uow_factory() as uow:
+            assert [uow.operator_sessions.get(s.token_hash) for s in mine] == [None, None]
+            assert uow.operator_sessions.get(theirs.token_hash) == theirs
 
     def test_updating_an_unregistered_model_version_fails(
         self, uow_factory: UnitOfWorkFactory

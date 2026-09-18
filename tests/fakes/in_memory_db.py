@@ -8,6 +8,7 @@ from loadvision.application.ports import AssessmentAlreadyExistsError, ImageReco
 from loadvision.domain.assessment import Assessment
 from loadvision.domain.confirmed_label import ConfirmedLabel
 from loadvision.domain.model_version import ModelVersion, ModelVersionId, ModelVersionStatus
+from loadvision.domain.operator import Operator, OperatorSession
 from loadvision.domain.shipment import Shipment, ShipmentId
 from loadvision.domain.training_job import TrainingJob, TrainingJobStatus
 
@@ -48,8 +49,11 @@ class InMemoryShipmentRepository:
 
 
 class InMemoryAssessmentRepository:
-    def __init__(self, table: _Table[UUID, Assessment]) -> None:
+    def __init__(
+        self, table: _Table[UUID, Assessment], labels: "_Table[str, ConfirmedLabel]"
+    ) -> None:
         self._table = table
+        self._labels = labels
 
     def add(self, assessment: Assessment) -> None:
         # Mirrors the primary key: a repeated id fails instead of silently replacing a row.
@@ -92,6 +96,14 @@ class InMemoryAssessmentRepository:
     def list_by_shipment(self, shipment_id: ShipmentId) -> list[Assessment]:
         rows = [row for row in self._table.rows() if row.shipment_id == shipment_id]
         return sorted(rows, key=lambda row: row.created_at, reverse=True)
+
+    def list_recent(self, limit: int, *, unlabeled_only: bool = False) -> list[Assessment]:
+        rows = [
+            row
+            for row in self._table.rows()
+            if not unlabeled_only or self._labels.get(row.image_sha256) is None
+        ]
+        return sorted(rows, key=lambda row: row.created_at, reverse=True)[:limit]
 
 
 class InMemoryImageRepository:
@@ -159,6 +171,48 @@ class InMemoryTrainingJobRepository:
         return sorted(rows, key=lambda row: (row.created_at, str(row.id)))
 
 
+class InMemoryOperatorRepository:
+    def __init__(self, table: _Table[str, Operator]) -> None:
+        self._table = table
+
+    def get(self, login: str) -> Operator | None:
+        return self._table.get(login)
+
+    def add(self, operator: Operator) -> None:
+        if self._table.get(operator.login) is not None:
+            raise ValueError(f"operator {operator.login} already exists")
+        self._table.put(operator.login, operator)
+
+    def update(self, operator: Operator) -> None:
+        if self._table.get(operator.login) is None:
+            raise ValueError(f"operator {operator.login} is not stored")
+        self._table.put(operator.login, operator)
+
+    def list_all(self) -> list[Operator]:
+        return sorted(self._table.rows(), key=lambda row: row.login)
+
+
+class InMemoryOperatorSessionRepository:
+    def __init__(self, table: _Table[str, OperatorSession | None]) -> None:
+        # A deleted session is kept as None until commit, like a row deleted in a transaction.
+        self._table = table
+
+    def add(self, session: OperatorSession) -> None:
+        self._table.put(session.token_hash, session)
+
+    def get(self, token_hash: str) -> OperatorSession | None:
+        return self._table.get(token_hash)
+
+    def delete(self, token_hash: str) -> None:
+        if self._table.get(token_hash) is not None:
+            self._table.put(token_hash, None)
+
+    def delete_for(self, login: str) -> None:
+        for session in self._table.rows():
+            if session is not None and session.login == login:
+                self._table.put(session.token_hash, None)
+
+
 class InMemoryModelVersionRepository:
     def __init__(self, table: _Table[ModelVersionId, ModelVersion]) -> None:
         self._table = table
@@ -205,6 +259,8 @@ class _Tables:
         self.model_versions = _Table(store.model_versions)
         self.labels = _Table(store.labels)
         self.training_jobs = _Table(store.training_jobs)
+        self.operators = _Table(store.operators)
+        self.operator_sessions = _Table(store.operator_sessions)
 
     def commit(self) -> None:
         self.shipments.commit()
@@ -213,6 +269,8 @@ class _Tables:
         self.model_versions.commit()
         self.labels.commit()
         self.training_jobs.commit()
+        self.operators.commit()
+        self.operator_sessions.commit()
 
 
 class InMemoryUnitOfWork:
@@ -232,7 +290,8 @@ class InMemoryUnitOfWork:
 
     @property
     def assessments(self) -> InMemoryAssessmentRepository:
-        return InMemoryAssessmentRepository(self._open().assessments)
+        tables = self._open()
+        return InMemoryAssessmentRepository(tables.assessments, tables.labels)
 
     @property
     def images(self) -> InMemoryImageRepository:
@@ -249,6 +308,14 @@ class InMemoryUnitOfWork:
     @property
     def training_jobs(self) -> InMemoryTrainingJobRepository:
         return InMemoryTrainingJobRepository(self._open().training_jobs)
+
+    @property
+    def operators(self) -> InMemoryOperatorRepository:
+        return InMemoryOperatorRepository(self._open().operators)
+
+    @property
+    def operator_sessions(self) -> InMemoryOperatorSessionRepository:
+        return InMemoryOperatorSessionRepository(self._open().operator_sessions)
 
     def __enter__(self) -> Self:
         self._tables = _Tables(self._store)
@@ -281,6 +348,9 @@ class InMemoryStore:
         self.model_versions: dict[ModelVersionId, ModelVersion] = {}
         self.labels: dict[str, ConfirmedLabel] = {}
         self.training_jobs: dict[UUID, TrainingJob] = {}
+        self.operators: dict[str, Operator] = {}
+        # None marks a session that was ended.
+        self.operator_sessions: dict[str, OperatorSession | None] = {}
 
     def unit_of_work(self) -> InMemoryUnitOfWork:
         return InMemoryUnitOfWork(self)

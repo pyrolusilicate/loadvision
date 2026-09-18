@@ -13,6 +13,7 @@ from uuid import UUID
 from loadvision.domain.assessment import SHA256_HEX_PATTERN, Assessment, LoadPercent
 from loadvision.domain.confirmed_label import ConfirmedLabel
 from loadvision.domain.model_version import ModelVersion, ModelVersionId
+from loadvision.domain.operator import Operator, OperatorSession
 from loadvision.domain.shipment import Shipment, ShipmentId
 from loadvision.domain.timestamps import ensure_aware
 from loadvision.domain.training_job import TrainingJob, TrainingMode
@@ -171,6 +172,16 @@ class AssessmentRepository(Protocol):
         """Returns all assessments of the shipment, newest `created_at` first."""
         ...
 
+    def list_recent(self, limit: int, *, unlabeled_only: bool = False) -> list[Assessment]:
+        """Returns the newest assessments first, at most `limit` of them.
+
+        Args:
+            limit: Most rows to return.
+            unlabeled_only: Leave out assessments whose photo already has a label; what is
+                left is the work of the review queue.
+        """
+        ...
+
 
 class ImageRepository(Protocol):
     """Photo metadata within the current unit of work."""
@@ -264,6 +275,50 @@ class TrainingJobRepository(Protocol):
         ...
 
 
+class OperatorRepository(Protocol):
+    """Operator accounts within the current unit of work."""
+
+    def get(self, login: str) -> Operator | None:
+        """Returns the account, or None if there is none with this login."""
+        ...
+
+    def add(self, operator: Operator) -> None:
+        """Stores a new account whose login is not taken."""
+        ...
+
+    def update(self, operator: Operator) -> None:
+        """Saves a stored account.
+
+        Raises:
+            ValueError: If the account was never stored.
+        """
+        ...
+
+    def list_all(self) -> list[Operator]:
+        """Returns every account, by login."""
+        ...
+
+
+class OperatorSessionRepository(Protocol):
+    """Sign-in sessions within the current unit of work."""
+
+    def add(self, session: OperatorSession) -> None:
+        """Stores a new session."""
+        ...
+
+    def get(self, token_hash: str) -> OperatorSession | None:
+        """Returns the session with this token hash, or None."""
+        ...
+
+    def delete(self, token_hash: str) -> None:
+        """Ends one session; ending an unknown one changes nothing."""
+        ...
+
+    def delete_for(self, login: str) -> None:
+        """Ends every session of an operator."""
+        ...
+
+
 class ImageStorage(Protocol):
     """Original photo bytes addressed by their SHA-256, outside the database transaction.
 
@@ -304,6 +359,12 @@ class UnitOfWork(Protocol):
 
     @property
     def training_jobs(self) -> TrainingJobRepository: ...
+
+    @property
+    def operators(self) -> OperatorRepository: ...
+
+    @property
+    def operator_sessions(self) -> OperatorSessionRepository: ...
 
     def __enter__(self) -> Self: ...
 

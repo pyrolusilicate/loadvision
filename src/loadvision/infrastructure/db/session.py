@@ -11,6 +11,10 @@ from loadvision.infrastructure.db.repositories.labels import PostgresLabelReposi
 from loadvision.infrastructure.db.repositories.model_versions import (
     PostgresModelVersionRepository,
 )
+from loadvision.infrastructure.db.repositories.operators import (
+    PostgresOperatorRepository,
+    PostgresOperatorSessionRepository,
+)
 from loadvision.infrastructure.db.repositories.shipments import PostgresShipmentRepository
 from loadvision.infrastructure.db.repositories.training_jobs import (
     PostgresTrainingJobRepository,
@@ -64,6 +68,14 @@ class PostgresUnitOfWork:
     @property
     def training_jobs(self) -> PostgresTrainingJobRepository:
         return PostgresTrainingJobRepository(self._open())
+
+    @property
+    def operators(self) -> PostgresOperatorRepository:
+        return PostgresOperatorRepository(self._open())
+
+    @property
+    def operator_sessions(self) -> PostgresOperatorSessionRepository:
+        return PostgresOperatorSessionRepository(self._open())
 
     def __enter__(self) -> Self:
         self._connection = self._engine.connect()
