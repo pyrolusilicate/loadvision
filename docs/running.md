@@ -116,16 +116,14 @@ open http://localhost:8000/                               # вход, затем
 | Очередь | `/ui/` | новые оценки, фото которых ещё никто не проверил; вкладка «Все» - последние оценки |
 | Оценка | `/ui/assessments/{id}` | фото, прогноз и форма: подтвердить загрузку или отметить фото непригодным |
 | Перевозки | `/ui/shipments` | поиск по номеру и история перевозки, новые оценки первыми |
-| Модели | `/ui/models` | версии со статусами, «Включить», «Откатить на предыдущую» |
+| Модели | `/ui/models` | версии со статусами, «Включить», «Вернуть предыдущую модель» |
 | Дообучение | `/ui/jobs` | поставить дообучение в очередь и посмотреть последние задачи |
 
 Загрузку можно вводить с запятой: `72,5` и `72.5` - одно и то же. Хранится она как введена, на
 странице показывается с одним знаком после точки, как в XML.
 
-Кнопки «Включить» и «Откатить на предыдущую» сразу подгружают версию в фоне, перезапуск не
-нужен; пока версия грузится, отвечает прежняя. Какая версия отвечает сейчас, видно в шапке.
-Команды `model activate`, `model rollback`, API и воркер меняют только базу, после них нужен
-`docker compose restart api`.
+Какая версия отвечает сейчас, видно в шапке. Как сервис переходит на новую версию - в разделе
+«Жизненный цикл версии модели».
 
 Управление аккаунтами:
 
@@ -200,10 +198,9 @@ uv run loadvision predict submission --package runs/run_20260918_101500_ab12/pac
 потом кто-то решает её включить.
 
 ```bash
-uv run loadvision model register runs/run_20260918_101500_ab12/package
-uv run loadvision model activate 2026-09-18.1
-docker compose restart api        # сервис берёт активную версию при старте
-uv run loadvision model list
+uv run --env-file .env loadvision model register runs/run_20260918_101500_ab12/package
+uv run --env-file .env loadvision model activate 2026-09-18.1
+uv run --env-file .env loadvision model list
 ```
 
 ```
@@ -215,9 +212,15 @@ baseline-v0             retired     2026-09-17T20:45:42Z  2026-09-17T20:45:44Z
 Если новая версия ведёт себя плохо, возврат - одна команда:
 
 ```bash
-uv run loadvision model rollback      # включит baseline-v0 из примера выше
-docker compose restart api
+uv run --env-file .env loadvision model rollback      # включит baseline-v0 из примера выше
 ```
+
+Перезапуск не нужен. Какая версия активна, решает база, а сервис каждые `model.check_seconds`
+сверяет с ней версию, которой отвечает, и при расхождении грузит активную в фоне; пока она
+грузится, отвечает прежняя. Так работает для всех способов включения: команды, API, кнопки на
+странице «Модели» и воркера. API и кнопки запускают сверку сразу, не дожидаясь очередной.
+Версию, пакет которой не загрузился, сервис пробует снова через `model.retry_seconds`: пакет,
+положенный позже, подхватится сам. Обе паузы - в `configs/app.yaml`, секция `model`.
 
 Что проверяет `register`: хэши файлов пакета, манифест и то, что предиктор действительно
 собирается (`--skip-load-check` отключает последнюю проверку на машине без ML-зависимостей).
@@ -230,10 +233,10 @@ docker compose restart api
 дообучает модель, гейт решает, лучше ли она, и при успехе версия включается.
 
 ```bash
-uv run loadvision jobs start           # поставить задачу в очередь (то же делает API)
-uv run loadvision-worker               # воркер: берёт задачи по одной, пока его не остановят
-uv run loadvision-worker --once        # один проход и выход, для cron или проверки
-uv run loadvision jobs list
+uv run --env-file .env loadvision jobs start      # поставить задачу в очередь (то же делает API)
+uv run --env-file .env loadvision-worker          # берёт задачи по одной, пока его не остановят
+uv run --env-file .env loadvision-worker --once   # один проход и выход, для cron или проверки
+uv run --env-file .env loadvision jobs list
 ```
 
 ```
@@ -255,7 +258,7 @@ curl -s -X POST http://localhost:8000/api/v1/models/2026-09-18.1/activate
 
 Одновременно выполняется одна задача: вторая `jobs start` вернёт `TRAINING_ALREADY_RUNNING`.
 Пакет, который собрал прогон, воркер сам кладёт в папку моделей и регистрирует; если гейт
-пропустил кандидата, версия включается, и её подхватит перезапуск сервиса.
+пропустил кандидата, версия включается, и сервис переходит на неё сам.
 
 Что настраивается в `configs/app.yaml`, секция `training`: конфиг эксперимента, папка базового
 датасета, устройство (`cpu`, `mps`, `cuda`) и пауза между опросами очереди.
@@ -313,8 +316,8 @@ docker compose logs -f api
 
 | Что видно | Почему | Что делать |
 |---|---|---|
-| `/health` отвечает 503 `MODEL_NOT_READY` | пакета модели нет или он не загрузился | `uv run loadvision model build-baseline`, затем `docker compose logs api` |
-| `DATABASE_URL is not set` | нет `.env` или переменной в окружении | `cp .env.example .env` |
+| `/health` отвечает 503 `MODEL_NOT_READY` | пакета модели нет или он не загрузился | `uv run loadvision model build-baseline`; сервис подхватит пакет сам через `model.retry_seconds`. Причина - на странице «Модели» и в `docker compose logs api` |
+| `DATABASE_URL is not set` | нет `.env` или команда запущена без него | `cp .env.example .env`, команду - через `uv run --env-file .env` |
 | `images folder not found: data/train/images` | нет данных хакатона | положить `data/train` и `data/test` |
 | `cannot read the git commit` | команда запущена вне git-репозитория | запускать из клона; для записей замеров это не мешает, для пакета модели обязательно |
 | `storage/models/baseline-v0 already exists` | версия уже собрана | другая `--version` или удалить папку осознанно |
