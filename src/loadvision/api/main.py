@@ -14,12 +14,19 @@ from sqlalchemy import Engine
 
 from loadvision.api.app import create_app
 from loadvision.api.services import ApiServices
+from loadvision.api.ui.services import UiServices
 from loadvision.application.assess_photo import AssessPhoto
 from loadvision.application.get_assessment import GetAssessment
 from loadvision.application.get_shipment import GetShipment
 from loadvision.application.load_served_model import LoadServedModel
-from loadvision.application.model_versions import ActivateModel, ListModelVersions
+from loadvision.application.model_versions import (
+    ActivateModel,
+    ListModelVersions,
+    RollbackModel,
+)
+from loadvision.application.operators import Authenticate, SignIn, SignOut
 from loadvision.application.ports import UnitOfWorkFactory
+from loadvision.application.review_queue import ReviewQueue
 from loadvision.application.submit_label import SubmitLabel
 from loadvision.application.training_jobs import (
     GetTrainingJob,
@@ -59,7 +66,9 @@ def build_service_app(settings: Settings, engine: Engine) -> FastAPI:
     """Wires the use cases to Postgres, the photo folder and the model packages.
 
     The service answers as soon as it starts. The model loads in the background, and until it
-    is ready assessments and `/health` answer 503. The engine is closed when the service stops.
+    is ready assessments and `/health` answer 503. A version activated on the operator pages
+    loads the same way while the previous one keeps answering. The engine is closed when the
+    service stops.
 
     Args:
         settings: Service settings.
@@ -73,10 +82,11 @@ def build_service_app(settings: Settings, engine: Engine) -> FastAPI:
     """
     uow_factory: UnitOfWorkFactory = functools.partial(PostgresUnitOfWork, engine)
     model = ActiveModel()
+    storage = LocalImageStorage(settings.storage.images_dir)
     services = ApiServices(
         assess_photo=AssessPhoto(
             uow_factory=uow_factory,
-            storage=LocalImageStorage(settings.storage.images_dir),
+            storage=storage,
             limits=settings.images.limits(),
             clock=utc_now,
             new_id=uuid.uuid4,
@@ -99,6 +109,23 @@ def build_service_app(settings: Settings, engine: Engine) -> FastAPI:
         load_package=functools.partial(load_package, settings.storage.models_dir),
         initial_version=ModelVersionId(settings.model.version),
     )
+    ui = UiServices(
+        sign_in=SignIn(uow_factory=uow_factory, clock=utc_now),
+        authenticate=Authenticate(uow_factory=uow_factory, clock=utc_now),
+        sign_out=SignOut(uow_factory=uow_factory),
+        review_queue=ReviewQueue(uow_factory=uow_factory),
+        get_assessment=services.get_assessment,
+        submit_label=services.submit_label,
+        get_shipment=services.get_shipment,
+        list_models=services.list_models,
+        activate_model=services.activate_model,
+        rollback_model=RollbackModel(uow_factory=uow_factory, activate=services.activate_model),
+        reload_model=lambda: model.load_in_background(load_model),
+        start_training=services.start_training,
+        list_training_jobs=services.list_training_jobs,
+        storage=storage,
+        model=model,
+    )
 
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
@@ -108,7 +135,7 @@ def build_service_app(settings: Settings, engine: Engine) -> FastAPI:
         finally:
             engine.dispose()
 
-    return create_app(services, lifespan)
+    return create_app(services, lifespan, ui)
 
 
 def load_package(models_dir: Path, version: ModelVersionId) -> PackagePredictor:
