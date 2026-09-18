@@ -87,6 +87,11 @@ curl -s http://localhost:8000/api/v1/schema.xsd            # схема, по к
 | GET | `/api/v1/assessments/{id}` | 200 оценка с меткой фото, 404 если нет |
 | PUT | `/api/v1/assessments/{id}/label` | 200, повтор заменяет метку |
 | GET | `/api/v1/shipments/{номер}` | 200 текущая оценка и история, 404 если нет |
+| GET | `/api/v1/models` | 200 со списком версий, новые первыми |
+| POST | `/api/v1/models/{версия}/activate` | 200 с активной версией, 404 и 409 при отказе |
+| POST | `/api/v1/training-jobs` | 201 с задачей, 409 если дообучение уже идёт |
+| GET | `/api/v1/training-jobs` | 200 с последними задачами |
+| GET | `/api/v1/training-jobs/{id}` | 200 с задачей, 404 если нет |
 | GET | `/health` | 200 с версией модели, 503 пока модель грузится |
 | GET | `/api/v1/schema.xsd` | XSD API |
 
@@ -174,7 +179,7 @@ docker compose restart api
 дообучает модель, гейт решает, лучше ли она, и при успехе версия включается.
 
 ```bash
-uv run loadvision jobs start           # поставить задачу в очередь
+uv run loadvision jobs start           # поставить задачу в очередь (то же делает API)
 uv run loadvision-worker               # воркер: берёт задачи по одной, пока его не остановят
 uv run loadvision-worker --once        # один проход и выход, для cron или проверки
 uv run loadvision jobs list
@@ -183,6 +188,18 @@ uv run loadvision jobs list
 ```
 job                                   status      queued                result                  gate
 145ee47a-0861-442e-a662-4459a94abfd9  succeeded   2026-09-18T09:21:23Z  2026-09-18.1            passed
+```
+
+То же самое через API:
+
+```bash
+curl -s -X POST http://localhost:8000/api/v1/training-jobs \
+  -H 'Content-Type: application/xml; charset=utf-8' \
+  --data '<TrainingJobRequest xmlns="urn:loadvision:api:v1"><Mode>fast</Mode></TrainingJobRequest>'
+
+curl -s http://localhost:8000/api/v1/training-jobs        # что делала очередь
+curl -s http://localhost:8000/api/v1/models               # версии и их статусы
+curl -s -X POST http://localhost:8000/api/v1/models/2026-09-18.1/activate
 ```
 
 Одновременно выполняется одна задача: вторая `jobs start` вернёт `TRAINING_ALREADY_RUNNING`.

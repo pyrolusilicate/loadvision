@@ -313,7 +313,11 @@
 - Очередь и воркер (36, 7.1, 7.3; 18.09): домен `TrainingJob` со статусами и переходами (`TrainingMode` переехал в домен, из `ports.py` по-прежнему импортируется), порт `TrainingJobRepository` с `claim_next` (`FOR UPDATE SKIP LOCKED` и «не берём, пока одна выполняется»), сценарии `start_training` и `run_training_job`, процесс `worker/main.py` (`loadvision-worker`, флаг `--once`), команды `jobs start` и `jobs list`, секция `training` в настройках.
 - Решения: обучение идёт вне транзакции; падение воркера записывает задачу неудачной до проброса исключения, иначе очередь встанет; отвергнутый гейтом кандидат — успешная задача; пакет регистрируется до активации, поэтому включается только то, что загружается.
 - Проверено вживую на временной базе: пустая очередь, постановка, отказ второй задачи (`TRAINING_ALREADY_RUNNING`), таблица `jobs list`. Настоящее дообучение на торче не гоняли — это минуты и веса энкодеров.
-- Не сделано: постановка задачи через API (нет сообщений в XSD — правка общего контракта), отдельный образ воркера с torch, маршруты API для версий модели.
+- Маршруты версий и очереди (4.10, 36; 18.09): `GET /api/v1/models`, `POST /api/v1/models/{версия}/activate`, `POST /api/v1/training-jobs`, `GET /api/v1/training-jobs`, `GET /api/v1/training-jobs/{id}`. Сообщения — в `api/xml/training.py`, сценарии чтения — в `application/model_versions.py` и `application/training_jobs.py`.
+- Правки общих контрактов (нужно подтверждение A): в XSD добавлены `TrainingJobRequest`, `TrainingJob`, `TrainingJobs`, типы `TrainingModeType`, `JobStatusType`, `RunIdType` и `FailureCodeType` — последний нужен потому, что задача может провалиться с кодом без HTTP-статуса (`STAGE_CHECK_FAILED`), а `ErrorCodeType` содержит только коды, которые уходят клиенту. В `errors.py` добавлены `MODEL_VERSION_NOT_FOUND` и `TRAINING_JOB_NOT_FOUND` (оба 404). Тесты сверяют каждый список в XSD с кодом.
+- `ActivateModel` и `RollbackModel` теперь отказывают кодом каталога, а не `ValueError`: маршруту API нужен HTTP-статус.
+- В `model_versions` поля `package_uri`, `manifest`, `cv_mae`, `within_10` по-прежнему пустые: сервису они не нужны, версия однозначно задаёт папку пакета. Если хотим показывать метрики в `GET /api/v1/models`, это отдельная задача.
+- Не сделано: отдельный образ воркера с torch.
 
 ### Модели, приоритеты и вес (решено B 17.09)
 
