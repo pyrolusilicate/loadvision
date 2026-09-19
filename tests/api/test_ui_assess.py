@@ -4,10 +4,13 @@ import pytest
 from httpx2 import Response
 
 from loadvision.api.ui.pages import catalog_error
+from loadvision.api.ui.templates import REVIEW_NOTES
+from loadvision.domain.assessment import ReviewReason
 from loadvision.errors import ERROR_CATALOG, ErrorCode
 from tests import image_files
 from tests.api.service import PHOTO, PHOTO_SHA256, Service, child, document, make_service
 from tests.api.ui_pages import get, page, sign_in, text_of
+from tests.fakes.predictor import FakePredictor
 
 FIRST = f"/ui/assessments/{UUID(int=1)}"
 
@@ -60,6 +63,46 @@ def test_the_same_photo_again_opens_the_stored_assessment(service: Service) -> N
     assert response.headers["location"] == f"{FIRST}?result=reused"
     assert len(service.store.assessments) == 1
     assert "показана сохранённая оценка" in text_of(get(service, response.headers["location"]))
+
+
+@pytest.mark.api
+def test_a_photo_shot_in_the_dark_opens_with_the_reason_to_check_it(service: Service) -> None:
+    token = sign_in(service)
+
+    response = upload(service, token, raw=image_files.dark_jpeg())
+
+    card = text_of(get(service, response.headers["location"]))
+    assert f"Прогноз может быть неверным. {REVIEW_NOTES[ReviewReason.TOO_DARK]}" in card
+    # The list runs the name into the value: "Яркость кадра" then "5 из 255".
+    assert "Яркость кадра5 из 255" in card
+
+
+@pytest.mark.api
+def test_a_new_model_assesses_the_photo_again_in_place_of_the_stored_estimate(
+    service: Service,
+) -> None:
+    token = sign_in(service)
+    upload(service, token)
+
+    service.model.activate(FakePredictor(version="fake-2", loads={PHOTO_SHA256: 30.0}))
+    response = upload(service, token)
+
+    assert response.headers["location"] == f"{FIRST}?result=again&from=fake-1"
+    card = text_of(get(service, response.headers["location"]))
+    assert "Новая модель пересчитала оценку, которую раньше дала модель fake-1." in card
+    assert "30.0% прогноз модели" in card
+    assert len(service.store.assessments) == 1
+
+
+@pytest.mark.api
+def test_a_made_up_model_version_in_the_address_is_left_out(service: Service) -> None:
+    token = sign_in(service)
+    upload(service, token)
+
+    card = text_of(get(service, f"{FIRST}?result=again&from=%3Cwhatever%20you%20like%3E"))
+
+    assert "Новая модель пересчитала оценку." in card
+    assert "whatever you like" not in card
 
 
 @pytest.mark.api

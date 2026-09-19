@@ -75,6 +75,18 @@ class ImageSettings(_Section):
         )
 
 
+class ReviewSettings(_Section):
+    """When the service asks a person to check a photo itself.
+
+    Attributes:
+        min_brightness: Mean brightness, from 0 to 255, below which the frame is too dark to
+            judge the load by. The unusual-scene threshold is not here: every model package
+            carries its own in `manifest.ood.threshold`.
+    """
+
+    min_brightness: float = Field(ge=0, le=255)
+
+
 class StorageSettings(_Section):
     """Folders of the files the service keeps.
 
@@ -155,6 +167,7 @@ class Settings(_Section):
 
     api: ApiSettings
     images: ImageSettings
+    review: ReviewSettings
     storage: StorageSettings
     logging: LoggingSettings
     runs: RunsSettings

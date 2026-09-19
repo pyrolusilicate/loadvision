@@ -109,6 +109,7 @@ def build_service_app(settings: Settings, engine: Engine) -> FastAPI:
             uow_factory=uow_factory,
             storage=storage,
             limits=settings.images.limits(),
+            min_brightness=settings.review.min_brightness,
             clock=utc_now,
             new_id=uuid.uuid4,
         ),

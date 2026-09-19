@@ -170,6 +170,21 @@ class AssessmentRepository(Protocol):
         """
         ...
 
+    def replace(self, assessment: Assessment) -> None:
+        """Stores a newer estimate of a photo that this shipment already has.
+
+        The shipment keeps one assessment per photo, so a photo assessed again by another
+        model version replaces the stored row and keeps its id.
+
+        Args:
+            assessment: Assessment with the id of the stored one, the same shipment and the
+                same photo.
+
+        Raises:
+            ValueError: If no assessment with this id is stored.
+        """
+        ...
+
     def get(self, assessment_id: UUID) -> Assessment | None:
         """Returns the assessment, or None if it is unknown."""
         ...

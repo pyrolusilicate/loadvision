@@ -44,6 +44,7 @@ LIMITS = ImageLimits(
     max_bytes=2_000_000, max_pixels=1_000_000, min_side=256, media_types=frozenset(MediaType)
 )
 MAX_BODY_BYTES = 1_000_000
+MIN_BRIGHTNESS = 20.0
 PHOTO = image_files.jpeg()
 PHOTO_SHA256 = prepare_image(PHOTO, LIMITS).sha256
 XML = {"Content-Type": "application/xml; charset=utf-8"}
@@ -105,6 +106,7 @@ def make_service(
             uow_factory=store.unit_of_work,
             storage=storage,
             limits=LIMITS,
+            min_brightness=MIN_BRIGHTNESS,
             clock=clock,
             new_id=SequentialIds(),
         ),

@@ -71,6 +71,11 @@ class InMemoryAssessmentRepository:
             )
         self._table.put(assessment.id, assessment)
 
+    def replace(self, assessment: Assessment) -> None:
+        if self._table.get(assessment.id) is None:
+            raise ValueError(f"assessment {assessment.id} is not stored")
+        self._table.put(assessment.id, assessment)
+
     def get(self, assessment_id: UUID) -> Assessment | None:
         return self._table.get(assessment_id)
 

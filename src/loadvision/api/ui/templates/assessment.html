@@ -10,6 +10,8 @@
   <section class="card">
     {% if created %}
     <p class="note ok">Фото оценено и сохранено в перевозке.</p>
+    {% elif again %}
+    <p class="note ok">Новая модель пересчитала оценку{% if previous %}, которую раньше дала модель {{ previous }}{% endif %}.</p>
     {% elif reused %}
     <p class="note">Это фото уже было в перевозке {{ a.shipment_id.value }}: показана сохранённая оценка, модель её не пересчитывала.</p>
     {% endif %}
@@ -26,6 +28,7 @@
       <dt>Время расчёта</dt><dd>{{ a.processing_ms }} мс</dd>
       {% if a.signals.uncertainty is not none %}<dt>Разброс ансамбля</dt><dd>{{ a.signals.uncertainty|load }} п.п.</dd>{% endif %}
       {% if a.signals.ood_score is not none %}<dt>Непохожесть на обучающие</dt><dd>{{ '%.3f'|format(a.signals.ood_score) }}</dd>{% endif %}
+      {% if a.signals.brightness is not none %}<dt>Яркость кадра</dt><dd>{{ '%.0f'|format(a.signals.brightness) }} из 255</dd>{% endif %}
     </dl>
 
     <h2>Подтверждённая загрузка</h2>

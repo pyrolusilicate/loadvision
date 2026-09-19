@@ -11,7 +11,7 @@ from loadvision.application.ports import (
     Prediction,
     UnitOfWorkFactory,
 )
-from loadvision.domain.assessment import LoadPercent, ReviewReason, Signals
+from loadvision.domain.assessment import LoadPercent, ReviewReason
 from loadvision.domain.model_version import ModelVersionId
 from loadvision.domain.shipment import Shipment, ShipmentId
 from loadvision.errors import ErrorCode, LoadvisionError
@@ -31,6 +31,11 @@ LIMITS = ImageLimits(
     media_types=frozenset(MediaType),
 )
 PHOTO = image_files.jpeg()
+DARK_PHOTO = image_files.dark_jpeg()
+MIN_BRIGHTNESS = 20.0
+# Mean brightness of the two photos above, measured by `imaging.quality.brightness`.
+PHOTO_BRIGHTNESS = 127.11
+DARK_BRIGHTNESS = 5.0
 OTHER_PHOTO = image_files.png()
 PHOTO_SHA256 = prepare_image(PHOTO, LIMITS).sha256
 
@@ -79,11 +84,13 @@ def use_case(
     store: InMemoryStore,
     storage: InMemoryImageStorage,
     uow_factory: UnitOfWorkFactory | None = None,
+    min_brightness: float = MIN_BRIGHTNESS,
 ) -> AssessPhoto:
     return AssessPhoto(
         uow_factory=store.unit_of_work if uow_factory is None else uow_factory,
         storage=storage,
         limits=LIMITS,
+        min_brightness=min_brightness,
         clock=FixedClock(T0),
         new_id=SequentialIds(),
         timer=StepTimer(),
@@ -144,13 +151,34 @@ def test_same_photo_in_the_same_shipment_returns_the_stored_assessment(
     predictor = FakePredictor()
     first = use_case(store, storage)(request(), predictor)
 
-    again = use_case(store, storage)(request(), FakePredictor(version="fake-2"))
+    again = use_case(store, storage)(request(), predictor)
 
     assert again.reused is True
+    assert again.replaced is None
     assert again.assessment == first.assessment
     assert again.image == first.image
     assert list(store.assessments) == [first.assessment.id]
     assert predictor.batches == [[PHOTO_SHA256]]
+
+
+@pytest.mark.unit
+def test_a_newer_model_assesses_the_photo_again_in_place_of_the_stored_estimate(
+    store: InMemoryStore, storage: InMemoryImageStorage
+) -> None:
+    assess = use_case(store, storage)
+    first = assess(request(), FakePredictor(version="fake-1"))
+    newer = FakePredictor(version="fake-2", loads={PHOTO_SHA256: 40.0})
+
+    again = assess(request(), newer)
+
+    assert again.reused is False
+    assert again.replaced == ModelVersionId("fake-1")
+    assert newer.batches == [[PHOTO_SHA256]]
+    # One photo of one shipment keeps one assessment, and its address stays the same.
+    assert again.assessment.id == first.assessment.id
+    assert store.assessments == {first.assessment.id: again.assessment}
+    assert again.assessment.load_pct == LoadPercent(40.0)
+    assert again.assessment.model_version == ModelVersionId("fake-2")
 
 
 @pytest.mark.unit
@@ -207,7 +235,9 @@ def test_prediction_signals_are_kept(store: InMemoryStore, storage: InMemoryImag
 
     result = use_case(store, storage)(request(), predictor)
 
-    assert result.assessment.signals == Signals(uncertainty=7.5, ood_score=0.2)
+    signals = result.assessment.signals
+    assert (signals.uncertainty, signals.ood_score) == (7.5, 0.2)
+    assert signals.brightness == pytest.approx(PHOTO_BRIGHTNESS, abs=0.01)
 
 
 @pytest.mark.unit
@@ -224,6 +254,35 @@ def test_the_reasons_of_the_model_to_check_it_are_stored(
     assert stored is not None
     assert stored.review_reasons == unusual
     assert stored.needs_review is True
+
+
+@pytest.mark.unit
+def test_a_photo_shot_in_the_dark_is_sent_to_a_person(
+    store: InMemoryStore, storage: InMemoryImageStorage
+) -> None:
+    result = use_case(store, storage)(request(photo=DARK_PHOTO), FakePredictor())
+
+    assert result.assessment.review_reasons == frozenset({ReviewReason.TOO_DARK})
+    assert result.assessment.signals.brightness == pytest.approx(DARK_BRIGHTNESS, abs=0.01)
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("photo", "min_brightness"),
+    [(PHOTO, MIN_BRIGHTNESS), (DARK_PHOTO, DARK_BRIGHTNESS)],
+    ids=["an ordinary photo", "a photo exactly at the threshold"],
+)
+def test_a_photo_light_enough_to_see_is_not_marked(
+    store: InMemoryStore,
+    storage: InMemoryImageStorage,
+    photo: bytes,
+    min_brightness: float,
+) -> None:
+    assess = use_case(store, storage, min_brightness=min_brightness)
+
+    result = assess(request(photo=photo), FakePredictor())
+
+    assert result.assessment.review_reasons == frozenset()
 
 
 @pytest.mark.unit

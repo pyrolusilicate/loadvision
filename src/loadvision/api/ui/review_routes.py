@@ -11,7 +11,12 @@ from starlette.requests import Request
 from starlette.responses import RedirectResponse, Response
 
 from loadvision.api.path_params import uuid_from_path
-from loadvision.api.ui.assess_routes import NEW_RESULT, REUSED_RESULT
+from loadvision.api.ui.assess_routes import (
+    AGAIN_RESULT,
+    NEW_RESULT,
+    PREVIOUS_PARAM,
+    REUSED_RESULT,
+)
 from loadvision.api.ui.pages import page
 from loadvision.api.ui.pagination import TILES_PER_PAGE, pager
 from loadvision.api.ui.services import ui_services_of
@@ -21,6 +26,7 @@ from loadvision.application.ports import AssessmentOrder, ReviewStatus
 from loadvision.application.submit_label import SubmitLabelRequest
 from loadvision.domain.assessment import SHA256_HEX_PATTERN, LoadPercent
 from loadvision.domain.confirmed_label import LabelSource
+from loadvision.domain.model_version import ModelVersionId
 from loadvision.errors import ErrorCode, LoadvisionError
 from loadvision.imaging.validator import detect_media_type
 
@@ -86,12 +92,17 @@ async def queue(
 
 @router.get("/assessments/{assessment_id}")
 async def assessment(
-    request: Request, session: SignedIn, assessment_id: str, result: str = ""
+    request: Request,
+    session: SignedIn,
+    assessment_id: str,
+    result: str = "",
+    previous: Annotated[str, Query(alias=PREVIOUS_PARAM)] = "",
 ) -> Response:
     """Shows one assessment: the photo, the prediction and the form for the verdict.
 
-    `result` comes from the photo form and says whether the photo was just assessed or had
-    been assessed for this shipment before.
+    `result` comes from the photo form and says whether the photo was just assessed, had been
+    assessed for this shipment by the model that answers now, or was assessed again in place
+    of the estimate of the model named by `previous`.
     """
     details = await run_in_threadpool(
         ui_services_of(request).get_assessment,
@@ -104,7 +115,17 @@ async def assessment(
         details=details,
         created=result == NEW_RESULT,
         reused=result == REUSED_RESULT,
+        again=result == AGAIN_RESULT,
+        previous=_version_or_blank(previous),
     )
+
+
+def _version_or_blank(value: str) -> str:
+    """The model version the address names, or nothing if it is not a version at all."""
+    try:
+        return ModelVersionId(value).value
+    except ValueError:
+        return ""
 
 
 @router.post("/assessments/{assessment_id}/label")

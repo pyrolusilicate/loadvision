@@ -123,8 +123,9 @@ def assessment_document(
     etree.SubElement(root, qualified("LoadPct")).text = format_decimal(
         assessment.load_pct.value, LOAD_PCT_PLACES
     )
-    # Review is written only when there are reasons: until the review policy exists, an empty
-    # set means "not checked", and needed="false" would claim more than the service knows.
+    # Review is written only when there are reasons: a package without an `ood` section checks
+    # nothing, so an empty set means "not checked" and needed="false" would claim more than the
+    # service knows.
     if assessment.review_reasons:
         review = etree.SubElement(root, qualified("Review"), needed="true")
         for reason in sorted(assessment.review_reasons):

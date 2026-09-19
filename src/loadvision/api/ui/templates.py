@@ -28,7 +28,7 @@ REVIEW_NOTES: Final = MappingProxyType(
             "засвет, в кадре не кузов или непривычный ракурс."
         ),
         ReviewReason.LOW_CONFIDENCE: "Модели ансамбля сильно расходятся в оценке.",
-        ReviewReason.TOO_DARK: "Фото слишком тёмное.",
+        ReviewReason.TOO_DARK: "В кадре слишком темно, груз не разглядеть.",
         ReviewReason.BLURRY: "Фото размыто.",
     }
 )

@@ -3,7 +3,7 @@
 from typing import Any, Final
 from uuid import UUID
 
-from sqlalchemy import Connection, Row, Select, func, select
+from sqlalchemy import Connection, Row, Select, func, select, update
 from sqlalchemy.dialects.postgresql import insert
 
 from loadvision.application.ports import (
@@ -48,6 +48,18 @@ class PostgresAssessmentRepository:
             raise AssessmentAlreadyExistsError(
                 f"shipment {assessment.shipment_id.value} already has this photo"
             )
+
+    def replace(self, assessment: Assessment) -> None:
+        # RETURNING for the same reason as in `add`: a Core update on psycopg reports
+        # rowcount -1, so the id that comes back is what tells that a row was there.
+        updated = self._connection.execute(
+            update(assessments)
+            .where(assessments.c.id == assessment.id)
+            .values(_values(assessment))
+            .returning(assessments.c.id)
+        ).first()
+        if updated is None:
+            raise ValueError(f"assessment {assessment.id} is not stored")
 
     def get(self, assessment_id: UUID) -> Assessment | None:
         return self._first(select(assessments).where(assessments.c.id == assessment_id))

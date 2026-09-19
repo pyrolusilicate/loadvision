@@ -9,6 +9,11 @@ images:
   min_side_px: 256
   allowed_formats: [jpeg, png, webp]
 
+review:
+  # Below this the frame is too dark to judge the load by. The darkest photo of our dataset
+  # of 1023 has 21.6, a photo shot in the dark has about 7, so nothing normal trips it.
+  min_brightness: 20
+
 storage:
   images_dir: storage/images
   models_dir: storage/models
