@@ -40,6 +40,7 @@ def settings(tmp_path: Path) -> Settings:
         "version": VERSION,
         "check_seconds": CHECK_SECONDS,
         "retry_seconds": RETRY_SECONDS,
+        "device": "cpu",
     }
     return Settings.model_validate(data)
 

@@ -17,11 +17,11 @@ WORKDIR /app
 # Dependencies go in a layer of their own, rebuilt only when the lock file changes.
 COPY pyproject.toml uv.lock ./
 RUN --mount=type=cache,target=/root/.cache/uv \
-    uv sync --locked --no-default-groups --group ml --no-install-project
+    uv sync --locked --no-default-groups --group ml --group cpu --no-install-project
 COPY README.md ./
 COPY src ./src
 RUN --mount=type=cache,target=/root/.cache/uv \
-    uv sync --locked --no-default-groups --group ml --no-editable
+    uv sync --locked --no-default-groups --group ml --group cpu --no-editable
 
 FROM mirror.gcr.io/library/python:${PYTHON_VERSION}-slim-trixie
 # The image has no git checkout; a package it builds records this commit instead.

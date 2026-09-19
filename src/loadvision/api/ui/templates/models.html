@@ -1,7 +1,7 @@
 {% extends "base.html" %}
 {% block title %}Модели{% endblock %}
 {% block content %}
-{% set status_names = {'active': 'работает', 'candidate': 'кандидат', 'retired': 'в отставке', 'rejected': 'отвергнута гейтом'} %}
+{% set status_names = {'active': 'работает', 'candidate': 'кандидат', 'retired': 'устарела', 'rejected': 'отвергнута гейтом'} %}
 {% set status_tones = {'active': 'ok', 'candidate': 'warn', 'retired': '', 'rejected': 'bad'} %}
 <div class="row">
   <h1>Версии модели</h1>
