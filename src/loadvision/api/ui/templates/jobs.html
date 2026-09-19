@@ -15,8 +15,6 @@
 <p class="caption">Новая дообученная модель проверяется, если подтверждённых загрузок не меньше {{ needed }}.</p>
 {% if error %}
 <p class="note bad" role="alert"><strong>{{ error[0] }}</strong> {{ error[1] }}</p>
-{% elif labels < needed %}
-<p class="note">Для дообучения необходимо подтвердить загрузку минимум ещё на {{ needed - labels }} фото.</p>
 {% endif %}
 {% if jobs.number == 1 and jobs.items and jobs.items[0].status.value == 'queued' %}
 <p class="note warn">Задача ждёт запуск воркера.</p>
