@@ -30,8 +30,8 @@
     {% if details.label %}
     <p class="note {% if details.label.unusable %}bad{% else %}ok{% endif %}">
       {% if details.label.unusable %}Фото отмечено непригодным{% else %}Загрузка {{ details.label.load_pct.value|load }}%{% endif %}
-      {% if details.label.author %} — {{ details.label.author }}{% endif %}, {{ details.label.updated_at|time }}.
-      Новый ответ заменит этот.
+      {% if details.label.author %} – {{ details.label.author }}{% endif %}, {{ details.label.updated_at|time }}.
+      Оценка оператора заменила оценку модели.
     </p>
     {% endif %}
     {% if error %}<p class="note bad" role="alert">{{ error }}</p>{% endif %}

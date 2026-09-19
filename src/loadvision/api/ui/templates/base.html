@@ -22,7 +22,7 @@
     {% if model_version %}
     <span class="badge ok" title="Версия модели, которой отвечает сервис">{{ model_version }}</span>
     {% elif model_failure %}
-    <span class="badge bad" title="Причина — на странице «Модели»">модель не загрузилась</span>
+    <span class="badge bad" title="Причина на странице «Модели»">модель не загрузилась</span>
     {% else %}
     <span class="badge warn" title="Оценка фото вернёт 503, пока модель не загрузится">модель загружается</span>
     {% endif %}
