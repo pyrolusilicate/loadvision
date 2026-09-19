@@ -11,7 +11,7 @@ from loadvision.application.ports import (
     Prediction,
     UnitOfWorkFactory,
 )
-from loadvision.domain.assessment import LoadPercent, Signals
+from loadvision.domain.assessment import LoadPercent, ReviewReason, Signals
 from loadvision.domain.model_version import ModelVersionId
 from loadvision.domain.shipment import Shipment, ShipmentId
 from loadvision.errors import ErrorCode, LoadvisionError
@@ -208,6 +208,22 @@ def test_prediction_signals_are_kept(store: InMemoryStore, storage: InMemoryImag
     result = use_case(store, storage)(request(), predictor)
 
     assert result.assessment.signals == Signals(uncertainty=7.5, ood_score=0.2)
+
+
+@pytest.mark.unit
+def test_the_reasons_of_the_model_to_check_it_are_stored(
+    store: InMemoryStore, storage: InMemoryImageStorage
+) -> None:
+    unusual = frozenset({ReviewReason.UNUSUAL_SCENE})
+    predictor = StubPredictor([Prediction(LoadPercent(60.0), review_reasons=unusual)])
+
+    result = use_case(store, storage)(request(), predictor)
+
+    with store.unit_of_work() as uow:
+        stored = uow.assessments.get(result.assessment.id)
+    assert stored is not None
+    assert stored.review_reasons == unusual
+    assert stored.needs_review is True
 
 
 @pytest.mark.unit

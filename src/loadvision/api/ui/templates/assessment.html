@@ -15,6 +15,11 @@
     {% endif %}
     <p><a href="{{ ui }}/shipments/{{ a.shipment_id.value|urlencode }}">Перевозка {{ a.shipment_id.value }}</a></p>
     <h1><span class="load">{{ a.load_pct.value|load }}%</span> <span class="muted">прогноз модели</span></h1>
+    {% if a.review_reasons and not details.label %}
+    <p class="note warn"><strong>Прогноз может быть неверным.</strong>
+      {% for reason in a.review_reasons|sort %}{{ review_notes[reason] }} {% endfor %}
+      Проверьте фото: подтвердите загрузку или отметьте фото непригодным.</p>
+    {% endif %}
     <dl>
       <dt>Модель</dt><dd>{{ a.model_version.value }}</dd>
       <dt>Время оценки</dt><dd>{{ a.created_at|time }}</dd>
@@ -22,9 +27,6 @@
       {% if a.signals.uncertainty is not none %}<dt>Разброс ансамбля</dt><dd>{{ a.signals.uncertainty|load }} п.п.</dd>{% endif %}
       {% if a.signals.ood_score is not none %}<dt>Непохожесть на обучающие</dt><dd>{{ '%.3f'|format(a.signals.ood_score) }}</dd>{% endif %}
     </dl>
-    {% if a.review_reasons %}
-    <p class="note warn">Модель просит проверить: {{ a.review_reasons|map(attribute='value')|join(', ') }}.</p>
-    {% endif %}
 
     <h2>Подтверждённая загрузка</h2>
     {% if details.label %}

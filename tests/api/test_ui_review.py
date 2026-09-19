@@ -2,6 +2,8 @@ from uuid import UUID
 
 import pytest
 
+from loadvision.api.ui.templates import REVIEW_NOTES
+from loadvision.domain.assessment import ReviewReason
 from loadvision.domain.confirmed_label import LabelSource
 from loadvision.errors import ERROR_CATALOG, ErrorCode
 from tests.api.service import (
@@ -15,7 +17,9 @@ from tests.api.service import (
     request_body,
 )
 from tests.api.ui_pages import LOGIN, get, page, sign_in, submit, text_of
+from tests.builders import make_assessment
 from tests.fakes.predictor import FakePredictor
+from tests.port_contracts.unit_of_work import store_assessment
 
 ASSESSMENT_ID = str(UUID(int=1))
 ASSESSMENT = f"/ui/assessments/{ASSESSMENT_ID}"
@@ -23,6 +27,12 @@ ASSESSMENT = f"/ui/assessments/{ASSESSMENT_ID}"
 
 def assess(service: Service) -> None:
     assert post(service.client, request_body()).status_code == 201
+
+
+def assess_with_reason(service: Service, reason: ReviewReason) -> None:
+    with service.store.unit_of_work() as uow:
+        store_assessment(uow, make_assessment(review_reasons=frozenset({reason})))
+        uow.commit()
 
 
 @pytest.mark.api
@@ -68,6 +78,33 @@ def test_the_page_shows_the_prediction_as_the_api_does(service: Service) -> None
         document(service.client.get(f"/api/v1/assessments/{ASSESSMENT_ID}")), "LoadPct"
     )
     assert shown == [f"{answered.text}%"]
+
+
+@pytest.mark.api
+@pytest.mark.parametrize("reason", list(ReviewReason))
+def test_the_card_says_in_words_why_the_prediction_needs_a_check(
+    service: Service, reason: ReviewReason
+) -> None:
+    sign_in(service)
+    assess_with_reason(service, reason)
+
+    card = text_of(get(service, ASSESSMENT))
+
+    assert f"Прогноз может быть неверным. {REVIEW_NOTES[reason]}" in card
+    assert reason.value not in card
+    tile = page(get(service, "/ui/")).xpath("//a[@class='tile']//span[@class='badge warn']")
+    assert [badge.text for badge in tile] == ["проверить"]
+
+
+@pytest.mark.api
+def test_a_confirmed_photo_no_longer_asks_for_a_check(service: Service) -> None:
+    token = sign_in(service)
+    assess_with_reason(service, ReviewReason.UNUSUAL_SCENE)
+
+    submit(service, f"{ASSESSMENT}/label", csrf=token, action="confirm", load_pct="60")
+
+    assert "Прогноз может быть неверным." not in text_of(get(service, ASSESSMENT))
+    assert page(get(service, "/ui/?status=confirmed")).xpath("//span[@class='badge warn']") == []
 
 
 @pytest.mark.api

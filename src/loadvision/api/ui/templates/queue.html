@@ -36,7 +36,7 @@
         {% if item.label.unusable %}<span class="badge bad">непригодно</span>
         {% else %}<span class="badge ok">подтверждено {{ item.label.load_pct.value|load }}%</span>{% endif %}
       {% endif %}
-      {% if a.review_reasons %}<span class="badge warn">проверить</span>{% endif %}
+      {% if a.review_reasons and not item.label %}<span class="badge warn">проверить</span>{% endif %}
     </span>
   </a>
   {% endfor %}

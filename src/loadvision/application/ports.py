@@ -10,7 +10,7 @@ from types import TracebackType
 from typing import Final, Protocol, Self
 from uuid import UUID
 
-from loadvision.domain.assessment import SHA256_HEX_PATTERN, Assessment, LoadPercent
+from loadvision.domain.assessment import SHA256_HEX_PATTERN, Assessment, LoadPercent, ReviewReason
 from loadvision.domain.confirmed_label import ConfirmedLabel
 from loadvision.domain.model_version import ModelVersion, ModelVersionId
 from loadvision.domain.operator import Operator, OperatorSession
@@ -41,11 +41,14 @@ class Prediction:
             model does not estimate it.
         ood_score: Distance to the nearest training photos in embedding space, or None if the
             model does not compute it.
+        review_reasons: Why a person should check the prediction, by the model's own
+            measures; empty when none apply.
     """
 
     load_pct: LoadPercent
     uncertainty: float | None = None
     ood_score: float | None = None
+    review_reasons: frozenset[ReviewReason] = field(default_factory=frozenset[ReviewReason])
 
 
 class LoadPredictor(Protocol):
