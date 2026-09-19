@@ -28,12 +28,12 @@ def test_the_bare_address_opens_the_pages(service: Service) -> None:
 
 @pytest.mark.api
 def test_a_page_without_a_session_sends_to_sign_in_and_back(service: Service) -> None:
-    response = get(service, "/ui/?all=true")
+    response = get(service, "/ui/?status=all")
 
     assert response.status_code == 303
-    assert response.headers["location"] == "/ui/login?next=/ui/%3Fall%3Dtrue"
+    assert response.headers["location"] == "/ui/login?next=/ui/%3Fstatus%3Dall"
     form = page(get(service, response.headers["location"]))
-    assert form.xpath("//input[@name='next']/@value") == ["/ui/?all=true"]
+    assert form.xpath("//input[@name='next']/@value") == ["/ui/?status=all"]
 
 
 @pytest.mark.api
@@ -42,9 +42,9 @@ def test_signing_in_returns_to_the_page_with_a_cookie_only_the_pages_get(
 ) -> None:
     add_operator(service)
 
-    response = log_in(service, next="/ui/?all=true")
+    response = log_in(service, next="/ui/?status=all")
 
-    assert (response.status_code, response.headers["location"]) == (303, "/ui/?all=true")
+    assert (response.status_code, response.headers["location"]) == (303, "/ui/?status=all")
     cookie = response.headers["set-cookie"]
     assert cookie.startswith("loadvision_session=")
     for attribute in ("HttpOnly", "Path=/ui", "SameSite=lax", "Max-Age=43200"):

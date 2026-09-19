@@ -6,6 +6,7 @@ from typing import Any, Final
 from starlette.requests import Request
 from starlette.responses import Response
 
+from loadvision.api.errors import answered_code
 from loadvision.api.ui.services import ui_services_of
 from loadvision.api.ui.templates import templates
 from loadvision.domain.operator import OperatorSession
@@ -40,13 +41,10 @@ _PAGE_HINTS: Final = MappingProxyType(
 def catalog_error(code: ErrorCode) -> tuple[int, str, str]:
     """Returns the HTTP status, message and hint a page shows for a catalog error.
 
-    A code without an HTTP status never reaches a person as is: it is shown as
-    `INTERNAL_ERROR`, the same as in the XML answers.
+    The code is the one `answered_code` gives, the same as in the XML answers.
     """
+    code = answered_code(code)
     spec = ERROR_CATALOG[code]
-    if spec.http_status is None:
-        code = ErrorCode.INTERNAL_ERROR
-        spec = ERROR_CATALOG[code]
     return spec.http_status or 500, spec.message, _PAGE_HINTS.get(code, spec.hint)
 
 
