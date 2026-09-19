@@ -4,6 +4,7 @@ Run with ``uvicorn --factory loadvision.api.main:create_service_app``.
 """
 
 import functools
+import logging
 import uuid
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
@@ -40,12 +41,15 @@ from loadvision.domain.timestamps import utc_now
 from loadvision.infrastructure.db.activity import worker_connected
 from loadvision.infrastructure.db.session import PostgresUnitOfWork, create_database_engine
 from loadvision.infrastructure.storage.local_storage import LocalImageStorage
+from loadvision.ml.devices import resolve_device
 from loadvision.ml.inference.active_model import ActiveModel
 from loadvision.ml.inference.model_follower import ModelFollower
 from loadvision.ml.inference.predictor import PackagePredictor
 from loadvision.ml.packaging.model_package import ModelPackage
 from loadvision.observability.logging import configure_logging
 from loadvision.settings import Settings, database_url, load_settings
+
+_logger = logging.getLogger(__name__)
 
 
 def create_service_app() -> FastAPI:
@@ -85,13 +89,15 @@ def build_service_app(settings: Settings, engine: Engine) -> FastAPI:
         ValueError: If `model.version` is not a valid version tag.
     """
     uow_factory: UnitOfWorkFactory = functools.partial(PostgresUnitOfWork, engine)
+    device = resolve_device(settings.model.device)
+    _logger.info("the model runs on %s", device)
     model = ActiveModel()
     follower = ModelFollower(
         model,
         LoadServedModel(
             uow_factory=uow_factory,
             clock=utc_now,
-            load_package=functools.partial(load_package, settings.storage.models_dir),
+            load_package=functools.partial(load_package, settings.storage.models_dir, device),
             initial_version=ModelVersionId(settings.model.version),
         ),
         check_seconds=settings.model.check_seconds,
@@ -152,14 +158,15 @@ def build_service_app(settings: Settings, engine: Engine) -> FastAPI:
     return create_app(services, lifespan, ui)
 
 
-def load_package(models_dir: Path, version: ModelVersionId) -> PackagePredictor:
+def load_package(models_dir: Path, device: str, version: ModelVersionId) -> PackagePredictor:
     """Loads the package of a version from its folder in the models storage.
 
     Args:
         models_dir: Folder with one package folder per version.
+        device: Torch device the model runs on.
         version: Version to load; its tag format keeps the path inside `models_dir`.
 
     Raises:
         ModelPackageError: If the package is missing, invalid or not supported.
     """
-    return PackagePredictor(ModelPackage.load(models_dir / version.value))
+    return PackagePredictor(ModelPackage.load(models_dir / version.value), device)

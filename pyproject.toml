@@ -177,20 +177,37 @@ ml = [
     { include-group = "serve" },
     "scikit-learn>=1.9.1",
 ]
+# Which build of torch Linux gets; exactly one of the two, see [tool.uv.sources].
+cpu = ["torch>=2.14.0", "torchvision>=0.29.0"]
+cuda = ["torch>=2.14.0", "torchvision>=0.29.0"]
 
 [tool.uv]
-# Every dependency group installs by default, so pyright and import-linter see all imports.
-# Service images should pick their groups explicitly.
-default-groups = "all"
+# Every group but `cuda` installs by default, so pyright and import-linter see all imports.
+# Service images pick their groups explicitly; the GPU server swaps `cpu` for `cuda`.
+default-groups = ["dev", "serve", "ml", "cpu"]
+conflicts = [[{ group = "cpu" }, { group = "cuda" }]]
 
-# Linux takes the CPU build of torch: the default Linux wheels pull CUDA libraries of several
-# gigabytes into the images. macOS keeps the PyPI build with MPS. torchvision is listed only so
-# that it comes from the same index: a source applies to direct dependencies alone.
+# Linux gets one of two builds of torch. `cpu` for the images: the default Linux wheels pull
+# CUDA libraries of several gigabytes. `cuda` for the GPU server: the default wheels need CUDA 13
+# and driver 580, while the organizers' machine has driver 535, which runs CUDA 12. macOS keeps
+# the PyPI build with MPS either way. torchvision is listed only so that it comes from the same
+# index: a source applies to direct dependencies alone.
 [tool.uv.sources]
-torch = [{ index = "pytorch-cpu", marker = "sys_platform == 'linux'" }]
-torchvision = [{ index = "pytorch-cpu", marker = "sys_platform == 'linux'" }]
+torch = [
+    { index = "pytorch-cpu", group = "cpu", marker = "sys_platform == 'linux'" },
+    { index = "pytorch-cu126", group = "cuda", marker = "sys_platform == 'linux'" },
+]
+torchvision = [
+    { index = "pytorch-cpu", group = "cpu", marker = "sys_platform == 'linux'" },
+    { index = "pytorch-cu126", group = "cuda", marker = "sys_platform == 'linux'" },
+]
 
 [[tool.uv.index]]
 name = "pytorch-cpu"
 url = "https://download.pytorch.org/whl/cpu"
+explicit = true
+
+[[tool.uv.index]]
+name = "pytorch-cu126"
+url = "https://download.pytorch.org/whl/cu126"
 explicit = true

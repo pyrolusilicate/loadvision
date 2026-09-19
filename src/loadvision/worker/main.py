@@ -29,6 +29,7 @@ from loadvision.domain.training_job import TrainingJob
 from loadvision.infrastructure.db.activity import WORKER_APPLICATION
 from loadvision.infrastructure.db.session import PostgresUnitOfWork, create_database_engine
 from loadvision.infrastructure.storage.local_storage import LocalImageStorage
+from loadvision.ml.devices import resolve_device
 from loadvision.ml.packaging.model_store import place_package
 from loadvision.ml.training.runner import PipelineTrainingRunner
 from loadvision.observability.logging import configure_logging
@@ -187,7 +188,7 @@ class ActivePackageRunner:
             storage=self._storage,
             clock=utc_now,
             active_package=active,
-            device=training.device,
+            device=resolve_device(training.device),
         )
         return runner.run(request)
 

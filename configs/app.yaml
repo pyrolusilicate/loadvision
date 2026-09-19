@@ -25,10 +25,13 @@ model:
   # The service follows the version the database names active, whoever activated it.
   check_seconds: 5
   retry_seconds: 60
+  # The GPU when torch sees one, otherwise the CPU: one file for a laptop, the images and the
+  # GPU server.
+  device: auto
 
 training:
   # The experiment the worker retrains with; the winner of the day 3 comparison.
   config: configs/experiments/ens4_apache_by_aspect.json
   data_dir: data
-  device: cpu
+  device: auto
   poll_seconds: 5

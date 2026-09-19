@@ -124,11 +124,14 @@ class ModelSettings(_Section):
         check_seconds: How often the service compares the version it answers with to the
             active one and loads the active one if they differ.
         retry_seconds: Pause before a version whose package failed to load is tried again.
+        device: Torch device the service runs the model on; `auto` takes the GPU when there is
+            one, see `ml/devices.py`.
     """
 
     version: str = Field(min_length=1)
     check_seconds: float = Field(gt=0)
     retry_seconds: float = Field(gt=0)
+    device: str = Field(min_length=1)
 
 
 class TrainingSettings(_Section):
@@ -137,7 +140,7 @@ class TrainingSettings(_Section):
     Attributes:
         config: Experiment config the worker retrains with.
         data_dir: Base dataset the confirmed labels are added to.
-        device: Torch device the encoders run on.
+        device: Torch device the encoders run on; `auto` takes the GPU when there is one.
         poll_seconds: How long the worker waits before looking for a job again.
     """
 
