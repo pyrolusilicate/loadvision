@@ -54,7 +54,7 @@ def start_job(args: argparse.Namespace) -> int:
 
     Raises:
         LoadvisionError: `TRAINING_ALREADY_RUNNING` if a job is queued or running.
-        RuntimeError: If `DATABASE_URL` is not set.
+        CommandError: If `DATABASE_URL` is not set.
     """
     with unit_of_work_factory() as uow_factory:
         job = StartTraining(uow_factory=uow_factory, clock=utc_now, new_id=uuid.uuid4)(
@@ -72,7 +72,7 @@ def list_jobs(args: argparse.Namespace) -> int:
         Exit code 0.
 
     Raises:
-        RuntimeError: If `DATABASE_URL` is not set.
+        CommandError: If `DATABASE_URL` is not set.
     """
     with unit_of_work_factory() as uow_factory, uow_factory() as uow:
         jobs = uow.training_jobs.list_recent(args.limit)

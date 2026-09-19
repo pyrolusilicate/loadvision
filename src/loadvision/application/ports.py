@@ -13,6 +13,7 @@ from uuid import UUID
 from loadvision.domain.assessment import SHA256_HEX_PATTERN, Assessment, LoadPercent
 from loadvision.domain.confirmed_label import ConfirmedLabel
 from loadvision.domain.model_version import ModelVersion, ModelVersionId
+from loadvision.domain.operator import Operator, OperatorSession
 from loadvision.domain.shipment import Shipment, ShipmentId
 from loadvision.domain.timestamps import ensure_aware
 from loadvision.domain.training_job import TrainingJob, TrainingMode
@@ -136,6 +137,24 @@ class ShipmentRepository(Protocol):
         ...
 
 
+class ReviewStatus(StrEnum):
+    """What a person said about the photo of an assessment; the values go into page addresses."""
+
+    WAITING = "review"
+    CONFIRMED = "confirmed"
+    UNUSABLE = "unusable"
+    ALL = "all"
+
+
+class AssessmentOrder(StrEnum):
+    """Orders of the review queue; the values are what the page puts into its address."""
+
+    NEWEST = "new"
+    OLDEST = "old"
+    FULLEST = "full"
+    EMPTIEST = "empty"
+
+
 class AssessmentRepository(Protocol):
     """Assessments within the current unit of work."""
 
@@ -169,6 +188,32 @@ class AssessmentRepository(Protocol):
 
     def list_by_shipment(self, shipment_id: ShipmentId) -> list[Assessment]:
         """Returns all assessments of the shipment, newest `created_at` first."""
+        ...
+
+    def list_page(
+        self,
+        *,
+        order: AssessmentOrder,
+        offset: int,
+        limit: int,
+        status: ReviewStatus = ReviewStatus.ALL,
+    ) -> list[Assessment]:
+        """Returns one page of assessments in the given order.
+
+        Rows with equal keys are ordered by time and then by id, so the order is total and
+        two pages never share a row.
+
+        Args:
+            order: Which assessments come first.
+            offset: Rows to skip.
+            limit: Most rows to return.
+            status: Which labels the photos must have; `WAITING` leaves the photos nobody
+                labelled, the work of the review queue.
+        """
+        ...
+
+    def count(self, *, status: ReviewStatus = ReviewStatus.ALL) -> int:
+        """Returns how many assessments `list_page` pages through."""
         ...
 
 
@@ -251,8 +296,12 @@ class TrainingJobRepository(Protocol):
         """
         ...
 
-    def list_recent(self, limit: int) -> list[TrainingJob]:
-        """Returns the newest jobs first, at most `limit` of them."""
+    def list_recent(self, limit: int, offset: int = 0) -> list[TrainingJob]:
+        """Returns the newest jobs first, at most `limit` of them after skipping `offset`."""
+        ...
+
+    def count(self) -> int:
+        """Returns how many jobs there are."""
         ...
 
     def update(self, job: TrainingJob) -> None:
@@ -261,6 +310,50 @@ class TrainingJobRepository(Protocol):
         Raises:
             ValueError: If the job was never stored.
         """
+        ...
+
+
+class OperatorRepository(Protocol):
+    """Operator accounts within the current unit of work."""
+
+    def get(self, login: str) -> Operator | None:
+        """Returns the account, or None if there is none with this login."""
+        ...
+
+    def add(self, operator: Operator) -> None:
+        """Stores a new account whose login is not taken."""
+        ...
+
+    def update(self, operator: Operator) -> None:
+        """Saves a stored account.
+
+        Raises:
+            ValueError: If the account was never stored.
+        """
+        ...
+
+    def list_all(self) -> list[Operator]:
+        """Returns every account, by login."""
+        ...
+
+
+class OperatorSessionRepository(Protocol):
+    """Sign-in sessions within the current unit of work."""
+
+    def add(self, session: OperatorSession) -> None:
+        """Stores a new session."""
+        ...
+
+    def get(self, token_hash: str) -> OperatorSession | None:
+        """Returns the session with this token hash, or None."""
+        ...
+
+    def delete(self, token_hash: str) -> None:
+        """Ends one session; ending an unknown one changes nothing."""
+        ...
+
+    def delete_for(self, login: str) -> None:
+        """Ends every session of an operator."""
         ...
 
 
@@ -304,6 +397,12 @@ class UnitOfWork(Protocol):
 
     @property
     def training_jobs(self) -> TrainingJobRepository: ...
+
+    @property
+    def operators(self) -> OperatorRepository: ...
+
+    @property
+    def operator_sessions(self) -> OperatorSessionRepository: ...
 
     def __enter__(self) -> Self: ...
 

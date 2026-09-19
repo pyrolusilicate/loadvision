@@ -14,6 +14,7 @@ from loadvision.cli.values import version_of
 from loadvision.domain.timestamps import format_utc_seconds, utc_now
 from loadvision.ml.inference.predictor import PackagePredictor
 from loadvision.ml.packaging.baseline_package import build_baseline_package
+from loadvision.ml.packaging.checkpoints import fetch_checkpoints
 from loadvision.ml.packaging.model_package import ModelPackage
 from loadvision.ml.packaging.model_store import place_package
 from loadvision.settings import load_settings
@@ -67,12 +68,24 @@ def add_commands(groups: "argparse._SubParsersAction[argparse.ArgumentParser]") 
     )
     register.set_defaults(run=register_package)
 
+    fetch = commands.add_parser(
+        "fetch",
+        help="download the encoder weights a package lists but does not hold",
+        description=(
+            "Downloads every encoder checkpoint the manifest lists from Hugging Face and keeps it "
+            "only if its hash matches the manifest. A package travels without its gigabyte of "
+            "public weights; this makes it whole again."
+        ),
+    )
+    fetch.add_argument("package", type=Path, help="package folder")
+    fetch.set_defaults(run=fetch_weights)
+
     activate = commands.add_parser(
         "activate",
         help="make a registered version the one the service answers with",
         description=(
             "The previously active version retires, so `rollback` can bring it back. The "
-            "service picks the new version up when it starts."
+            "service switches to the new version within model.check_seconds."
         ),
     )
     activate.add_argument("version", help="registered version")
@@ -125,6 +138,29 @@ def build_baseline(args: argparse.Namespace) -> int:
     return 0
 
 
+def fetch_weights(args: argparse.Namespace) -> int:
+    """Downloads the checkpoints a package misses, then verifies the whole package.
+
+    Returns:
+        Exit code 0.
+
+    Raises:
+        ModelPackageError: If the manifest is invalid, a downloaded checkpoint has another hash
+            than the manifest records, or the package still does not verify.
+        OSError: If a file cannot be written.
+    """
+    fetched = fetch_checkpoints(args.package)
+    for name in fetched:
+        _logger.info("fetched %s", name)
+    package = ModelPackage.load(args.package)
+    _logger.info(
+        "package %s is complete: every file matches its hash (%d downloaded)",
+        package.version.value,
+        len(fetched),
+    )
+    return 0
+
+
 def register_package(args: argparse.Namespace) -> int:
     """Registers a package: checks it, copies it into the models folder, writes the version.
 
@@ -135,10 +171,10 @@ def register_package(args: argparse.Namespace) -> int:
         Exit code 0.
 
     Raises:
-        CommandError: If the models folder already holds this version or it is registered.
+        CommandError: If the models folder already holds this version, it is registered, or
+            `DATABASE_URL` is not set.
         ModelPackageError: If the package is missing, invalid or not supported.
         OSError: If the package cannot be copied.
-        RuntimeError: If `DATABASE_URL` is not set.
     """
     package = ModelPackage.load(args.package)
     version = package.version
@@ -167,10 +203,9 @@ def activate_version(args: argparse.Namespace) -> int:
         Exit code 0.
 
     Raises:
-        CommandError: If the version tag is invalid.
+        CommandError: If the version tag is invalid or `DATABASE_URL` is not set.
         LoadvisionError: `MODEL_VERSION_NOT_FOUND` if the version is not registered;
             `MODEL_VERSION_STATUS_CONFLICT` if it was rejected.
-        RuntimeError: If `DATABASE_URL` is not set.
     """
     version = version_of(args.version)
     with unit_of_work_factory() as uow_factory:
@@ -189,7 +224,7 @@ def rollback_version(_args: argparse.Namespace) -> int:
     Raises:
         LoadvisionError: `MODEL_VERSION_NOT_FOUND` if nothing has been retired yet;
             `MODEL_VERSION_STATUS_CONFLICT` if that version cannot be activated again.
-        RuntimeError: If `DATABASE_URL` is not set.
+        CommandError: If `DATABASE_URL` is not set.
     """
     with unit_of_work_factory() as uow_factory:
         activate = ActivateModel(uow_factory=uow_factory, clock=utc_now)
@@ -206,7 +241,7 @@ def list_versions(_args: argparse.Namespace) -> int:
         Exit code 0.
 
     Raises:
-        RuntimeError: If `DATABASE_URL` is not set.
+        CommandError: If `DATABASE_URL` is not set.
     """
     with unit_of_work_factory() as uow_factory, uow_factory() as uow:
         versions = uow.model_versions.list_all()

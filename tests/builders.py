@@ -10,6 +10,7 @@ from loadvision.application.ports import ImageRecord
 from loadvision.domain.assessment import Assessment, LoadPercent
 from loadvision.domain.confirmed_label import ConfirmedLabel, LabelSource
 from loadvision.domain.model_version import ModelVersion, ModelVersionId, ModelVersionStatus
+from loadvision.domain.operator import SESSION_LIFETIME, Operator, OperatorSession
 from loadvision.domain.shipment import Shipment, ShipmentId
 from loadvision.domain.training_job import TrainingJob, TrainingMode
 from loadvision.imaging.prepared_image import MediaType, PreparedImage
@@ -66,6 +67,25 @@ def make_job(
     at: datetime = T0,
 ) -> TrainingJob:
     return TrainingJob.queued(job_id=job_id, mode=mode, at=at)
+
+
+def make_operator(
+    login: str = "operator-17", *, active: bool = True, at: datetime = T0
+) -> Operator:
+    # A hash no password matches: tests that sign in hash a real password themselves.
+    return Operator(login=login, password_hash="scrypt$00$00", active=active, created_at=at)
+
+
+def make_session(
+    login: str = "operator-17", *, token_hash: str = "a" * 64, at: datetime = T0
+) -> OperatorSession:
+    return OperatorSession(
+        token_hash=token_hash,
+        login=login,
+        csrf="csrf-token",
+        created_at=at,
+        expires_at=at + SESSION_LIFETIME,
+    )
 
 
 def make_label(

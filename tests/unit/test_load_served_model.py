@@ -122,3 +122,36 @@ def test_package_declaring_another_version_is_refused_and_not_registered() -> No
         load(store, Packages(declared={INITIAL.value: "other-v1"}))
     assert raised.value.code is ErrorCode.MODEL_PACKAGE_INVALID
     assert store.model_versions == {}
+
+
+@pytest.mark.unit
+def test_the_wanted_version_is_the_active_one_without_loading_it() -> None:
+    store = store_with(
+        make_model_version("v1", status=ModelVersionStatus.ACTIVE, activated_at=T0),
+    )
+    packages = Packages()
+
+    wanted = LoadServedModel(
+        uow_factory=store.unit_of_work,
+        clock=FixedClock(NOW),
+        load_package=packages,
+        initial_version=INITIAL,
+    ).wanted_version()
+
+    assert wanted == ModelVersionId("v1")
+    assert packages.loaded == []
+
+
+@pytest.mark.unit
+def test_an_empty_database_wants_the_initial_version_and_stays_empty() -> None:
+    store = InMemoryStore()
+
+    wanted = LoadServedModel(
+        uow_factory=store.unit_of_work,
+        clock=FixedClock(NOW),
+        load_package=Packages(),
+        initial_version=INITIAL,
+    ).wanted_version()
+
+    assert wanted == INITIAL
+    assert store.model_versions == {}

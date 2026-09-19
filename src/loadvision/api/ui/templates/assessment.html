@@ -1,0 +1,51 @@
+{% extends "base.html" %}
+{% block title %}Оценка{% endblock %}
+{% block content %}
+{% set a = details.assessment %}
+<div class="pair">
+  <figure class="photo">
+    <img src="{{ ui }}/photos/{{ a.image_sha256 }}" alt="Фото перевозки {{ a.shipment_id.value }}">
+    <figcaption class="muted">{{ details.image.width }}×{{ details.image.height }} · {{ details.image.media_type.value }}</figcaption>
+  </figure>
+  <section class="card">
+    {% if created %}
+    <p class="note ok">Фото оценено и сохранено в перевозке.</p>
+    {% elif reused %}
+    <p class="note">Это фото уже было в перевозке {{ a.shipment_id.value }}: показана сохранённая оценка, модель её не пересчитывала.</p>
+    {% endif %}
+    <p><a href="{{ ui }}/shipments/{{ a.shipment_id.value|urlencode }}">Перевозка {{ a.shipment_id.value }}</a></p>
+    <h1><span class="load">{{ a.load_pct.value|load }}%</span> <span class="muted">прогноз модели</span></h1>
+    <dl>
+      <dt>Модель</dt><dd>{{ a.model_version.value }}</dd>
+      <dt>Время оценки</dt><dd>{{ a.created_at|time }}</dd>
+      <dt>Время расчёта</dt><dd>{{ a.processing_ms }} мс</dd>
+      {% if a.signals.uncertainty is not none %}<dt>Разброс ансамбля</dt><dd>{{ a.signals.uncertainty|load }} п.п.</dd>{% endif %}
+      {% if a.signals.ood_score is not none %}<dt>Непохожесть на обучающие</dt><dd>{{ '%.3f'|format(a.signals.ood_score) }}</dd>{% endif %}
+    </dl>
+    {% if a.review_reasons %}
+    <p class="note warn">Модель просит проверить: {{ a.review_reasons|map(attribute='value')|join(', ') }}.</p>
+    {% endif %}
+
+    <h2>Подтверждённая загрузка</h2>
+    {% if details.label %}
+    <p class="note {% if details.label.unusable %}bad{% else %}ok{% endif %}">
+      {% if details.label.unusable %}Фото отмечено непригодным{% else %}Загрузка {{ details.label.load_pct.value|load }}%{% endif %}
+      {% if details.label.author %} — {{ details.label.author }}{% endif %}, {{ details.label.updated_at|time }}.
+      Новый ответ заменит этот.
+    </p>
+    {% endif %}
+    {% if error %}<p class="note bad" role="alert">{{ error }}</p>{% endif %}
+    <form method="post" action="{{ ui }}/assessments/{{ a.id }}/label" class="stack">
+      <input type="hidden" name="csrf" value="{{ session.csrf }}">
+      <label for="load_pct">Загрузка на фото, %</label>
+      <input id="load_pct" name="load_pct" type="text" inputmode="decimal"
+             value="{{ typed if typed is defined else (a.load_pct.value|load) }}" autofocus>
+      <div class="actions">
+        <button type="submit" name="action" value="confirm">Подтвердить загрузку</button>
+        <button type="submit" name="action" value="unusable" class="warn"
+                title="Закрыт объектив, чёрный или засвеченный кадр">Фото непригодно</button>
+      </div>
+    </form>
+  </section>
+</div>
+{% endblock %}

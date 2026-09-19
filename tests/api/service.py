@@ -1,4 +1,4 @@
-"""The API on fakes, with helpers that check every XML response against the published XSD."""
+"""The API and the operator pages on fakes, with helpers that check every XML response."""
 
 import base64
 from dataclasses import dataclass
@@ -9,14 +9,27 @@ from lxml import etree
 
 from loadvision.api.app import create_app
 from loadvision.api.services import ApiServices
+from loadvision.api.ui.services import UiServices
 from loadvision.api.xml.parser import NAMESPACE, schema_bytes
 from loadvision.application.assess_photo import AssessPhoto
 from loadvision.application.get_assessment import GetAssessment
 from loadvision.application.get_shipment import GetShipment
-from loadvision.application.model_versions import ActivateModel, ListModelVersions
-from loadvision.application.ports import LoadPredictor
+from loadvision.application.model_versions import (
+    ActivateModel,
+    ListModelVersions,
+    RollbackModel,
+)
+from loadvision.application.operators import Authenticate, SignIn, SignOut
+from loadvision.application.ports import ImageStorage, LoadPredictor
+from loadvision.application.review_queue import ReviewQueue
 from loadvision.application.submit_label import SubmitLabel
-from loadvision.application.training_jobs import GetTrainingJob, ListTrainingJobs, StartTraining
+from loadvision.application.training_jobs import (
+    CountTrainingLabels,
+    GetTrainingJob,
+    ListTrainingJobPage,
+    ListTrainingJobs,
+    StartTraining,
+)
 from loadvision.errors import ERROR_CATALOG, ErrorCode
 from loadvision.imaging.prepared_image import MediaType
 from loadvision.imaging.validator import ImageLimits, prepare_image
@@ -37,23 +50,56 @@ XML = {"Content-Type": "application/xml; charset=utf-8"}
 SCHEMA = etree.XMLSchema(etree.fromstring(schema_bytes()))
 
 
+class ReloadCounter:
+    """Stands in for loading the active model in the background; counts the requests."""
+
+    def __init__(self) -> None:
+        self.calls = 0
+
+    def __call__(self) -> None:
+        self.calls += 1
+
+
+class WorkerSwitch:
+    """Stands in for the check whether a worker is connected; tests turn it off."""
+
+    def __init__(self) -> None:
+        self.online = True
+
+    def __call__(self) -> bool:
+        return self.online
+
+
 @dataclass
 class Service:
     client: TestClient
     store: InMemoryStore
     storage: InMemoryImageStorage
     clock: FixedClock
+    model: ActiveModel
+    reloads: ReloadCounter
+    worker: WorkerSwitch
 
 
 def make_service(
-    predictor: LoadPredictor | None = None, storage: InMemoryImageStorage | None = None
+    predictor: LoadPredictor | None = None,
+    storage: InMemoryImageStorage | None = None,
+    photos: ImageStorage | None = None,
 ) -> Service:
+    """Builds the service on fakes, with the operator pages mounted like in production.
+
+    Args:
+        predictor: Model the service answers with, or None while it is loading.
+        storage: Where assessments save photos.
+        photos: Where the pages read photos from; the same storage when None.
+    """
     store = InMemoryStore()
     storage = InMemoryImageStorage() if storage is None else storage
     model = ActiveModel()
     if predictor is not None:
         model.activate(predictor)
     clock = FixedClock(T0)
+    reloads = ReloadCounter()
     services = ApiServices(
         assess_photo=AssessPhoto(
             uow_factory=store.unit_of_work,
@@ -73,11 +119,43 @@ def make_service(
         list_training_jobs=ListTrainingJobs(uow_factory=store.unit_of_work),
         get_training_job=GetTrainingJob(uow_factory=store.unit_of_work),
         model=model,
+        reload_model=reloads,
         request_id_header="X-Request-ID",
         max_body_bytes=MAX_BODY_BYTES,
     )
-    client = TestClient(create_app(services), raise_server_exceptions=False)
-    return Service(client=client, store=store, storage=storage, clock=clock)
+    worker = WorkerSwitch()
+    ui = UiServices(
+        sign_in=SignIn(uow_factory=store.unit_of_work, clock=clock),
+        authenticate=Authenticate(uow_factory=store.unit_of_work, clock=clock),
+        sign_out=SignOut(uow_factory=store.unit_of_work),
+        assess_photo=services.assess_photo,
+        review_queue=ReviewQueue(uow_factory=store.unit_of_work),
+        get_assessment=services.get_assessment,
+        submit_label=services.submit_label,
+        get_shipment=services.get_shipment,
+        list_models=services.list_models,
+        activate_model=services.activate_model,
+        rollback_model=RollbackModel(
+            uow_factory=store.unit_of_work, activate=services.activate_model
+        ),
+        reload_model=reloads,
+        start_training=services.start_training,
+        training_job_page=ListTrainingJobPage(uow_factory=store.unit_of_work),
+        count_training_labels=CountTrainingLabels(uow_factory=store.unit_of_work),
+        worker_online=worker,
+        storage=storage if photos is None else photos,
+        model=model,
+    )
+    client = TestClient(create_app(services, ui=ui), raise_server_exceptions=False)
+    return Service(
+        client=client,
+        store=store,
+        storage=storage,
+        clock=clock,
+        model=model,
+        reloads=reloads,
+        worker=worker,
+    )
 
 
 def request_body(shipment_id: str = "RP-1", image: str | None = None) -> bytes:

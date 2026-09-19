@@ -11,7 +11,8 @@ from uuid import UUID
 from lxml import etree
 
 from loadvision.api.xml.parser import NAMESPACE
-from loadvision.application.get_shipment import LabeledAssessment, ShipmentHistory
+from loadvision.application.get_shipment import ShipmentHistory
+from loadvision.application.labelled_assessments import LabeledAssessment
 from loadvision.application.ports import ImageRecord
 from loadvision.domain.assessment import Assessment, LoadPercent
 from loadvision.domain.confirmed_label import ConfirmedLabel

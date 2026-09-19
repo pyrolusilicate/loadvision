@@ -26,6 +26,7 @@ from loadvision.application.run_training_job import RunTrainingJob
 from loadvision.domain.model_version import ModelVersionId
 from loadvision.domain.timestamps import utc_now
 from loadvision.domain.training_job import TrainingJob
+from loadvision.infrastructure.db.activity import WORKER_APPLICATION
 from loadvision.infrastructure.db.session import PostgresUnitOfWork, create_database_engine
 from loadvision.infrastructure.storage.local_storage import LocalImageStorage
 from loadvision.ml.packaging.model_store import place_package
@@ -53,7 +54,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     args = parser.parse_args(argv)
     settings = load_settings()
     configure_logging(settings.logging.format, settings.logging.level)
-    engine = create_database_engine(database_url())
+    engine = create_database_engine(database_url(), application_name=WORKER_APPLICATION)
     try:
         run_job = build_worker(settings, engine)
         serve(run_job, poll_seconds=settings.training.poll_seconds, once=args.once)

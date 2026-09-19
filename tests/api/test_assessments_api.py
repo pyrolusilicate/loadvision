@@ -8,6 +8,7 @@ from uuid import UUID
 import pytest
 from lxml import etree
 
+from loadvision.api.errors import error_response
 from loadvision.api.middleware import REQUEST_ID_PATTERN
 from loadvision.api.xml.parser import NAMESPACE, schema_bytes
 from loadvision.domain.shipment import ShipmentId
@@ -18,6 +19,7 @@ from tests.api.service import (
     MAX_BODY_BYTES,
     PHOTO,
     PHOTO_SHA256,
+    SCHEMA,
     XML,
     Service,
     assert_error,
@@ -255,6 +257,15 @@ def test_without_a_model_assessment_and_health_answer_not_ready() -> None:
 def test_model_failure_is_reported(service: Service) -> None:
     failing = make_service(FakePredictor(error=RuntimeError("CUDA out of memory")))
     assert_error(post(failing.client, request_body()), ErrorCode.MODEL_INFERENCE_FAILED)
+
+
+@pytest.mark.api
+def test_a_code_without_an_http_status_is_answered_as_internal() -> None:
+    response = error_response(ErrorCode.STAGE_CHECK_FAILED, "req-1")
+
+    root = etree.fromstring(response.body)
+    SCHEMA.assertValid(root)
+    assert (response.status_code, root.get("code")) == (500, "INTERNAL_ERROR")
 
 
 @pytest.mark.api

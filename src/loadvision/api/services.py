@@ -1,5 +1,6 @@
 """What the routes need from the rest of the service, put together once at startup."""
 
+from collections.abc import Callable
 from dataclasses import dataclass
 from typing import cast
 
@@ -29,6 +30,7 @@ class ApiServices:
         list_training_jobs: Use case behind `GET /api/v1/training-jobs`.
         get_training_job: Use case behind `GET /api/v1/training-jobs/{job_id}`.
         model: The model the service answers with.
+        reload_model: Starts loading the active version now rather than at the next check.
         request_id_header: Header that carries the request id both ways.
         max_body_bytes: Largest accepted request body.
     """
@@ -43,6 +45,7 @@ class ApiServices:
     list_training_jobs: ListTrainingJobs
     get_training_job: GetTrainingJob
     model: ActiveModel
+    reload_model: Callable[[], object]
     request_id_header: str
     max_body_bytes: int
 

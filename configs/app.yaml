@@ -22,6 +22,9 @@ runs:
 
 model:
   version: baseline-v0
+  # The service follows the version the database names active, whoever activated it.
+  check_seconds: 5
+  retry_seconds: 60
 
 training:
   # The experiment the worker retrains with; the winner of the day 3 comparison.

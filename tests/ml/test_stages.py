@@ -82,7 +82,7 @@ def fake_checkpoint(root: Path, timm_name: str) -> Path:
     return target
 
 
-def toy_loader(name: str, _device: str) -> Backbone:
+def toy_loader(name: str, _device: str, _weights: Path | None = None) -> Backbone:
     return Backbone(
         name=name,
         module=ToyEncoder(),
@@ -461,7 +461,7 @@ def test_build_package_writes_a_package_the_service_can_load(
     ctx, folds_file = workspace
     run_upto(ctx, folds_file, chain=[("round_to", {"step": 5.0})])
     monkeypatch.setattr(build_package, "load_backbone", toy_loader)
-    monkeypatch.setattr(build_package, "_place_checkpoint", fake_checkpoint)
+    monkeypatch.setattr(build_package, "place_checkpoint", fake_checkpoint)
     # The manifest records the folds by their repository path, never an absolute one.
     monkeypatch.chdir(folds_file.parent)
     stage = BuildPackage(
@@ -490,7 +490,7 @@ def test_members_sharing_a_checkpoint_share_its_file(
     ctx, folds_file = workspace
     run_upto(ctx, folds_file)
     monkeypatch.setattr(build_package, "load_backbone", toy_loader)
-    monkeypatch.setattr(build_package, "_place_checkpoint", fake_checkpoint)
+    monkeypatch.setattr(build_package, "place_checkpoint", fake_checkpoint)
     monkeypatch.chdir(folds_file.parent)
 
     BuildPackage(
@@ -519,7 +519,7 @@ def test_the_package_answers_exactly_what_the_submission_says(
     PredictTest(members=members(), chain=chain, load=toy_loader).run(ctx)
     monkeypatch.setattr(backbones_module, "load_backbone", toy_loader)
     monkeypatch.setattr(build_package, "load_backbone", toy_loader)
-    monkeypatch.setattr(build_package, "_place_checkpoint", fake_checkpoint)
+    monkeypatch.setattr(build_package, "place_checkpoint", fake_checkpoint)
     monkeypatch.chdir(folds_file.parent)
     stage = BuildPackage(
         members=members(),
@@ -551,7 +551,7 @@ def test_the_package_carries_the_licence_of_every_checkpoint(
     ctx, folds_file = workspace
     run_upto(ctx, folds_file)
     monkeypatch.setattr(build_package, "load_backbone", toy_loader)
-    monkeypatch.setattr(build_package, "_place_checkpoint", fake_checkpoint)
+    monkeypatch.setattr(build_package, "place_checkpoint", fake_checkpoint)
     monkeypatch.chdir(folds_file.parent)
 
     result = BuildPackage(
@@ -578,7 +578,7 @@ def test_a_checkpoint_without_its_licence_text_stops_the_build(
     ctx, folds_file = workspace
     run_upto(ctx, folds_file)
     monkeypatch.setattr(build_package, "load_backbone", toy_loader)
-    monkeypatch.setattr(build_package, "_place_checkpoint", fake_checkpoint)
+    monkeypatch.setattr(build_package, "place_checkpoint", fake_checkpoint)
     monkeypatch.chdir(folds_file.parent)
 
     with pytest.raises(FileNotFoundError, match=r"Toy-1\.0"):

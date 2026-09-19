@@ -1,16 +1,28 @@
 """Postgres repository for assessments."""
 
-from typing import Any
+from typing import Any, Final
 from uuid import UUID
 
-from sqlalchemy import Connection, Row, Select, select
+from sqlalchemy import Connection, Row, Select, func, select
 from sqlalchemy.dialects.postgresql import insert
 
-from loadvision.application.ports import AssessmentAlreadyExistsError
+from loadvision.application.ports import (
+    AssessmentAlreadyExistsError,
+    AssessmentOrder,
+    ReviewStatus,
+)
 from loadvision.domain.assessment import Assessment, LoadPercent, ReviewReason, Signals
 from loadvision.domain.model_version import ModelVersionId
 from loadvision.domain.shipment import ShipmentId
-from loadvision.infrastructure.db.tables import assessments
+from loadvision.infrastructure.db.tables import assessments, confirmed_labels
+
+_NEWEST: Final = (assessments.c.created_at.desc(), assessments.c.id.desc())
+_ORDER: Final = {
+    AssessmentOrder.NEWEST: _NEWEST,
+    AssessmentOrder.OLDEST: (assessments.c.created_at.asc(), assessments.c.id.asc()),
+    AssessmentOrder.FULLEST: (assessments.c.load_pct.desc(), *_NEWEST),
+    AssessmentOrder.EMPTIEST: (assessments.c.load_pct.asc(), *_NEWEST),
+}
 
 
 class PostgresAssessmentRepository:
@@ -70,9 +82,44 @@ class PostgresAssessmentRepository:
         )
         return [_assessment(row) for row in rows]
 
+    def list_page(
+        self,
+        *,
+        order: AssessmentOrder,
+        offset: int,
+        limit: int,
+        status: ReviewStatus = ReviewStatus.ALL,
+    ) -> list[Assessment]:
+        statement = (
+            _filtered(select(assessments), status)
+            .order_by(*_ORDER[order])
+            .offset(offset)
+            .limit(limit)
+        )
+        return [_assessment(row) for row in self._connection.execute(statement)]
+
+    def count(self, *, status: ReviewStatus = ReviewStatus.ALL) -> int:
+        statement = _filtered(select(func.count()).select_from(assessments), status)
+        return self._connection.execute(statement).scalar_one()
+
     def _first(self, statement: Select[Any]) -> Assessment | None:
         row = self._connection.execute(statement).first()
         return None if row is None else _assessment(row)
+
+
+def _filtered(statement: Select[Any], status: ReviewStatus) -> Select[Any]:
+    label = select(confirmed_labels.c.image_sha256).where(
+        confirmed_labels.c.image_sha256 == assessments.c.image_sha256
+    )
+    match status:
+        case ReviewStatus.ALL:
+            return statement
+        case ReviewStatus.WAITING:
+            return statement.where(~label.exists())
+        case ReviewStatus.CONFIRMED:
+            return statement.where(label.where(~confirmed_labels.c.unusable).exists())
+        case ReviewStatus.UNUSABLE:
+            return statement.where(label.where(confirmed_labels.c.unusable).exists())
 
 
 def _values(assessment: Assessment) -> dict[str, object]:

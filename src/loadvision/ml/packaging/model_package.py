@@ -79,19 +79,31 @@ class ModelPackage:
                 missing, lies outside the package or has another hash. All file problems are
                 reported together.
         """
-        manifest_path = root / MANIFEST_FILE
-        try:
-            text = manifest_path.read_bytes()
-        except OSError as error:
-            raise ModelPackageError(f"cannot read {manifest_path}: {error}") from error
-        try:
-            manifest = Manifest.model_validate_json(text)
-        except ValidationError as error:
-            raise ModelPackageError(f"{manifest_path}: {_describe(error)}") from error
+        manifest = read_manifest(root)
         problems = _check_files(root, manifest)
         if problems:
             raise ModelPackageError(f"{root}: {'; '.join(problems)}")
         return cls(root, manifest)
+
+
+def read_manifest(root: Path) -> Manifest:
+    """Reads and validates the manifest of a package without checking its files.
+
+    Args:
+        root: Package folder.
+
+    Raises:
+        ModelPackageError: If the manifest is missing or invalid.
+    """
+    manifest_path = root / MANIFEST_FILE
+    try:
+        text = manifest_path.read_bytes()
+    except OSError as error:
+        raise ModelPackageError(f"cannot read {manifest_path}: {error}") from error
+    try:
+        return Manifest.model_validate_json(text)
+    except ValidationError as error:
+        raise ModelPackageError(f"{manifest_path}: {_describe(error)}") from error
 
 
 def write_package(root: Path, manifest: Manifest) -> ModelPackage:

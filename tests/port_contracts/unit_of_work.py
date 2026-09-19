@@ -7,6 +7,8 @@ import pytest
 
 from loadvision.application.ports import (
     AssessmentAlreadyExistsError,
+    AssessmentOrder,
+    ReviewStatus,
     UnitOfWork,
     UnitOfWorkFactory,
 )
@@ -23,11 +25,14 @@ from tests.builders import (
     make_job,
     make_label,
     make_model_version,
+    make_operator,
+    make_session,
     make_shipment,
 )
 
 PHOTO_A = b"photo-a"
 PHOTO_B = b"photo-b"
+PHOTOS = (PHOTO_A, PHOTO_B, b"photo-c", b"photo-d")
 UNKNOWN_SHA256 = "0" * 64
 
 
@@ -212,6 +217,65 @@ class UnitOfWorkContract:
         with uow_factory() as uow:
             assert uow.assessments.list_by_shipment(ShipmentId("RP-1")) == [newer, older]
 
+    def test_assessments_page_through_in_every_order(self, uow_factory: UnitOfWorkFactory) -> None:
+        # Loads 40, 80, 40 and 10 at hours 0 to 3: two share a load, so the ties show too.
+        stored = [
+            make_assessment(
+                id=UUID(int=number + 1),
+                image_sha256=make_image(PHOTOS[number]).sha256,
+                load_pct=LoadPercent(load),
+                created_at=T0 + timedelta(hours=number),
+            )
+            for number, load in enumerate((40.0, 80.0, 40.0, 10.0))
+        ]
+        with uow_factory() as uow:
+            for number, assessment in enumerate(stored):
+                store_assessment(uow, assessment, PHOTOS[number])
+            uow.commit()
+
+        def ids(order: AssessmentOrder, offset: int = 0, limit: int = 10) -> list[int]:
+            with uow_factory() as uow:
+                rows = uow.assessments.list_page(order=order, offset=offset, limit=limit)
+            return [row.id.int for row in rows]
+
+        assert ids(AssessmentOrder.NEWEST) == [4, 3, 2, 1]
+        assert ids(AssessmentOrder.OLDEST) == [1, 2, 3, 4]
+        assert ids(AssessmentOrder.FULLEST) == [2, 3, 1, 4]
+        assert ids(AssessmentOrder.EMPTIEST) == [4, 3, 1, 2]
+        assert ids(AssessmentOrder.FULLEST, offset=1, limit=2) == [3, 1]
+        with uow_factory() as uow:
+            assert uow.assessments.count() == 4
+
+    def test_assessments_filter_by_what_a_person_said_about_the_photo(
+        self, uow_factory: UnitOfWorkFactory
+    ) -> None:
+        confirmed, unusable, waiting = (
+            make_assessment(
+                id=UUID(int=number + 1),
+                image_sha256=make_image(PHOTOS[number]).sha256,
+                created_at=T0 + timedelta(hours=number),
+            )
+            for number in range(3)
+        )
+        with uow_factory() as uow:
+            for number, assessment in enumerate((confirmed, unusable, waiting)):
+                store_assessment(uow, assessment, PHOTOS[number])
+            uow.labels.save(make_label(PHOTOS[0], 70.0))
+            uow.labels.save(make_label(PHOTOS[1], None))
+            uow.commit()
+
+        def shown(status: ReviewStatus) -> tuple[list[Assessment], int]:
+            with uow_factory() as uow:
+                rows = uow.assessments.list_page(
+                    order=AssessmentOrder.NEWEST, offset=0, limit=10, status=status
+                )
+                return rows, uow.assessments.count(status=status)
+
+        assert shown(ReviewStatus.WAITING) == ([waiting], 1)
+        assert shown(ReviewStatus.CONFIRMED) == ([confirmed], 1)
+        assert shown(ReviewStatus.UNUSABLE) == ([unusable], 1)
+        assert shown(ReviewStatus.ALL) == ([waiting, unusable, confirmed], 3)
+
     def test_model_versions_track_the_active_one_and_list_newest_first(
         self, uow_factory: UnitOfWorkFactory
     ) -> None:
@@ -320,10 +384,61 @@ class UnitOfWorkContract:
         with uow_factory() as uow:
             assert uow.training_jobs.list_recent(2) == [jobs[2], jobs[1]]
             assert uow.training_jobs.list_recent(10) == list(reversed(jobs))
+            assert uow.training_jobs.list_recent(2, 1) == [jobs[1], jobs[0]]
+            assert uow.training_jobs.count() == 3
 
     def test_updating_an_unstored_job_fails(self, uow_factory: UnitOfWorkFactory) -> None:
         with uow_factory() as uow, pytest.raises(ValueError, match="not stored"):
             uow.training_jobs.update(make_job().started(at=T0, base_version=None))
+
+    def test_operator_is_stored_and_read_back(self, uow_factory: UnitOfWorkFactory) -> None:
+        locked = make_operator("anna").failed(T0)
+        with uow_factory() as uow:
+            uow.operators.add(make_operator("petr"))
+            uow.operators.add(make_operator("anna"))
+            uow.operators.update(locked)
+            uow.commit()
+        with uow_factory() as uow:
+            assert uow.operators.get("anna") == locked
+            assert uow.operators.get("nobody") is None
+            assert [operator.login for operator in uow.operators.list_all()] == ["anna", "petr"]
+
+    def test_updating_an_unstored_operator_fails(self, uow_factory: UnitOfWorkFactory) -> None:
+        with uow_factory() as uow, pytest.raises(ValueError, match="not stored"):
+            uow.operators.update(make_operator())
+
+    def test_session_is_stored_read_and_ended(self, uow_factory: UnitOfWorkFactory) -> None:
+        session = make_session()
+        with uow_factory() as uow:
+            uow.operators.add(make_operator())
+            uow.operator_sessions.add(session)
+            uow.commit()
+        with uow_factory() as uow:
+            assert uow.operator_sessions.get(session.token_hash) == session
+            assert uow.operator_sessions.get("b" * 64) is None
+            uow.operator_sessions.delete(session.token_hash)
+            uow.operator_sessions.delete("b" * 64)
+            uow.commit()
+        with uow_factory() as uow:
+            assert uow.operator_sessions.get(session.token_hash) is None
+
+    def test_every_session_of_an_operator_ends_together(
+        self, uow_factory: UnitOfWorkFactory
+    ) -> None:
+        mine = [make_session("anna", token_hash=char * 64) for char in "ab"]
+        theirs = make_session("petr", token_hash="c" * 64)
+        with uow_factory() as uow:
+            uow.operators.add(make_operator("anna"))
+            uow.operators.add(make_operator("petr"))
+            for session in (*mine, theirs):
+                uow.operator_sessions.add(session)
+            uow.commit()
+        with uow_factory() as uow:
+            uow.operator_sessions.delete_for("anna")
+            uow.commit()
+        with uow_factory() as uow:
+            assert [uow.operator_sessions.get(s.token_hash) for s in mine] == [None, None]
+            assert uow.operator_sessions.get(theirs.token_hash) == theirs
 
     def test_updating_an_unregistered_model_version_fails(
         self, uow_factory: UnitOfWorkFactory
