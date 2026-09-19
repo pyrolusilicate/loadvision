@@ -95,6 +95,9 @@ input[type="file"] { font: inherit; padding: 10px; border: 1px dashed var(--line
 .note.ok { background: var(--ok-ground); border-color: transparent; color: var(--ok); }
 .note.warn { background: var(--warn-ground); border-color: transparent; color: var(--warn); }
 .note.bad { background: var(--bad-ground); border-color: transparent; color: var(--bad); }
+/* A note may hold several lines and the measurements behind it; p has no margin of its own. */
+.note > * + * { margin-top: 6px; }
+.note dt { color: inherit; opacity: 0.75; }
 .badge { display: inline-block; padding: 1px 8px; border-radius: 999px; font-size: 12px; background: var(--ground); color: var(--muted); border: 1px solid var(--line); white-space: nowrap; }
 .badge.ok { background: var(--ok-ground); color: var(--ok); border-color: transparent; }
 .badge.warn { background: var(--warn-ground); color: var(--warn); border-color: transparent; }

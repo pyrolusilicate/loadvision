@@ -2,12 +2,32 @@
 {% block title %}Оценка{% endblock %}
 {% block content %}
 {% set a = details.assessment %}
+{% macro measurements(signals) %}
+  {% if signals.ood_score is not none %}<dt>Непохожесть на обучающие</dt><dd>{{ '%.3f'|format(signals.ood_score) }}</dd>{% endif %}
+  {% if signals.brightness is not none %}<dt>Яркость кадра</dt><dd>{{ '%.0f'|format(signals.brightness) }} из 255</dd>{% endif %}
+{% endmacro %}
 <div class="pair">
   <figure class="photo">
     <img src="{{ ui }}/photos/{{ a.image_sha256 }}" alt="Фото перевозки {{ a.shipment_id.value }}">
     <figcaption class="muted">{{ details.image.width }}×{{ details.image.height }} · {{ details.image.media_type.value }}</figcaption>
   </figure>
   <section class="card">
+    <p><a href="{{ ui }}/shipments/{{ a.shipment_id.value|urlencode }}">Перевозка {{ a.shipment_id.value }}</a></p>
+    {% if unreadable %}
+    <div class="note bad" role="alert">
+      <p><strong>Загружено нечитаемое фото.</strong></p>
+      <p>В кадре нет ничего похожего на кузов: закрыт объектив, кадр испорчен или это снимок чего-то другого. Фото отмечено непригодным, перевозка его не считает.</p>
+      <dl>
+        <dt>Время оценки</dt><dd>{{ a.created_at|time }}</dd>
+        <dt>Время расчёта</dt><dd>{{ a.processing_ms }} мс</dd>
+        {{ measurements(a.signals) }}
+      </dl>
+    </div>
+    <form method="post" action="{{ ui }}/assessments/{{ a.id }}/readable">
+      <input type="hidden" name="csrf" value="{{ session.csrf }}">
+      <button type="submit" title="Снять отметку и оценить фото как обычно">Фото читаемо</button>
+    </form>
+    {% else %}
     {% if created %}
     <p class="note ok">Фото оценено и сохранено в перевозке.</p>
     {% elif again %}
@@ -15,20 +35,20 @@
     {% elif reused %}
     <p class="note">Это фото уже было в перевозке {{ a.shipment_id.value }}: показана сохранённая оценка, модель её не пересчитывала.</p>
     {% endif %}
-    <p><a href="{{ ui }}/shipments/{{ a.shipment_id.value|urlencode }}">Перевозка {{ a.shipment_id.value }}</a></p>
     <h1><span class="load">{{ a.load_pct.value|load }}%</span> <span class="muted">прогноз модели</span></h1>
     {% if a.review_reasons and not details.label %}
-    <p class="note warn"><strong>Прогноз может быть неверным.</strong>
-      {% for reason in a.review_reasons|sort %}{{ review_notes[reason] }} {% endfor %}
-      Проверьте фото: подтвердите загрузку или отметьте фото непригодным.</p>
+    <div class="note warn">
+      <p><strong>Прогноз может быть неверным.</strong></p>
+      <p>{% for reason in a.review_reasons|sort %}{{ review_notes[reason] }} {% endfor %}</p>
+      <dl>{{ measurements(a.signals) }}</dl>
+    </div>
     {% endif %}
     <dl>
       <dt>Модель</dt><dd>{{ a.model_version.value }}</dd>
       <dt>Время оценки</dt><dd>{{ a.created_at|time }}</dd>
       <dt>Время расчёта</dt><dd>{{ a.processing_ms }} мс</dd>
       {% if a.signals.uncertainty is not none %}<dt>Разброс ансамбля</dt><dd>{{ a.signals.uncertainty|load }} п.п.</dd>{% endif %}
-      {% if a.signals.ood_score is not none %}<dt>Непохожесть на обучающие</dt><dd>{{ '%.3f'|format(a.signals.ood_score) }}</dd>{% endif %}
-      {% if a.signals.brightness is not none %}<dt>Яркость кадра</dt><dd>{{ '%.0f'|format(a.signals.brightness) }} из 255</dd>{% endif %}
+      {% if not a.review_reasons or details.label %}{{ measurements(a.signals) }}{% endif %}
     </dl>
 
     <h2>Подтверждённая загрузка</h2>
@@ -51,6 +71,7 @@
                 title="Закрыт объектив, чёрный или засвеченный кадр">Фото непригодно</button>
       </div>
     </form>
+    {% endif %}
   </section>
 </div>
 {% endblock %}

@@ -22,7 +22,7 @@ from loadvision.application.model_versions import (
 from loadvision.application.operators import Authenticate, SignIn, SignOut
 from loadvision.application.ports import ImageStorage, LoadPredictor
 from loadvision.application.review_queue import ReviewQueue
-from loadvision.application.submit_label import SubmitLabel
+from loadvision.application.submit_label import MarkReadable, SubmitLabel
 from loadvision.application.training_jobs import (
     CountTrainingLabels,
     GetTrainingJob,
@@ -45,6 +45,8 @@ LIMITS = ImageLimits(
 )
 MAX_BODY_BYTES = 1_000_000
 MIN_BRIGHTNESS = 20.0
+# Not the 0.5 of `configs/app.yaml`: a page must take the threshold it is given.
+UNREADABLE_OOD = 0.6
 PHOTO = image_files.jpeg()
 PHOTO_SHA256 = prepare_image(PHOTO, LIMITS).sha256
 XML = {"Content-Type": "application/xml; charset=utf-8"}
@@ -107,6 +109,7 @@ def make_service(
             storage=storage,
             limits=LIMITS,
             min_brightness=MIN_BRIGHTNESS,
+            unreadable_ood=UNREADABLE_OOD,
             clock=clock,
             new_id=SequentialIds(),
         ),
@@ -134,6 +137,7 @@ def make_service(
         review_queue=ReviewQueue(uow_factory=store.unit_of_work),
         get_assessment=services.get_assessment,
         submit_label=services.submit_label,
+        mark_readable=MarkReadable(uow_factory=store.unit_of_work),
         get_shipment=services.get_shipment,
         list_models=services.list_models,
         activate_model=services.activate_model,

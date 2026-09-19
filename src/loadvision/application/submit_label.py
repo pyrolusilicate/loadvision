@@ -40,6 +40,42 @@ class SubmitLabelResult:
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
+class MarkReadable:
+    """Cancels the verdict the model made about a photo it found unreadable.
+
+    Only the verdict of the model is cancelled. A person's label stays whoever asks: the pages
+    show this as one button on a photo the service refused, and nothing else may lose a label.
+
+    Attributes:
+        uow_factory: Opens database transactions.
+    """
+
+    uow_factory: UnitOfWorkFactory
+
+    def __call__(self, assessment_id: UUID) -> Assessment:
+        """Removes the label of the photo when the model is the one that made it.
+
+        Args:
+            assessment_id: Assessment whose photo returns to assessment.
+
+        Returns:
+            The assessment, so the caller can open its page.
+
+        Raises:
+            LoadvisionError: `ASSESSMENT_NOT_FOUND` if the assessment is unknown.
+        """
+        with self.uow_factory() as uow:
+            assessment = uow.assessments.get(assessment_id)
+            if assessment is None:
+                raise LoadvisionError(ErrorCode.ASSESSMENT_NOT_FOUND, str(assessment_id))
+            label = uow.labels.get(assessment.image_sha256)
+            if label is not None and label.source is LabelSource.MODEL:
+                uow.labels.delete(assessment.image_sha256)
+                uow.commit()
+        return assessment
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
 class SubmitLabel:
     """Stores a label for the photo of an assessment; a repeated submission replaces it.
 

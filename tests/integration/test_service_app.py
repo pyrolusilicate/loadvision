@@ -147,6 +147,8 @@ def test_a_photo_shot_in_the_dark_is_answered_with_the_reason_to_check_it(
     assert [reason.text for reason in review] == ["too_dark"]
     brightness = child(root, "Signals").attrib["brightness"]
     assert float(brightness) < settings.review.min_brightness
+    # The second half of the same policy comes from the same settings.
+    assert services_of(app).assess_photo.unreadable_ood == settings.review.unreadable_ood
 
 
 @pytest.mark.integration

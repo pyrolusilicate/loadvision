@@ -14,6 +14,8 @@ class FakePredictor:
     Args:
         version: Version tag reported by the predictor.
         loads: Load per photo SHA-256; other photos get a load derived from their hash.
+        ood_score: Distance to the training photos reported for every photo, or None when the
+            model does not measure it.
         error: Exception raised for every batch, to test model failures.
     """
 
@@ -22,10 +24,12 @@ class FakePredictor:
         *,
         version: str = "fake-1",
         loads: Mapping[str, float] | None = None,
+        ood_score: float | None = None,
         error: Exception | None = None,
     ) -> None:
         self._version = ModelVersionId(version)
         self._loads = dict(loads or {})
+        self._ood_score = ood_score
         self._error = error
         self.batches: list[list[str]] = []
 
@@ -37,7 +41,10 @@ class FakePredictor:
         self.batches.append([image.sha256 for image in images])
         if self._error is not None:
             raise self._error
-        return [Prediction(LoadPercent(self._load_for(image.sha256))) for image in images]
+        return [
+            Prediction(LoadPercent(self._load_for(image.sha256)), ood_score=self._ood_score)
+            for image in images
+        ]
 
     def _load_for(self, sha256: str) -> float:
         if sha256 in self._loads:

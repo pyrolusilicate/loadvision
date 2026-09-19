@@ -104,15 +104,21 @@ async def assessment(
     assessed for this shipment by the model that answers now, or was assessed again in place
     of the estimate of the model named by `previous`.
     """
+    services = ui_services_of(request)
     details = await run_in_threadpool(
-        ui_services_of(request).get_assessment,
+        services.get_assessment,
         uuid_from_path(assessment_id, ErrorCode.ASSESSMENT_NOT_FOUND),
     )
+    # The model found nothing of a truck body in this frame and marked the photo unusable
+    # itself, so the page shows the measurements instead of a prediction nobody should act on.
+    label = details.label
+    unreadable = label is not None and label.source is LabelSource.MODEL
     return page(
         request,
         "assessment.html",
         session,
         details=details,
+        unreadable=unreadable,
         created=result == NEW_RESULT,
         reused=result == REUSED_RESULT,
         again=result == AGAIN_RESULT,
@@ -126,6 +132,15 @@ def _version_or_blank(value: str) -> str:
         return ModelVersionId(value).value
     except ValueError:
         return ""
+
+
+@router.post("/assessments/{assessment_id}/readable")
+async def readable(request: Request, session: SignedIn, assessment_id: str) -> Response:
+    """Cancels the verdict of the model, so the photo can be judged like any other."""
+    target = uuid_from_path(assessment_id, ErrorCode.ASSESSMENT_NOT_FOUND)
+    await checked_form(request, session)
+    await run_in_threadpool(ui_services_of(request).mark_readable, target)
+    return RedirectResponse(f"{UI_PREFIX}/assessments/{target}", status_code=303)
 
 
 @router.post("/assessments/{assessment_id}/label")

@@ -13,7 +13,7 @@ from loadvision.application.model_versions import ActivateModel, ListModelVersio
 from loadvision.application.operators import Authenticate, SignIn, SignOut
 from loadvision.application.ports import ImageStorage
 from loadvision.application.review_queue import ReviewQueue
-from loadvision.application.submit_label import SubmitLabel
+from loadvision.application.submit_label import MarkReadable, SubmitLabel
 from loadvision.application.training_jobs import (
     CountTrainingLabels,
     ListTrainingJobPage,
@@ -34,6 +34,7 @@ class UiServices:
         review_queue: Assessments waiting for a confirmed load.
         get_assessment: One assessment with its photo and label.
         submit_label: Stores the verdict of an operator.
+        mark_readable: Cancels the verdict of the model about an unreadable photo.
         get_shipment: A shipment with its history.
         list_models: Registered model versions.
         activate_model: Makes a version the active one.
@@ -54,6 +55,7 @@ class UiServices:
     review_queue: ReviewQueue
     get_assessment: GetAssessment
     submit_label: SubmitLabel
+    mark_readable: MarkReadable
     get_shipment: GetShipment
     list_models: ListModelVersions
     activate_model: ActivateModel

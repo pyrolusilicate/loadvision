@@ -3,12 +3,13 @@ from uuid import UUID
 import pytest
 
 from loadvision.api.ui.templates import REVIEW_NOTES
-from loadvision.domain.assessment import ReviewReason
+from loadvision.domain.assessment import ReviewReason, Signals
 from loadvision.domain.confirmed_label import LabelSource
 from loadvision.errors import ERROR_CATALOG, ErrorCode
 from tests.api.service import (
     PHOTO,
     PHOTO_SHA256,
+    UNREADABLE_OOD,
     Service,
     child,
     document,
@@ -32,6 +33,19 @@ def assess(service: Service) -> None:
 def assess_with_reason(service: Service, reason: ReviewReason) -> None:
     with service.store.unit_of_work() as uow:
         store_assessment(uow, make_assessment(review_reasons=frozenset({reason})))
+        uow.commit()
+
+
+def assess_with_signals(service: Service, ood_score: float) -> None:
+    """Stores an assessment the model marked, with the measurements a card shows."""
+    with service.store.unit_of_work() as uow:
+        store_assessment(
+            uow,
+            make_assessment(
+                signals=Signals(ood_score=ood_score, brightness=219.0),
+                review_reasons=frozenset({ReviewReason.UNUSUAL_SCENE}),
+            ),
+        )
         uow.commit()
 
 
@@ -78,6 +92,94 @@ def test_the_page_shows_the_prediction_as_the_api_does(service: Service) -> None
         document(service.client.get(f"/api/v1/assessments/{ASSESSMENT_ID}")), "LoadPct"
     )
     assert shown == [f"{answered.text}%"]
+
+
+@pytest.mark.api
+def test_the_measurements_stand_next_to_the_reason_to_check_the_photo(service: Service) -> None:
+    sign_in(service)
+    assess_with_signals(service, ood_score=0.181)
+
+    card = page(get(service, ASSESSMENT))
+    note = card.xpath("//div[@class='note warn']")
+
+    assert len(note) == 1
+    assert note[0].xpath(".//dt/text()") == ["Непохожесть на обучающие", "Яркость кадра"]
+    assert note[0].xpath(".//dd/text()") == ["0.181", "219 из 255"]
+    # And nowhere else: the list below the note keeps the model and the times.
+    assert card.xpath("//dt/text()").count("Непохожесть на обучающие") == 1
+
+
+@pytest.mark.api
+def test_a_frame_the_model_refused_is_shown_without_a_prediction(service: Service) -> None:
+    token = sign_in(service)
+    service.model.activate(FakePredictor(ood_score=UNREADABLE_OOD))
+    assert post(service.client, request_body()).status_code == 201
+
+    card = page(get(service, ASSESSMENT))
+    text = text_of(get(service, ASSESSMENT))
+
+    assert "Загружено нечитаемое фото." in text
+    assert card.xpath("//div[@class='note bad']/@role") == ["alert"]
+    # No prediction, no model, no way to confirm a number nobody should trust.
+    assert card.xpath("//span[@class='load']") == []
+    # Everything the card still says stands inside the red block, as on a marked photo.
+    assert card.xpath("//div[@class='note bad']//dt/text()") == [
+        "Время оценки",
+        "Время расчёта",
+        "Непохожесть на обучающие",
+        "Яркость кадра",
+    ]
+    assert card.xpath("//section[@class='card']/dl") == []
+    assert card.xpath("//section[@class='card']//button/text()") == ["Фото читаемо"]
+    assert "Подтверждённая загрузка" not in text
+    # The shipment does not count the photo: the XML API answers that it is unusable.
+    current = child(document(service.client.get("/api/v1/shipments/RP-1")), "Current")
+    assert current.get("photoUnusable") == "true"
+    assert current.get("confirmedLoadPct") is None
+    assert token  # the card needs a session, and the button carries its token
+
+
+@pytest.mark.api
+def test_the_queue_shows_no_number_for_a_frame_the_model_refused(service: Service) -> None:
+    sign_in(service)
+    service.model.activate(FakePredictor(ood_score=UNREADABLE_OOD))
+    post(service.client, request_body())
+
+    tile = page(get(service, "/ui/?status=unusable")).xpath("//a[@class='tile']/span")
+
+    assert "Нечитаемое фото" in str(tile[0].xpath("string(strong)"))
+    assert tile[0].xpath(".//strong[@class='load']") == []
+
+
+@pytest.mark.api
+def test_the_button_cancels_the_verdict_of_the_model_and_the_photo_is_judged(
+    service: Service,
+) -> None:
+    token = sign_in(service)
+    service.model.activate(FakePredictor(ood_score=UNREADABLE_OOD))
+    post(service.client, request_body())
+
+    submit(service, f"{ASSESSMENT}/readable", csrf=token)
+
+    card = page(get(service, ASSESSMENT))
+    assert card.xpath("//span[@class='load']") != []
+    assert card.xpath("//div[@class='note bad']") == []
+    assert service.store.labels == {}
+    assert "Всё проверено" not in text_of(get(service, "/ui/"))
+
+
+@pytest.mark.api
+def test_the_button_never_takes_back_a_verdict_of_a_person(service: Service) -> None:
+    token = sign_in(service)
+    assess(service)
+    submit(service, f"{ASSESSMENT}/label", csrf=token, action="unusable")
+
+    submit(service, f"{ASSESSMENT}/readable", csrf=token)
+
+    card = text_of(get(service, ASSESSMENT))
+    assert "Фото отмечено непригодным" in card
+    assert "Загружено нечитаемое фото." not in card
+    assert list(service.store.labels) == [PHOTO_SHA256]
 
 
 @pytest.mark.api

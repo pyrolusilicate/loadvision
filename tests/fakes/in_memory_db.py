@@ -24,19 +24,33 @@ class _Table[K, V]:
     def __init__(self, committed: dict[K, V]) -> None:
         self._committed = committed
         self._pending: dict[K, V] = {}
+        self._dropped: set[K] = set()
 
     def get(self, key: K) -> V | None:
         if key in self._pending:
             return self._pending[key]
+        if key in self._dropped:
+            return None
         return self._committed.get(key)
 
     def put(self, key: K, value: V) -> None:
+        self._dropped.discard(key)
         self._pending[key] = value
 
+    def drop(self, key: K) -> None:
+        self._pending.pop(key, None)
+        self._dropped.add(key)
+
     def rows(self) -> list[V]:
-        return list({**self._committed, **self._pending}.values())
+        rows = {**self._committed, **self._pending}
+        for key in self._dropped:
+            rows.pop(key, None)
+        return list(rows.values())
 
     def commit(self) -> None:
+        for key in self._dropped:
+            self._committed.pop(key, None)
+        self._dropped.clear()
         self._committed.update(self._pending)
         self._pending.clear()
 
@@ -169,6 +183,9 @@ class InMemoryLabelRepository:
 
     def save(self, label: ConfirmedLabel) -> None:
         self._table.put(label.image_sha256, label)
+
+    def delete(self, image_sha256: str) -> None:
+        self._table.drop(image_sha256)
 
     def list_for_training(self) -> list[ConfirmedLabel]:
         usable = [row for row in self._table.rows() if row.load_pct is not None]

@@ -12,13 +12,14 @@ from loadvision.application.ports import (
     UnitOfWorkFactory,
 )
 from loadvision.domain.assessment import LoadPercent, ReviewReason
+from loadvision.domain.confirmed_label import LabelSource
 from loadvision.domain.model_version import ModelVersionId
 from loadvision.domain.shipment import Shipment, ShipmentId
 from loadvision.errors import ErrorCode, LoadvisionError
 from loadvision.imaging.prepared_image import MediaType, PreparedImage
 from loadvision.imaging.validator import ImageLimits, prepare_image
 from tests import image_files
-from tests.builders import T0, make_assessment
+from tests.builders import T0, make_assessment, make_image_record, make_label
 from tests.fakes.clock import FixedClock, SequentialIds
 from tests.fakes.image_storage import InMemoryImageStorage
 from tests.fakes.in_memory_db import InMemoryStore, InMemoryUnitOfWork
@@ -33,6 +34,7 @@ LIMITS = ImageLimits(
 PHOTO = image_files.jpeg()
 DARK_PHOTO = image_files.dark_jpeg()
 MIN_BRIGHTNESS = 20.0
+UNREADABLE_OOD = 0.45
 # Mean brightness of the two photos above, measured by `imaging.quality.brightness`.
 PHOTO_BRIGHTNESS = 127.11
 DARK_BRIGHTNESS = 5.0
@@ -85,12 +87,14 @@ def use_case(
     storage: InMemoryImageStorage,
     uow_factory: UnitOfWorkFactory | None = None,
     min_brightness: float = MIN_BRIGHTNESS,
+    unreadable_ood: float = UNREADABLE_OOD,
 ) -> AssessPhoto:
     return AssessPhoto(
         uow_factory=store.unit_of_work if uow_factory is None else uow_factory,
         storage=storage,
         limits=LIMITS,
         min_brightness=min_brightness,
+        unreadable_ood=unreadable_ood,
         clock=FixedClock(T0),
         new_id=SequentialIds(),
         timer=StepTimer(),
@@ -283,6 +287,62 @@ def test_a_photo_light_enough_to_see_is_not_marked(
     result = assess(request(photo=photo), FakePredictor())
 
     assert result.assessment.review_reasons == frozenset()
+
+
+@pytest.mark.unit
+def test_a_frame_with_no_truck_body_in_it_is_marked_unusable_by_the_model(
+    store: InMemoryStore, storage: InMemoryImageStorage
+) -> None:
+    result = use_case(store, storage)(request(), FakePredictor(ood_score=UNREADABLE_OOD))
+
+    label = store.labels[result.assessment.image_sha256]
+    assert (label.unusable, label.load_pct, label.author) == (True, None, None)
+    assert label.source is LabelSource.MODEL
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "ood_score",
+    [UNREADABLE_OOD - 0.001, None],
+    ids=["a photo just below the line", "a model that measures no distance"],
+)
+def test_a_photo_the_model_can_read_gets_no_verdict(
+    store: InMemoryStore, storage: InMemoryImageStorage, ood_score: float | None
+) -> None:
+    use_case(store, storage)(request(), FakePredictor(ood_score=ood_score))
+
+    assert store.labels == {}
+
+
+@pytest.mark.unit
+def test_the_model_never_overrules_a_person(
+    store: InMemoryStore, storage: InMemoryImageStorage
+) -> None:
+    # A photo somebody labelled before it was ever assessed here, such as an imported one.
+    with store.unit_of_work() as uow:
+        uow.images.add(make_image_record(PHOTO))
+        uow.labels.save(make_label(PHOTO, 60.0))
+        uow.commit()
+
+    use_case(store, storage)(request(), FakePredictor(ood_score=UNREADABLE_OOD))
+
+    label = store.labels[PHOTO_SHA256]
+    assert (label.source, label.load_pct) == (LabelSource.API, LoadPercent(60.0))
+
+
+@pytest.mark.unit
+def test_a_photo_the_model_already_judged_is_not_judged_again(
+    store: InMemoryStore, storage: InMemoryImageStorage
+) -> None:
+    assess = use_case(store, storage)
+    assess(request(shipment_id="RP-1"), FakePredictor(ood_score=UNREADABLE_OOD))
+    with store.unit_of_work() as uow:
+        uow.labels.delete(PHOTO_SHA256)
+        uow.commit()
+
+    assess(request(shipment_id="RP-2"), FakePredictor(ood_score=UNREADABLE_OOD))
+
+    assert store.labels == {}
 
 
 @pytest.mark.unit

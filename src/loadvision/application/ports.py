@@ -285,6 +285,10 @@ class LabelRepository(Protocol):
         """
         ...
 
+    def delete(self, image_sha256: str) -> None:
+        """Removes the label of the photo; does nothing when the photo has none."""
+        ...
+
     def list_for_training(self) -> list[ConfirmedLabel]:
         """Returns the labels with a load, sorted by photo hash; unusable photos are left out."""
         ...

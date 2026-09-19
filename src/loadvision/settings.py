@@ -82,9 +82,13 @@ class ReviewSettings(_Section):
         min_brightness: Mean brightness, from 0 to 255, below which the frame is too dark to
             judge the load by. The unusual-scene threshold is not here: every model package
             carries its own in `manifest.ood.threshold`.
+        unreadable_ood: Distance to the training photos from which the pages stop showing the
+            prediction at all: nothing of a truck body is in the frame, so the number would
+            only mislead.
     """
 
     min_brightness: float = Field(ge=0, le=255)
+    unreadable_ood: float = Field(gt=0)
 
 
 class StorageSettings(_Section):

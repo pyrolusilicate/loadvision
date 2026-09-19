@@ -13,6 +13,10 @@ review:
   # Below this the frame is too dark to judge the load by. The darkest photo of our dataset
   # of 1023 has 21.6, a photo shot in the dark has about 7, so nothing normal trips it.
   min_brightness: 20
+  # From here the pages show no prediction at all. Measured on v2: a grey, black, white or
+  # noise frame, a photo of paper and a closed lens score 0.59 to 0.91, a strongly blurred
+  # photo 0.47, while the most unusual real photo of 1023 scores 0.24.
+  unreadable_ood: 0.45
 
 storage:
   images_dir: storage/images

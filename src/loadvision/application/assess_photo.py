@@ -3,6 +3,7 @@
 import time
 from collections.abc import Callable
 from dataclasses import dataclass
+from datetime import datetime
 
 from loadvision.application.ports import (
     AssessmentAlreadyExistsError,
@@ -15,6 +16,7 @@ from loadvision.application.ports import (
     UnitOfWorkFactory,
 )
 from loadvision.domain.assessment import Assessment, LoadPercent, ReviewReason, Signals
+from loadvision.domain.confirmed_label import ConfirmedLabel, LabelSource
 from loadvision.domain.model_version import ModelVersionId
 from loadvision.domain.shipment import Shipment, ShipmentId
 from loadvision.errors import ErrorCode, LoadvisionError
@@ -80,6 +82,8 @@ class AssessPhoto:
         limits: Size and format limits of uploaded photos.
         min_brightness: Frames darker than this are sent to a person; the load cannot be seen
             on them, whatever the model answers.
+        unreadable_ood: Distance to the training photos from which the frame holds nothing of a
+            truck body; such a photo is marked unusable on the spot.
         clock: Current time, timezone-aware.
         new_id: New assessment ids.
         timer: Monotonic seconds, for the processing time.
@@ -89,6 +93,7 @@ class AssessPhoto:
     storage: ImageStorage
     limits: ImageLimits
     min_brightness: float
+    unreadable_ood: float
     clock: Clock
     new_id: IdFactory
     timer: Callable[[], float] = time.perf_counter
@@ -149,6 +154,7 @@ class AssessPhoto:
                     uow.assessments.add(assessment)
                 else:
                     uow.assessments.replace(assessment)
+                self._mark_unreadable(uow, assessment, now, judged=cached is not None)
                 record = _image_record(uow, assessment)
                 uow.commit()
         except AssessmentAlreadyExistsError as error:
@@ -165,6 +171,36 @@ class AssessPhoto:
             image=record,
             reused=False,
             replaced=None if stored is None else stored.model_version,
+        )
+
+    def _mark_unreadable(
+        self, uow: UnitOfWork, assessment: Assessment, now: datetime, *, judged: bool
+    ) -> None:
+        """Marks a frame that holds nothing of a truck body unusable, as the model sees it.
+
+        The shipment would otherwise count a number nobody should act on. The verdict is the
+        model's own, so it never touches a photo that already has one: a person who cancelled it
+        from the pages keeps the photo readable, and so does a photo assessed before.
+
+        Args:
+            uow: Open transaction; the verdict is committed with the assessment.
+            assessment: The assessment just stored.
+            now: Time of the verdict.
+            judged: Whether this photo was assessed by this model version before.
+        """
+        score = assessment.signals.ood_score
+        if judged or score is None or score < self.unreadable_ood:
+            return
+        if uow.labels.get(assessment.image_sha256) is not None:
+            return
+        uow.labels.save(
+            ConfirmedLabel.first(
+                image_sha256=assessment.image_sha256,
+                load_pct=None,
+                source=LabelSource.MODEL,
+                author=None,
+                at=now,
+            )
         )
 
     @staticmethod

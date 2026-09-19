@@ -28,7 +28,7 @@ from loadvision.application.model_versions import (
 from loadvision.application.operators import Authenticate, SignIn, SignOut
 from loadvision.application.ports import UnitOfWorkFactory
 from loadvision.application.review_queue import ReviewQueue
-from loadvision.application.submit_label import SubmitLabel
+from loadvision.application.submit_label import MarkReadable, SubmitLabel
 from loadvision.application.training_jobs import (
     CountTrainingLabels,
     GetTrainingJob,
@@ -110,6 +110,7 @@ def build_service_app(settings: Settings, engine: Engine) -> FastAPI:
             storage=storage,
             limits=settings.images.limits(),
             min_brightness=settings.review.min_brightness,
+            unreadable_ood=settings.review.unreadable_ood,
             clock=utc_now,
             new_id=uuid.uuid4,
         ),
@@ -134,6 +135,7 @@ def build_service_app(settings: Settings, engine: Engine) -> FastAPI:
         review_queue=ReviewQueue(uow_factory=uow_factory),
         get_assessment=services.get_assessment,
         submit_label=services.submit_label,
+        mark_readable=MarkReadable(uow_factory=uow_factory),
         get_shipment=services.get_shipment,
         list_models=services.list_models,
         activate_model=services.activate_model,
