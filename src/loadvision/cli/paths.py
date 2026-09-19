@@ -12,6 +12,8 @@ OOF_POSTPROCESS_FILE: Final = Path("oof/postprocess.jsonl")
 OOF_PREDICTIONS_FILE: Final = Path("oof/predictions.csv")
 ERROR_REPORT_FILE: Final = Path("eda/errors.html")
 SUBMISSIONS_DIR: Final = Path("submissions")
+FINETUNE_DIR: Final = Path("finetune")
+BLENDS_DIR: Final = Path("blends")
 
 
 def runs_dir(override: Path | None = None) -> Path:

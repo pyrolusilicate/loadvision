@@ -1,9 +1,10 @@
 """CLI commands for model packages."""
 
 import argparse
+import json
 import logging
 from pathlib import Path
-from typing import Final
+from typing import Any, Final
 
 from loadvision.application.model_versions import ActivateModel, RegisterModel, RollbackModel
 from loadvision.cli.database import unit_of_work_factory
@@ -12,6 +13,7 @@ from loadvision.cli.options import add_data_option
 from loadvision.cli.provenance import dataset_hash, git_commit
 from loadvision.cli.values import version_of
 from loadvision.domain.timestamps import format_utc_seconds, utc_now
+from loadvision.ml.data.manifest import load_split
 from loadvision.ml.inference.predictor import PackagePredictor
 from loadvision.ml.packaging.baseline_package import build_baseline_package
 from loadvision.ml.packaging.checkpoints import fetch_checkpoints
@@ -50,6 +52,24 @@ def add_commands(groups: "argparse._SubParsersAction[argparse.ArgumentParser]") 
     add_data_option(build)
     build.add_argument("--version", help="package version (default: model.version from settings)")
     build.set_defaults(run=build_baseline)
+
+    finetuned = commands.add_parser(
+        "build-finetuned",
+        help="package an encoder fine-tuned by `finetune --full`",
+        description=(
+            "Packages the model of a `finetune --full` run with the calibration and the metrics "
+            "of the out-of-fold run of the same settings. The package is written into the full "
+            "run's folder; `register` puts it into the models folder."
+        ),
+    )
+    finetuned.add_argument("full_run", type=Path, help="folder of the finetune --full run")
+    finetuned.add_argument(
+        "--oof-run", type=Path, required=True, help="folder of the out-of-fold run it matches"
+    )
+    add_data_option(finetuned)
+    finetuned.add_argument("--version", required=True, help="package version, such as v2")
+    finetuned.add_argument("--device", default="cpu", help="torch device (default: %(default)s)")
+    finetuned.set_defaults(run=build_finetuned)
 
     register = commands.add_parser(
         "register",
@@ -136,6 +156,67 @@ def build_baseline(args: argparse.Namespace) -> int:
     )
     _logger.info("built model package %s in %s", package.version.value, package.root)
     return 0
+
+
+def build_finetuned(args: argparse.Namespace) -> int:
+    """Builds the package of a fine-tuned model into `<full_run>/package`.
+
+    Returns:
+        Exit code 0.
+
+    Raises:
+        CommandError: If the version tag is invalid, the package folder exists, the runs do
+            not match each other or the dataset.
+    """
+    # Imported here: building needs torch, the other model commands do not.
+    from loadvision.ml.packaging.finetuned_package import build_finetuned_package
+    from loadvision.ml.pipeline.stages import DEFAULT_CHAIN
+    from loadvision.ml.pipeline.stages.build_package import LICENSES_DIR
+    from loadvision.ml.pipeline.stages.train_folds import OOF_FILE, read_oof
+
+    version = version_of(args.version)
+    out_dir = args.full_run / "package"
+    if out_dir.exists():
+        raise CommandError(f"{out_dir} already exists")
+    full, oof_run = _run_settings(args.full_run), _run_settings(args.oof_run)
+    if not full["full"] or oof_run["full"]:
+        raise CommandError("pass a finetune --full run and then the out-of-fold run")
+    if _learned(full) != _learned(oof_run):
+        raise CommandError("the two runs were fine-tuned with different settings")
+    try:
+        package = build_finetuned_package(
+            args.full_run,
+            out_dir,
+            encoder=full["settings"]["encoder"],
+            train=load_split(args.data, "train"),
+            oof=read_oof(args.oof_run / OOF_FILE),
+            oof_file=args.oof_run / OOF_FILE,
+            chain=[(name, dict(params)) for name, params in DEFAULT_CHAIN],
+            folds_file=Path(oof_run["folds"]),
+            licenses_dir=LICENSES_DIR,
+            version=version.value,
+            git_commit=git_commit(),
+            data_hash=dataset_hash(args.data),
+            created_at=utc_now(),
+            device=args.device,
+        )
+    except ValueError as error:
+        raise CommandError(str(error)) from error
+    _logger.info("built model package %s in %s", package.version.value, package.root)
+    return 0
+
+
+def _run_settings(folder: Path) -> dict[str, Any]:
+    path = folder / "settings.json"
+    if not path.is_file():
+        raise CommandError(f"{path} is missing; {folder} is not a finetune run")
+    content: dict[str, Any] = json.loads(path.read_text(encoding="utf-8"))
+    return content
+
+
+def _learned(run: dict[str, Any]) -> dict[str, Any]:
+    """Settings that change what a run learns; the number of loader workers does not."""
+    return {key: value for key, value in run["settings"].items() if key != "workers"}
 
 
 def fetch_weights(args: argparse.Namespace) -> int:

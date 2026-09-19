@@ -140,6 +140,32 @@ def summary(
     return report
 
 
+def paired_difference(errors: Vector, baseline: Vector) -> tuple[float, float]:
+    """Mean difference of two models' errors on the same photos, with two standard errors.
+
+    Pairing photo by photo cancels how hard each photo is, which is most of the spread: the
+    same 0.3 that is noise between two unpaired averages can be a clear result between two
+    paired ones. A difference beyond two standard errors is what every decision here needs.
+
+    Args:
+        errors: Absolute errors of the model under test.
+        baseline: Absolute errors of the model it is compared with, on the same photos.
+
+    Returns:
+        Mean of `errors - baseline`, below zero when the model under test is better, and two
+        standard errors of that mean; zero spread for a single photo.
+
+    Raises:
+        ValueError: If the inputs have different lengths or are empty.
+    """
+    ours, theirs = _as_pair(baseline, errors)
+    difference = theirs - ours
+    spread = (
+        float(2 * difference.std(ddof=1) / np.sqrt(difference.size)) if difference.size > 1 else 0.0
+    )
+    return float(difference.mean()), spread
+
+
 def _as_pair(y_true: Vector, y_pred: Vector) -> tuple[NDArray[np.float64], NDArray[np.float64]]:
     true = np.asarray(y_true, dtype=np.float64)
     pred = np.asarray(y_pred, dtype=np.float64)
