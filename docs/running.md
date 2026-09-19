@@ -16,10 +16,13 @@
 ## Установка
 
 ```bash
-uv sync                                # все группы зависимостей, включая ml
+uv sync                                # группы по умолчанию: dev, serve, ml и cpu
 cp .env.example .env                   # логин, пароль и база Postgres
 git config core.hooksPath .githooks    # проверки перед каждым git push
 ```
+
+Группа `cpu` даёт на Linux сборку torch без CUDA, на macOS ставится обычная сборка с MPS. На
+сервере с GPU вместо неё ставится группа `cuda`: как и зачем, написано в `deploy-vm.md`.
 
 ## Сервис за три команды
 
@@ -335,8 +338,8 @@ docker compose logs -f api
 
 | Образ | Файл | Что внутри | Размер |
 |---|---|---|---|
-| `loadvision-api` | `docker/api.Dockerfile` | сервис и миграции, группа `serve`: torch, torchvision, timm | 1,5 ГБ |
-| `loadvision-worker` | `docker/worker.Dockerfile` | воркер, группа `ml`: то же плюс scikit-learn | 1,8 ГБ |
+| `loadvision-api` | `docker/api.Dockerfile` | сервис и миграции, группы `serve` и `cpu`: torch, torchvision, timm | 1,5 ГБ |
+| `loadvision-worker` | `docker/worker.Dockerfile` | воркер, группы `ml` и `cpu`: то же плюс scikit-learn | 1,8 ГБ |
 
 Сервис читает веса энкодеров только из пакета модели, в сеть не ходит: в образе стоит
 `HF_HUB_OFFLINE=1`, и нехватка файла сразу даёт понятную ошибку вместо скачивания.
