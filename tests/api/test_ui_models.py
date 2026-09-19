@@ -70,7 +70,7 @@ def test_versions_are_listed_and_only_those_that_may_answer_can_be_switched_on(
         ("v4", "кандидат"),
         ("v3", "отвергнута гейтом"),
         ("v2", "работает"),
-        ("v1", "в отставке"),
+        ("v1", "устарела"),
     ]
     assert table.xpath("//tbody//form/@action") == [
         "/ui/models/v4/activate",

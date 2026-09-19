@@ -18,11 +18,11 @@ WORKDIR /app
 # Dependencies go in a layer of their own, rebuilt only when the lock file changes.
 COPY pyproject.toml uv.lock ./
 RUN --mount=type=cache,target=/root/.cache/uv \
-    uv sync --locked --no-default-groups --group serve --no-install-project
+    uv sync --locked --no-default-groups --group serve --group cpu --no-install-project
 COPY README.md ./
 COPY src ./src
 RUN --mount=type=cache,target=/root/.cache/uv \
-    uv sync --locked --no-default-groups --group serve --no-editable
+    uv sync --locked --no-default-groups --group serve --group cpu --no-editable
 
 FROM mirror.gcr.io/library/python:${PYTHON_VERSION}-slim-trixie
 RUN useradd --create-home --uid 1000 loadvision

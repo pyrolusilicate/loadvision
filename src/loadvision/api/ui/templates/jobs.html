@@ -30,9 +30,9 @@
   <tr>
     <td>{{ job.created_at|time }}</td>
     <td><span class="badge {{ status_tones[job.status.value] }}">{{ status_names[job.status.value] }}</span></td>
-    <td>{{ job.finished_at|time if job.finished_at else '—' }}</td>
-    <td>{% if job.result_version %}<code>{{ job.result_version.value }}</code>{% elif job.error_code %}<code>{{ job.error_code.value }}</code>{% else %}—{% endif %}</td>
-    <td>{% if job.gate_passed is none %}—{% elif job.gate_passed %}пропустил{% else %}отказал{% endif %}</td>
+    <td>{{ job.finished_at|time if job.finished_at else '–' }}</td>
+    <td>{% if job.result_version %}<code>{{ job.result_version.value }}</code>{% elif job.error_code %}<code>{{ job.error_code.value }}</code>{% else %}–{% endif %}</td>
+    <td>{% if job.gate_passed is none %}–{% elif job.gate_passed %}пропустил{% else %}отказал{% endif %}</td>
   </tr>
   {% endfor %}
   </tbody>

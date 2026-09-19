@@ -30,6 +30,26 @@ up:
 worker:
     GIT_COMMIT=$(git rev-parse HEAD) docker compose up -d --build worker
 
+# GPU server: torch for CUDA 12.6 instead of the CPU build. Every gpu- recipe passes these groups,
+# because a plain `uv run` would bring the CPU build back; see docs/deploy-vm.md.
+gpu := "--no-group cpu --group cuda"
+
+# Install the project with torch for CUDA 12.6 (GPU server)
+gpu-sync:
+    uv sync {{gpu}}
+
+# Prove that torch sees the GPU and computes on it (GPU server)
+gpu-check:
+    uv run {{gpu}} python -c "import torch; assert torch.cuda.is_available(), 'torch does not see the GPU'; x = torch.randn(512, 512, device='cuda'); print(torch.cuda.get_device_name(0), '| torch', torch.__version__, '| CUDA', torch.version.cuda, '| matmul ok:', bool((x @ x).isfinite().all()))"
+
+# The service on the GPU server, outside Docker so that torch reaches the GPU
+gpu-serve:
+    uv run {{gpu}} --env-file .env uvicorn --factory loadvision.api.main:create_service_app --host 0.0.0.0 --port 8000 --no-access-log
+
+# The retraining worker on the GPU server
+gpu-worker:
+    uv run {{gpu}} --env-file .env loadvision-worker
+
 # Local Postgres
 db-up:
     docker compose up -d postgres
