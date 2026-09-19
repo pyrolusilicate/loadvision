@@ -104,6 +104,23 @@ BACKBONES: Final = MappingProxyType(
             height=518,
             width=392,
         ),
+        # 1.4 times the box: the far end of a long body gets twice the patches.
+        "dinov2_vitb14_728": BackboneSpec(
+            timm_name="vit_base_patch14_reg4_dinov2.lvd142m",
+            license="Apache-2.0",
+            origin="DINOv2, Meta AI Research",
+            patch=14,
+            height=728,
+            width=546,
+        ),
+        "dinov2_vitl14": BackboneSpec(
+            timm_name="vit_large_patch14_reg4_dinov2.lvd142m",
+            patch=14,
+            height=518,
+            width=392,
+            license="Apache-2.0",
+            origin="DINOv2, Meta AI Research",
+        ),
         "dinov3_vitb16": BackboneSpec(
             timm_name="vit_base_patch16_dinov3.lvd1689m",
             license="LicenseRef-DINOv3",

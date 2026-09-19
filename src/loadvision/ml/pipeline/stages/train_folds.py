@@ -4,7 +4,7 @@ import csv
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Final
+from typing import Final, NamedTuple
 
 import numpy as np
 from numpy.typing import NDArray
@@ -123,7 +123,7 @@ class TrainFolds:
         raw = np.clip(np.mean(parts, axis=0), _MIN_LOAD, _MAX_LOAD)
         predicted = self._apply_chain(raw, labels, numbers, read_facts(ctx, samples))
         path = ctx.run_dir / OOF_FILE
-        _write(path, samples, numbers, labels, raw, predicted)
+        write_oof(path, samples, numbers, labels, raw, predicted)
         return StageResult(
             artifacts={"oof": path},
             counts={"photos": len(samples), "members": len(self.members), "folds": folds.n_folds},
@@ -176,7 +176,7 @@ class TrainFolds:
         return corrected
 
 
-def _write(
+def write_oof(
     path: Path,
     samples: Sequence[Sample],
     numbers: Sequence[int],
@@ -184,6 +184,19 @@ def _write(
     raw: NDArray[np.float64],
     predicted: NDArray[np.float64],
 ) -> None:
+    """Writes out-of-fold predictions in the one format every reader of `oof.csv` expects.
+
+    The pipeline, the promotion gate and the fine-tuning command all write through here, so a
+    fine-tuned model and a frozen one are compared from the same file layout.
+
+    Args:
+        path: File to write.
+        samples: Photos, in row order.
+        numbers: Fold of every photo.
+        labels: Reference loads.
+        raw: Predictions before postprocessing.
+        predicted: Predictions after postprocessing.
+    """
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("w", newline="", encoding="utf-8") as file:
         writer = csv.writer(file)
@@ -200,6 +213,51 @@ def _write(
                     f"{after:.4f}",
                 ]
             )
+
+
+class OofRow(NamedTuple):
+    """One photo of `oof.csv`.
+
+    Attributes:
+        fold: Fold the photo was held out in.
+        label: Reference load.
+        raw: Prediction before postprocessing.
+        predicted: Prediction after postprocessing.
+    """
+
+    fold: int
+    label: float
+    raw: float
+    predicted: float
+
+
+def read_oof(path: Path) -> dict[str, OofRow]:
+    """Reads the out-of-fold predictions `write_oof` writes, keyed by photo id.
+
+    Args:
+        path: An `oof.csv` of any run: the pipeline, fine-tuning or a blend.
+
+    Returns:
+        Photo id to its row.
+
+    Raises:
+        FileNotFoundError: If the file is missing.
+        ValueError: If a column is missing or a value is not a number.
+    """
+    with path.open(newline="", encoding="utf-8") as file:
+        reader = csv.DictReader(file)
+        missing = sorted(set(_COLUMNS) - set(reader.fieldnames or ()))
+        if missing:
+            raise ValueError(f"{path}: missing columns {', '.join(missing)}")
+        return {
+            row["image_id"]: OofRow(
+                fold=int(row["fold"]),
+                label=float(row["label"]),
+                raw=float(row["raw"]),
+                predicted=float(row["predicted"]),
+            )
+            for row in reader
+        }
 
 
 def read_facts(ctx: RunContext, samples: Sequence[Sample]) -> dict[str, NDArray[np.float64]]:

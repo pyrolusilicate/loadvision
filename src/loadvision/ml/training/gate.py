@@ -6,6 +6,7 @@ from typing import Final
 
 import numpy as np
 
+from loadvision.ml.evaluation.metrics import paired_difference
 from loadvision.ml.packaging.model_package import PACKAGE_OOF, ModelPackage, ModelPackageError
 
 # Two versions are compared on the rows they share. A row keeps its fold forever (rule 2 of
@@ -155,11 +156,7 @@ def decide(
     labels = np.array([theirs[image_id][1] for image_id in shared])
     active_error = np.abs(labels - np.array([theirs[image_id][2] for image_id in shared]))
     candidate_error = np.abs(labels - np.array([ours[image_id][2] for image_id in shared]))
-    difference = candidate_error - active_error
-    spread = (
-        float(2 * difference.std(ddof=1) / np.sqrt(difference.size)) if len(shared) > 1 else 0.0
-    )
-    mean = float(difference.mean())
+    mean, spread = paired_difference(candidate_error, active_error)
     passed = mean <= rules.tolerance
     return GateReport(
         passed=passed,

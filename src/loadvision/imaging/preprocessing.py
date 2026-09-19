@@ -99,6 +99,26 @@ def resize_pad_mean(image: PreparedImage, params: Params) -> ModelInput:
     return _letterbox(image, params, fill=np.round(mean * _MAX_CHANNEL).astype(np.uint8))
 
 
+def letterbox_region(
+    image_height: int, image_width: int, box_height: int, box_width: int
+) -> tuple[int, int, int, int]:
+    """Where a photo lands when it is fitted into the input box without changing proportions.
+
+    Args:
+        image_height: Photo height in pixels.
+        image_width: Photo width in pixels.
+        box_height: Height of the input box.
+        box_width: Width of the input box.
+
+    Returns:
+        Top, left, height and width of the photo inside the box, in box pixels.
+    """
+    scale = min(box_width / image_width, box_height / image_height)
+    height = max(1, round(image_height * scale))
+    width = max(1, round(image_width * scale))
+    return (box_height - height) // 2, (box_width - width) // 2, height, width
+
+
 def _letterbox(
     image: PreparedImage, params: Params, *, fill: NDArray[np.uint8] | None
 ) -> ModelInput:
@@ -109,9 +129,11 @@ def _letterbox(
     if not (std > 0).all():
         raise LoadvisionError(ErrorCode.MODEL_PACKAGE_INVALID, "preprocessing std must be positive")
 
-    scale = min(width / image.width, height / image.height)
+    top, left, inner_height, inner_width = letterbox_region(
+        image.height, image.width, height, width
+    )
     resized = Image.fromarray(image.pixels).resize(
-        (max(1, round(image.width * scale)), max(1, round(image.height * scale))),
+        (inner_width, inner_height),
         # Bicubic, because every encoder we consider was pretrained with it; baseline_v0 keeps
         # bilinear, since it must reproduce the organizers' reference code byte for byte.
         Image.Resampling.BICUBIC,
@@ -120,9 +142,7 @@ def _letterbox(
         canvas = np.zeros((height, width, 3), np.uint8)
     else:
         canvas = np.broadcast_to(fill, (height, width, 3)).copy()
-    top = (height - resized.height) // 2
-    left = (width - resized.width) // 2
-    canvas[top : top + resized.height, left : left + resized.width] = np.asarray(resized)
+    canvas[top : top + inner_height, left : left + inner_width] = np.asarray(resized)
 
     normalized = (canvas.astype(np.float32) / _MAX_CHANNEL - mean) / std
     return np.ascontiguousarray(normalized.transpose(2, 0, 1))
