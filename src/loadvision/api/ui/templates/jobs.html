@@ -1,0 +1,43 @@
+{% extends "base.html" %}
+{% block title %}Дообучение{% endblock %}
+{% block content %}
+{% set status_names = {'queued': 'в очереди', 'running': 'идёт', 'succeeded': 'готово', 'failed': 'ошибка'} %}
+{% set status_tones = {'queued': 'warn', 'running': 'warn', 'succeeded': 'ok', 'failed': 'bad'} %}
+<div class="row">
+  <h1>Дообучение</h1>
+  <form method="post" action="{{ ui }}/jobs">
+    <input type="hidden" name="csrf" value="{{ session.csrf }}">
+    <button type="submit" title="Головы на замороженных энкодерах, минуты счёта" {% if labels < needed or not worker_online %}disabled{% endif %}>Дообучить на подтверждённых метках</button>
+  </form>
+</div>
+<p>Воркер: {% if worker_online %}<span class="badge ok">запущен</span>{% else %}<span class="badge bad">не запущен</span>{% endif %}</p>
+<p>Подтверждённых загрузок: {{ labels }}.</p>
+<p class="caption">Новая дообученная модель проверяется, если подтверждённых загрузок не меньше {{ needed }}.</p>
+{% if error %}
+<p class="note bad" role="alert"><strong>{{ error[0] }}</strong> {{ error[1] }}</p>
+{% endif %}
+{% if jobs.number == 1 and jobs.items and jobs.items[0].status.value == 'queued' %}
+<p class="note warn">Задача ждёт запуск воркера.</p>
+{% endif %}
+{% if not jobs.total %}
+<p class="note">Задач ещё не было.</p>
+{% else %}
+<div class="scroll">
+<table>
+  <thead><tr><th>Поставлена</th><th>Статус</th><th>Завершена</th><th>Версия</th><th>Гейт</th></tr></thead>
+  <tbody>
+  {% for job in jobs.items %}
+  <tr>
+    <td>{{ job.created_at|time }}</td>
+    <td><span class="badge {{ status_tones[job.status.value] }}">{{ status_names[job.status.value] }}</span></td>
+    <td>{{ job.finished_at|time if job.finished_at else '—' }}</td>
+    <td>{% if job.result_version %}<code>{{ job.result_version.value }}</code>{% elif job.error_code %}<code>{{ job.error_code.value }}</code>{% else %}—{% endif %}</td>
+    <td>{% if job.gate_passed is none %}—{% elif job.gate_passed %}пропустил{% else %}отказал{% endif %}</td>
+  </tr>
+  {% endfor %}
+  </tbody>
+</table>
+</div>
+{% include "_pager.html" %}
+{% endif %}
+{% endblock %}

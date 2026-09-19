@@ -7,11 +7,13 @@ requires-python = ">=3.12,<3.13"
 dependencies = [
     "alembic>=1.20.0",
     "fastapi>=0.141.1",
+    "jinja2>=3.1.6",
     "lxml>=6.1.3",
     "numpy>=2.5.3",
     "pillow>=12.3.0",
     "psycopg[binary]>=3.3.5",
     "pydantic>=2.13.5",
+    "python-multipart>=0.0.32",
     "pyyaml>=6.0.3",
     "sqlalchemy>=2.0.54",
     "uvicorn>=0.53.0",
@@ -165,13 +167,30 @@ dev = [
     "ruff>=0.16.7",
     "types-lxml>=2026.2.16",
 ]
-ml = [
-    "scikit-learn>=1.9.1",
+# What the service needs to run a package of torch members; the API image installs only this.
+serve = [
     "timm>=1.0.29",
     "torch>=2.14.0",
+    "torchvision>=0.29.0",
+]
+ml = [
+    { include-group = "serve" },
+    "scikit-learn>=1.9.1",
 ]
 
 [tool.uv]
 # Every dependency group installs by default, so pyright and import-linter see all imports.
 # Service images should pick their groups explicitly.
 default-groups = "all"
+
+# Linux takes the CPU build of torch: the default Linux wheels pull CUDA libraries of several
+# gigabytes into the images. macOS keeps the PyPI build with MPS. torchvision is listed only so
+# that it comes from the same index: a source applies to direct dependencies alone.
+[tool.uv.sources]
+torch = [{ index = "pytorch-cpu", marker = "sys_platform == 'linux'" }]
+torchvision = [{ index = "pytorch-cpu", marker = "sys_platform == 'linux'" }]
+
+[[tool.uv.index]]
+name = "pytorch-cpu"
+url = "https://download.pytorch.org/whl/cpu"
+explicit = true

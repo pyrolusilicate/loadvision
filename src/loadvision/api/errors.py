@@ -19,11 +19,17 @@ _logger = logging.getLogger(__name__)
 _HTTP_CODES: Final = {404: ErrorCode.ROUTE_NOT_FOUND, 405: ErrorCode.METHOD_NOT_ALLOWED}
 
 
-def error_response(code: ErrorCode, request_id: str) -> XmlResponse:
-    """Builds the XML error response of a catalog code.
+def answered_code(code: ErrorCode) -> ErrorCode:
+    """Returns the code a client or a page is answered with.
 
-    A code without an HTTP status, such as a pipeline failure, never reaches a client as is: it
+    A code without an HTTP status, such as a pipeline failure, never reaches anyone as is: it
     is answered as `INTERNAL_ERROR`.
+    """
+    return code if ERROR_CATALOG[code].http_status is not None else ErrorCode.INTERNAL_ERROR
+
+
+def error_response(code: ErrorCode, request_id: str) -> XmlResponse:
+    """Builds the XML error response of a catalog code, as `answered_code` names it.
 
     Args:
         code: Catalog code.
@@ -32,10 +38,8 @@ def error_response(code: ErrorCode, request_id: str) -> XmlResponse:
     Returns:
         The response with the status of the code.
     """
-    status = ERROR_CATALOG[code].http_status
-    if status is None:
-        code = ErrorCode.INTERNAL_ERROR
-        status = ERROR_CATALOG[code].http_status or 500
+    code = answered_code(code)
+    status = ERROR_CATALOG[code].http_status or 500
     return xml_response(error_document(code, request_id), status)
 
 

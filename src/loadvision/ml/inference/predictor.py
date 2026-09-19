@@ -169,8 +169,11 @@ class PackagePredictor:
         # image that carries no torch at all.
         from loadvision.ml.models.backbones import load_backbone
 
+        # The validator of `Member` gives every torch member a weights file; the package has
+        # already checked its hash.
+        weights = None if member.weights is None else self._package.path(member.weights)
         try:
-            return load_backbone(member.backbone, self._device)
+            return load_backbone(member.backbone, self._device, weights)
         except KeyError as error:
             raise ModelPackageError(f"unknown backbone {member.backbone!r}") from error
 

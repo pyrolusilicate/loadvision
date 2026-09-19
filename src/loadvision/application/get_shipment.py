@@ -2,24 +2,10 @@
 
 from dataclasses import dataclass
 
+from loadvision.application.labelled_assessments import LabeledAssessment, with_labels
 from loadvision.application.ports import UnitOfWorkFactory
-from loadvision.domain.assessment import Assessment
-from loadvision.domain.confirmed_label import ConfirmedLabel
 from loadvision.domain.shipment import ShipmentId
 from loadvision.errors import ErrorCode, LoadvisionError
-
-
-@dataclass(frozen=True, slots=True, kw_only=True)
-class LabeledAssessment:
-    """An assessment together with the label of its photo.
-
-    Attributes:
-        assessment: The assessment.
-        label: Label of the assessed photo, or None if nobody confirmed it.
-    """
-
-    assessment: Assessment
-    label: ConfirmedLabel | None
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
@@ -79,12 +65,4 @@ class GetShipment:
             # assessments means no shipment.
             if not assessments:
                 raise LoadvisionError(ErrorCode.SHIPMENT_NOT_FOUND, shipment.value)
-            photos = {assessment.image_sha256 for assessment in assessments}
-            labels = {sha256: uow.labels.get(sha256) for sha256 in photos}
-        return ShipmentHistory(
-            shipment_id=shipment,
-            assessments=tuple(
-                LabeledAssessment(assessment=assessment, label=labels[assessment.image_sha256])
-                for assessment in assessments
-            ),
-        )
+            return ShipmentHistory(shipment_id=shipment, assessments=with_labels(uow, assessments))

@@ -76,6 +76,29 @@ def label_row(**overrides: Any) -> Row:
     return row | overrides
 
 
+def operator_row(**overrides: Any) -> Row:
+    row: Row = {
+        "login": "operator-17",
+        "password_hash": "scrypt$00$11",
+        "active": True,
+        "created_at": T0,
+        "failed_sign_ins": 0,
+        "first_failure_at": None,
+    }
+    return row | overrides
+
+
+def session_row(**overrides: Any) -> Row:
+    row: Row = {
+        "token_hash": SHA_A,
+        "login": "operator-1",
+        "csrf": "csrf-token",
+        "created_at": T0,
+        "expires_at": T0 + timedelta(hours=12),
+    }
+    return row | overrides
+
+
 def job_row(**overrides: Any) -> Row:
     return {"id": UUID(int=2), "mode": "fast", "status": "queued", "created_at": T0} | overrides
 
@@ -87,6 +110,8 @@ ROW_BUILDERS: dict[str, Callable[..., Row]] = {
     "assessments": assessment_row,
     "confirmed_labels": label_row,
     "training_jobs": job_row,
+    "operators": operator_row,
+    "operator_sessions": session_row,
 }
 
 
@@ -138,10 +163,11 @@ def schema_snapshot(connection: Connection) -> dict[str, list[tuple[Any, ...]]]:
 
 @pytest.fixture
 def seeded(connection: Connection) -> Connection:
-    """Connection with one photo, one shipment and one candidate version."""
+    """Connection with one photo, one shipment, one candidate version and one operator."""
     insert(connection, "images", image_row(sha256=SHA_A))
     insert(connection, "shipments", shipment_row(id="RP-1"))
     insert(connection, "model_versions", model_row(version="baseline-v0"))
+    insert(connection, "operators", operator_row(login="operator-1"))
     return connection
 
 
@@ -197,6 +223,8 @@ def test_each_revision_downgrades_to_the_previous_schema(server_url: URL) -> Non
         assert "ck_confirmed_labels_load_pct_unless_unusable" in check_names(
             engine, "confirmed_labels"
         )
+        command.downgrade(config, "0003")
+        assert {"operators", "operator_sessions"}.isdisjoint(inspect(engine).get_table_names())
         command.downgrade(config, "0002")
         assert "ck_confirmed_labels_load_pct_unless_unusable" not in check_names(
             engine, "confirmed_labels"
@@ -328,6 +356,14 @@ def test_accepts_boundary_row(seeded: Connection, table_name: str, overrides: Ro
         ),
         ("training_jobs", {"base_version": "v404"}, "fk_training_jobs_base_version"),
         ("training_jobs", {"result_version": "v404"}, "fk_training_jobs_result_version"),
+        ("operators", {"login": "Ivan"}, "ck_operators_login_format"),
+        ("operators", {"login": ".hidden"}, "ck_operators_login_format"),
+        ("operators", {"failed_sign_ins": -1}, "ck_operators_failed_sign_ins_non_negative"),
+        ("operators", {"failed_sign_ins": 3}, "ck_operators_failure_window_matches_count"),
+        ("operators", {"first_failure_at": T0}, "ck_operators_failure_window_matches_count"),
+        ("operator_sessions", {"token_hash": "A" * 64}, "ck_operator_sessions_token_hash_format"),
+        ("operator_sessions", {"expires_at": T0}, "ck_operator_sessions_expires_after_created"),
+        ("operator_sessions", {"login": "nobody"}, "fk_operator_sessions_login"),
     ],
 )
 def test_rejects_invalid_row(

@@ -1,0 +1,45 @@
+{% extends "base.html" %}
+{% block title %}Модели{% endblock %}
+{% block content %}
+{% set status_names = {'active': 'работает', 'candidate': 'кандидат', 'retired': 'в отставке', 'rejected': 'отвергнута гейтом'} %}
+{% set status_tones = {'active': 'ok', 'candidate': 'warn', 'retired': '', 'rejected': 'bad'} %}
+<div class="row">
+  <h1>Версии модели</h1>
+  <form method="post" action="{{ ui }}/models/rollback">
+    <input type="hidden" name="csrf" value="{{ session.csrf }}">
+    <button type="submit" class="ghost" title="Включить версию, которая работала до текущей">Вернуть предыдущую модель</button>
+  </form>
+</div>
+<p class="muted">Включённая версия подгружается в фоне: пока она грузится, сервис отвечает прежней.</p>
+{% if model_failure %}
+<p class="note bad" role="alert">Последняя загрузка модели не удалась: <code>{{ model_failure }}</code>.</p>
+{% endif %}
+{% if not versions.total %}
+<p class="note">Версий пока нет. Сервис зарегистрирует начальную при первом запуске.</p>
+{% else %}
+<div class="scroll">
+<table>
+  <thead><tr><th>Версия</th><th>Статус</th><th>Зарегистрирована</th><th>Включена</th><th></th></tr></thead>
+  <tbody>
+  {% for v in versions.items %}
+  <tr>
+    <td><code>{{ v.version.value }}</code></td>
+    <td><span class="badge {{ status_tones[v.status.value] }}">{{ status_names[v.status.value] }}</span></td>
+    <td>{{ v.created_at|time }}</td>
+    <td>{{ v.activated_at|time if v.activated_at else '—' }}</td>
+    <td>
+      {% if v.status.value in ('candidate', 'retired') %}
+      <form method="post" action="{{ ui }}/models/{{ v.version.value|urlencode }}/activate">
+        <input type="hidden" name="csrf" value="{{ session.csrf }}">
+        <button type="submit">Включить</button>
+      </form>
+      {% endif %}
+    </td>
+  </tr>
+  {% endfor %}
+  </tbody>
+</table>
+</div>
+{% include "_pager.html" %}
+{% endif %}
+{% endblock %}

@@ -26,6 +26,10 @@ hooks:
 up:
     docker compose up -d --build api
 
+# Retraining worker in Docker; its packages record the commit the image was built from
+worker:
+    GIT_COMMIT=$(git rev-parse HEAD) docker compose up -d --build worker
+
 # Local Postgres
 db-up:
     docker compose up -d postgres

@@ -3,7 +3,7 @@
 from typing import Any
 from uuid import UUID
 
-from sqlalchemy import Connection, Row, insert, select, update
+from sqlalchemy import Connection, Row, func, insert, select, update
 
 from loadvision.domain.model_version import ModelVersionId
 from loadvision.domain.training_job import TrainingJob, TrainingJobStatus, TrainingMode
@@ -59,11 +59,19 @@ class PostgresTrainingJobRepository:
         ).first()
         return None if row is None else _job(row)
 
-    def list_recent(self, limit: int) -> list[TrainingJob]:
+    def list_recent(self, limit: int, offset: int = 0) -> list[TrainingJob]:
         rows = self._connection.execute(
-            select(training_jobs).order_by(training_jobs.c.created_at.desc()).limit(limit)
+            select(training_jobs)
+            .order_by(training_jobs.c.created_at.desc(), training_jobs.c.id.desc())
+            .offset(offset)
+            .limit(limit)
         )
         return [_job(row) for row in rows]
+
+    def count(self) -> int:
+        return self._connection.execute(
+            select(func.count()).select_from(training_jobs)
+        ).scalar_one()
 
     def update(self, job: TrainingJob) -> None:
         """Saves the status and the outcome.

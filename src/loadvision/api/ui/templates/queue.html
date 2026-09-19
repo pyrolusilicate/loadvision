@@ -1,0 +1,46 @@
+{% extends "base.html" %}
+{% block title %}Очередь{% endblock %}
+{% block content %}
+<div class="row">
+  <h1>{{ status_label }}</h1>
+  <div class="filters">
+    <details class="menu">
+      <summary><span class="menu-name">Статус</span> {{ status_label }}</summary>
+      <div class="menu-list">
+        {% for label, address, on in statuses %}<a href="{{ address }}"{% if on %} class="on" aria-current="true"{% endif %}>{{ label }}</a>{% endfor %}
+      </div>
+    </details>
+    <details class="menu">
+      <summary><span class="menu-name">Порядок</span> {{ order_label }}</summary>
+      <div class="menu-list">
+        {% for label, address, on in orders %}<a href="{{ address }}"{% if on %} class="on" aria-current="true"{% endif %}>{{ label }}</a>{% endfor %}
+      </div>
+    </details>
+  </div>
+</div>
+{% if not items %}
+<p class="note">
+  {% if status == 'review' %}Всё проверено.{% elif status == 'confirmed' %}Подтверждённых оценок пока нет.{% elif status == 'unusable' %}Непригодных фото нет.{% else %}Оценок пока нет.{% endif %}
+  <a href="{{ ui }}/assess">Оценить фото</a></p>
+{% else %}
+<div class="grid">
+  {% for item in items %}
+  {% set a = item.assessment %}
+  <a class="tile" href="{{ ui }}/assessments/{{ a.id }}">
+    <img src="{{ ui }}/photos/{{ a.image_sha256 }}" alt="Фото перевозки {{ a.shipment_id.value }}" loading="lazy">
+    <span class="tile-body">
+      <strong class="load">{{ a.load_pct.value|load }}%</strong>
+      <span>{{ a.shipment_id.value }}</span>
+      <span class="muted">{{ a.created_at|time }}</span>
+      {% if item.label %}
+        {% if item.label.unusable %}<span class="badge bad">непригодно</span>
+        {% else %}<span class="badge ok">подтверждено {{ item.label.load_pct.value|load }}%</span>{% endif %}
+      {% endif %}
+      {% if a.review_reasons %}<span class="badge warn">проверить</span>{% endif %}
+    </span>
+  </a>
+  {% endfor %}
+</div>
+{% include "_pager.html" %}
+{% endif %}
+{% endblock %}

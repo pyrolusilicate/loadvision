@@ -1,0 +1,10 @@
+{% extends "base.html" %}
+{% block title %}Ошибка{% endblock %}
+{% block content %}
+<section class="card narrow">
+  <h1>{{ message }}</h1>
+  <p>{{ hint }}</p>
+  <p class="muted">Номер запроса для поиска в журнале: <code>{{ request_id }}</code></p>
+  <p><a href="{{ ui }}/">На главную</a></p>
+</section>
+{% endblock %}

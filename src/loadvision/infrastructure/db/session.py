@@ -11,23 +11,31 @@ from loadvision.infrastructure.db.repositories.labels import PostgresLabelReposi
 from loadvision.infrastructure.db.repositories.model_versions import (
     PostgresModelVersionRepository,
 )
+from loadvision.infrastructure.db.repositories.operators import (
+    PostgresOperatorRepository,
+    PostgresOperatorSessionRepository,
+)
 from loadvision.infrastructure.db.repositories.shipments import PostgresShipmentRepository
 from loadvision.infrastructure.db.repositories.training_jobs import (
     PostgresTrainingJobRepository,
 )
 
 
-def create_database_engine(url: str) -> Engine:
+def create_database_engine(url: str, application_name: str = "") -> Engine:
     """Creates the engine of the service database.
 
     Args:
         url: Connection string, such as ``postgresql+psycopg://user:password@host/db``.
+        application_name: Name the connections show in pg_stat_activity; the worker sets it so
+            the service can tell it is running.
 
     Returns:
         Engine with a connection pool. A pooled connection is checked before use, so a
         database restart does not fail the next request.
     """
-    return create_engine(url, pool_pre_ping=True)
+    return create_engine(
+        url, pool_pre_ping=True, connect_args={"application_name": application_name}
+    )
 
 
 class PostgresUnitOfWork:
@@ -64,6 +72,14 @@ class PostgresUnitOfWork:
     @property
     def training_jobs(self) -> PostgresTrainingJobRepository:
         return PostgresTrainingJobRepository(self._open())
+
+    @property
+    def operators(self) -> PostgresOperatorRepository:
+        return PostgresOperatorRepository(self._open())
+
+    @property
+    def operator_sessions(self) -> PostgresOperatorSessionRepository:
+        return PostgresOperatorSessionRepository(self._open())
 
     def __enter__(self) -> Self:
         self._connection = self._engine.connect()

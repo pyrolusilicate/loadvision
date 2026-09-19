@@ -15,11 +15,13 @@ from loadvision.imaging.validator import ImageLimits
 DATABASE_URL_ENV: Final = "DATABASE_URL"
 # Path of the settings file, for a deployment that keeps it outside the repository.
 CONFIG_PATH_ENV: Final = "LOADVISION_CONFIG"
+# Commit the code was built from, for an image that has no git checkout inside.
+GIT_COMMIT_ENV: Final = "LOADVISION_GIT_COMMIT"
 DEFAULT_CONFIG_PATH: Final = Path("configs/app.yaml")
 # Cache kept between runs, such as embeddings, inside the runs folder but outside every run.
 RUNS_CACHE_SUBDIR: Final = "cache"
 
-_MEBIBYTE: Final = 1024 * 1024
+MEBIBYTE: Final = 1024 * 1024
 _MEGAPIXEL: Final = 1_000_000
 _FORMATS: Final = {"jpeg": MediaType.JPEG, "png": MediaType.PNG, "webp": MediaType.WEBP}
 
@@ -45,7 +47,7 @@ class ApiSettings(_Section):
     @property
     def max_body_bytes(self) -> int:
         """Largest accepted request body, in bytes."""
-        return self.max_body_mb * _MEBIBYTE
+        return self.max_body_mb * MEBIBYTE
 
 
 class ImageSettings(_Section):
@@ -66,7 +68,7 @@ class ImageSettings(_Section):
     def limits(self) -> ImageLimits:
         """Returns the limits in the units the image validator works with."""
         return ImageLimits(
-            max_bytes=self.max_decoded_mb * _MEBIBYTE,
+            max_bytes=self.max_decoded_mb * MEBIBYTE,
             max_pixels=self.max_megapixels * _MEGAPIXEL,
             min_side=self.min_side_px,
             media_types=frozenset(_FORMATS[name] for name in self.allowed_formats),
@@ -113,15 +115,20 @@ class RunsSettings(_Section):
 
 
 class ModelSettings(_Section):
-    """Model the service starts with.
+    """Model the service starts with and how it follows the active version.
 
     Attributes:
         version: Version the service activates while the database has no active version; once
             one is active, the database decides. The package is the folder of that name in the
             models folder.
+        check_seconds: How often the service compares the version it answers with to the
+            active one and loads the active one if they differ.
+        retry_seconds: Pause before a version whose package failed to load is tried again.
     """
 
     version: str = Field(min_length=1)
+    check_seconds: float = Field(gt=0)
+    retry_seconds: float = Field(gt=0)
 
 
 class TrainingSettings(_Section):

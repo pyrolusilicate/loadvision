@@ -5,7 +5,7 @@ from dataclasses import dataclass
 
 from loadvision.application.model_versions import ActivateModel
 from loadvision.application.ports import Clock, LoadPredictor, UnitOfWorkFactory
-from loadvision.domain.model_version import ModelVersionId
+from loadvision.domain.model_version import ModelVersion, ModelVersionId
 from loadvision.errors import ErrorCode, LoadvisionError
 
 
@@ -35,6 +35,15 @@ class LoadServedModel:
     def _activate(self) -> ActivateModel:
         return ActivateModel(uow_factory=self.uow_factory, clock=self.clock)
 
+    def wanted_version(self) -> ModelVersionId:
+        """Returns the version the service should answer with, without loading it.
+
+        Returns:
+            The active version, or `initial_version` while none is active.
+        """
+        active = self._active()
+        return self.initial_version if active is None else active.version
+
     def __call__(self) -> LoadPredictor:
         """Loads the model.
 
@@ -46,8 +55,7 @@ class LoadServedModel:
                 `MODEL_VERSION_STATUS_CONFLICT` if the initial version was rejected.
             Exception: Whatever `load_package` raises for a missing or broken package.
         """
-        with self.uow_factory() as uow:
-            active = uow.model_versions.get_active()
+        active = self._active()
         version = self.initial_version if active is None else active.version
         predictor = self.load_package(version)
         if predictor.version != version:
@@ -59,3 +67,7 @@ class LoadServedModel:
             # The version the service starts with may be brand new, so it is registered here.
             self._activate(version, register=True)
         return predictor
+
+    def _active(self) -> ModelVersion | None:
+        with self.uow_factory() as uow:
+            return uow.model_versions.get_active()

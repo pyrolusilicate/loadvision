@@ -91,3 +91,19 @@ def test_the_registry_is_only_read(service: Service) -> None:
 
     assert_error(response, ErrorCode.METHOD_NOT_ALLOWED)
     assert response.headers["allow"] == "GET"
+
+
+@pytest.mark.api
+def test_activation_makes_the_service_load_the_version(service: Service) -> None:
+    register(service, "v1")
+
+    service.client.post("/api/v1/models/v1/activate")
+
+    assert service.reloads.calls == 1
+
+
+@pytest.mark.api
+def test_a_refused_activation_loads_nothing(service: Service) -> None:
+    service.client.post("/api/v1/models/v9/activate")
+
+    assert service.reloads.calls == 0

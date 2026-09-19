@@ -91,7 +91,7 @@ def workspace(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     licenses = fake_licenses(tmp_path)
     monkeypatch.setattr(backbones_module, "load_backbone", toy_loader)
     monkeypatch.setattr(build_package, "load_backbone", toy_loader)
-    monkeypatch.setattr(build_package, "_place_checkpoint", fake_checkpoint)
+    monkeypatch.setattr(build_package, "place_checkpoint", fake_checkpoint)
     monkeypatch.setattr(runner_module, "build_pipeline", toy_pipeline(folds_file, licenses))
     return data_dir, folds_file, tmp_path
 
