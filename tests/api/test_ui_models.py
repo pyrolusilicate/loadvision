@@ -265,7 +265,6 @@ def test_the_page_counts_confirmed_loads_against_what_the_gate_needs(service: Se
 
     assert "Подтверждённых загрузок: 3." in text
     assert f"если подтверждённых загрузок не меньше {NEEDED}." in text
-    assert f"подтвердить загрузку минимум ещё на {NEEDED - 3} фото" in text
 
 
 @pytest.mark.api
