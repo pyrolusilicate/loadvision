@@ -2,7 +2,7 @@
 
 from typing import Any
 
-from sqlalchemy import Connection, Row, select
+from sqlalchemy import Connection, Row, delete, select
 from sqlalchemy.dialects.postgresql import insert
 
 from loadvision.domain.assessment import LoadPercent
@@ -39,6 +39,11 @@ class PostgresLabelRepository:
                 index_elements=[confirmed_labels.c.image_sha256],
                 set_={name: statement.excluded[name] for name in values if name != "image_sha256"},
             )
+        )
+
+    def delete(self, image_sha256: str) -> None:
+        self._connection.execute(
+            delete(confirmed_labels).where(confirmed_labels.c.image_sha256 == image_sha256)
         )
 
     def list_for_training(self) -> list[ConfirmedLabel]:

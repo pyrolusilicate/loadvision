@@ -10,7 +10,7 @@ from types import TracebackType
 from typing import Final, Protocol, Self
 from uuid import UUID
 
-from loadvision.domain.assessment import SHA256_HEX_PATTERN, Assessment, LoadPercent
+from loadvision.domain.assessment import SHA256_HEX_PATTERN, Assessment, LoadPercent, ReviewReason
 from loadvision.domain.confirmed_label import ConfirmedLabel
 from loadvision.domain.model_version import ModelVersion, ModelVersionId
 from loadvision.domain.operator import Operator, OperatorSession
@@ -41,11 +41,54 @@ class Prediction:
             model does not estimate it.
         ood_score: Distance to the nearest training photos in embedding space, or None if the
             model does not compute it.
+        review_reasons: Why a person should check the prediction, by the model's own
+            measures; empty when none apply.
     """
 
     load_pct: LoadPercent
     uncertainty: float | None = None
     ood_score: float | None = None
+    review_reasons: frozenset[ReviewReason] = field(default_factory=frozenset[ReviewReason])
+
+
+class ExplanationKind(StrEnum):
+    """Which map of what the model saw a page asks for.
+
+    `ATTENTION` shows where the model looked and costs one pass of the encoder.
+    `CONTRIBUTION` also says which way a place pulls the answer and costs a pass back as well.
+    """
+
+    ATTENTION = "attention"
+    CONTRIBUTION = "contribution"
+
+
+class LoadExplainer(Protocol):
+    """Draws what the model saw on one photo.
+
+    Kept apart from `LoadPredictor` on purpose: a map is drawn when a person asks for one, so
+    assessing a photo costs exactly as much as it did before.
+    """
+
+    @property
+    def version(self) -> ModelVersionId:
+        """Version of the model package the maps are drawn with."""
+        ...
+
+    def explain(self, image: PreparedImage, kind: ExplanationKind) -> bytes:
+        """Returns the photo with the map drawn over it, as JPEG bytes.
+
+        Args:
+            image: Decoded photo, prepared the same way as for a prediction.
+            kind: Which map to draw.
+
+        Returns:
+            JPEG bytes: a map is a photo with a coloured layer over it, and PNG of a photo
+            weighs ten times as much.
+
+        Raises:
+            Exception: Any model failure; the use case reports it as MODEL_INFERENCE_FAILED.
+        """
+        ...
 
 
 class LoadPredictor(Protocol):
@@ -167,6 +210,21 @@ class AssessmentRepository(Protocol):
         """
         ...
 
+    def replace(self, assessment: Assessment) -> None:
+        """Stores a newer estimate of a photo that this shipment already has.
+
+        The shipment keeps one assessment per photo, so a photo assessed again by another
+        model version replaces the stored row and keeps its id.
+
+        Args:
+            assessment: Assessment with the id of the stored one, the same shipment and the
+                same photo.
+
+        Raises:
+            ValueError: If no assessment with this id is stored.
+        """
+        ...
+
     def get(self, assessment_id: UUID) -> Assessment | None:
         """Returns the assessment, or None if it is unknown."""
         ...
@@ -265,6 +323,10 @@ class LabelRepository(Protocol):
 
         The photo record must already be stored in `ImageRepository`.
         """
+        ...
+
+    def delete(self, image_sha256: str) -> None:
+        """Removes the label of the photo; does nothing when the photo has none."""
         ...
 
     def list_for_training(self) -> list[ConfirmedLabel]:

@@ -11,16 +11,22 @@ from starlette.requests import Request
 from starlette.responses import RedirectResponse, Response
 
 from loadvision.api.path_params import uuid_from_path
-from loadvision.api.ui.assess_routes import NEW_RESULT, REUSED_RESULT
+from loadvision.api.ui.assess_routes import (
+    AGAIN_RESULT,
+    NEW_RESULT,
+    PREVIOUS_PARAM,
+    REUSED_RESULT,
+)
 from loadvision.api.ui.pages import page
 from loadvision.api.ui.pagination import TILES_PER_PAGE, pager
 from loadvision.api.ui.services import ui_services_of
 from loadvision.api.ui.session import SignedIn, checked_form
 from loadvision.api.ui.templates import UI_PREFIX
-from loadvision.application.ports import AssessmentOrder, ReviewStatus
+from loadvision.application.ports import AssessmentOrder, ExplanationKind, ReviewStatus
 from loadvision.application.submit_label import SubmitLabelRequest
 from loadvision.domain.assessment import SHA256_HEX_PATTERN, LoadPercent
 from loadvision.domain.confirmed_label import LabelSource
+from loadvision.domain.model_version import ModelVersionId
 from loadvision.errors import ErrorCode, LoadvisionError
 from loadvision.imaging.validator import detect_media_type
 
@@ -29,6 +35,9 @@ router = APIRouter()
 _SHA256_RE: Final = re.compile(SHA256_HEX_PATTERN)
 # A photo never changes under its hash, so a browser may keep it for a day.
 _PHOTO_CACHE: Final = "private, max-age=86400, immutable"
+# A map is redrawn when the model changes, so a browser keeps it for a minute, not a day.
+_MAP_CACHE: Final = "private, max-age=60"
+_MAP_TYPE: Final = "image/jpeg"
 _UNUSABLE_ACTION: Final = "unusable"
 _QUEUE: Final = f"{UI_PREFIX}/"
 # Filters and orders of the queue in the words of the page.
@@ -86,25 +95,63 @@ async def queue(
 
 @router.get("/assessments/{assessment_id}")
 async def assessment(
-    request: Request, session: SignedIn, assessment_id: str, result: str = ""
+    request: Request,
+    session: SignedIn,
+    assessment_id: str,
+    result: str = "",
+    previous: Annotated[str, Query(alias=PREVIOUS_PARAM)] = "",
+    view: str = "",
 ) -> Response:
     """Shows one assessment: the photo, the prediction and the form for the verdict.
 
-    `result` comes from the photo form and says whether the photo was just assessed or had
-    been assessed for this shipment before.
+    `result` comes from the photo form and says whether the photo was just assessed, had been
+    assessed for this shipment by the model that answers now, or was assessed again in place
+    of the estimate of the model named by `previous`.
     """
+    services = ui_services_of(request)
     details = await run_in_threadpool(
-        ui_services_of(request).get_assessment,
+        services.get_assessment,
         uuid_from_path(assessment_id, ErrorCode.ASSESSMENT_NOT_FOUND),
     )
+    # The model found nothing of a truck body in this frame and marked the photo unusable
+    # itself, so the page shows the measurements instead of a prediction nobody should act on.
+    label = details.label
+    unreadable = label is not None and label.source is LabelSource.MODEL
     return page(
         request,
         "assessment.html",
         session,
         details=details,
+        unreadable=unreadable,
+        heatmaps=services.draw_heatmap is not None,
+        view=_view_or_photo(view),
         created=result == NEW_RESULT,
         reused=result == REUSED_RESULT,
+        again=result == AGAIN_RESULT,
+        previous=_version_or_blank(previous),
     )
+
+
+def _view_or_photo(value: str) -> str:
+    """The map the address asks for, or nothing at all, which means the photo itself."""
+    return value if value in {kind.value for kind in ExplanationKind} else ""
+
+
+def _version_or_blank(value: str) -> str:
+    """The model version the address names, or nothing if it is not a version at all."""
+    try:
+        return ModelVersionId(value).value
+    except ValueError:
+        return ""
+
+
+@router.post("/assessments/{assessment_id}/readable")
+async def readable(request: Request, session: SignedIn, assessment_id: str) -> Response:
+    """Cancels the verdict of the model, so the photo can be judged like any other."""
+    target = uuid_from_path(assessment_id, ErrorCode.ASSESSMENT_NOT_FOUND)
+    await checked_form(request, session)
+    await run_in_threadpool(ui_services_of(request).mark_readable, target)
+    return RedirectResponse(f"{UI_PREFIX}/assessments/{target}", status_code=303)
 
 
 @router.post("/assessments/{assessment_id}/label")
@@ -154,6 +201,29 @@ async def photo(request: Request, _session: SignedIn, sha256: str) -> Response:
     if raw is None or media_type is None:
         raise LoadvisionError(ErrorCode.ROUTE_NOT_FOUND, f"photo {sha256} is not stored")
     return Response(raw, media_type=media_type.value, headers={"Cache-Control": _PHOTO_CACHE})
+
+
+@router.get("/photos/{sha256}/heatmap")
+async def heatmap(
+    request: Request, _session: SignedIn, sha256: str, kind: ExplanationKind
+) -> Response:
+    """Returns the map of what the model saw on the photo, as PNG.
+
+    The map is drawn here and not when the photo is assessed: an assessment costs exactly as
+    much as it did before, and a map only when somebody opens one.
+    """
+    services = ui_services_of(request)
+    if services.draw_heatmap is None:
+        raise LoadvisionError(ErrorCode.ROUTE_NOT_FOUND, "this service draws no maps")
+    if _SHA256_RE.fullmatch(sha256) is None:
+        raise LoadvisionError(ErrorCode.ROUTE_NOT_FOUND, "malformed photo hash")
+    predictor = services.model.current()
+    if predictor is None:
+        raise LoadvisionError(ErrorCode.MODEL_NOT_READY, services.model.failure)
+    picture = await run_in_threadpool(services.draw_heatmap, sha256, kind, predictor.version)
+    # Not the long cache of a photo: a map belongs to a model version, and the address says
+    # nothing about the version.
+    return Response(picture, media_type=_MAP_TYPE, headers={"Cache-Control": _MAP_CACHE})
 
 
 def _queue_params(*, status: ReviewStatus, order: AssessmentOrder) -> dict[str, str]:

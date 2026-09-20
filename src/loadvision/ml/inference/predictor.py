@@ -9,7 +9,7 @@ import numpy as np
 from numpy.typing import NDArray
 
 from loadvision.application.ports import Prediction
-from loadvision.domain.assessment import LoadPercent
+from loadvision.domain.assessment import LoadPercent, ReviewReason
 from loadvision.domain.model_version import ModelVersionId
 from loadvision.errors import LoadvisionError
 from loadvision.imaging.prepared_image import MediaType, PreparedImage
@@ -124,7 +124,8 @@ class PackagePredictor:
 
     Every member prepares the photo with its own preprocessing, so members with different
     input sizes live in one package. The ensemble is their weighted average, and
-    `uncertainty` is how far the members are apart.
+    `uncertainty` is how far the members are apart. A photo whose OOD score is above the
+    threshold of the package is marked as an unusual scene.
 
     Members that name the same checkpoint at the same input size run it once and pool its
     tokens each in their own way, so an ensemble of four costs two runs of the encoder.
@@ -301,10 +302,12 @@ class PackagePredictor:
                 self._postprocess(np.array([corrected], dtype=np.float64), {ASPECT: aspect})[0]
             )
         spread = max(values) - min(values) if len(values) > 1 else None
+        ood_score = self._ood_score(computed)
         return Prediction(
             load_pct=LoadPercent(_clip(corrected)),
             uncertainty=spread,
-            ood_score=self._ood_score(computed),
+            ood_score=ood_score,
+            review_reasons=self._review_reasons(ood_score),
         )
 
     def _ood_score(
@@ -317,6 +320,13 @@ class PackagePredictor:
         if embedding is None:
             return None
         return self._ood.score(embedding, config.k)
+
+    def _review_reasons(self, ood_score: float | None) -> frozenset[ReviewReason]:
+        # The threshold comes with the package: every encoder has its own scale of distances.
+        config = self._package.manifest.ood
+        if config is None or ood_score is None or ood_score <= config.threshold:
+            return frozenset()
+        return frozenset({ReviewReason.UNUSUAL_SCENE})
 
 
 def _backbone(loaded: _LoadedMember) -> Any:

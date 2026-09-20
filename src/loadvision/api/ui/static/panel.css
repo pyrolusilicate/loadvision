@@ -95,6 +95,23 @@ input[type="file"] { font: inherit; padding: 10px; border: 1px dashed var(--line
 .note.ok { background: var(--ok-ground); border-color: transparent; color: var(--ok); }
 .note.warn { background: var(--warn-ground); border-color: transparent; color: var(--warn); }
 .note.bad { background: var(--bad-ground); border-color: transparent; color: var(--bad); }
+/* A note may hold several lines and the measurements behind it; p has no margin of its own. */
+.note > * + * { margin-top: 6px; }
+.note dt { color: inherit; opacity: 0.75; }
+
+/* A map takes a second to draw; the label waits in its place and the picture covers it. */
+.loading { display: grid; place-items: center; min-height: 240px; }
+.loading > * { grid-area: 1 / 1; }
+.loading span { color: var(--muted); font-size: 14px; }
+
+/* Switch above the photo: the photo itself or one of the maps of what the model saw. */
+.views { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+.views a {
+  padding: 5px 12px; border: 1px solid var(--line); border-radius: 999px;
+  background: var(--surface); color: var(--text); text-decoration: none; font-size: 14px;
+}
+.views a:hover { border-color: var(--accent); color: var(--accent); }
+.views a[aria-current] { background: var(--accent); border-color: var(--accent); color: var(--accent-text); }
 .badge { display: inline-block; padding: 1px 8px; border-radius: 999px; font-size: 12px; background: var(--ground); color: var(--muted); border: 1px solid var(--line); white-space: nowrap; }
 .badge.ok { background: var(--ok-ground); color: var(--ok); border-color: transparent; }
 .badge.warn { background: var(--warn-ground); color: var(--warn); border-color: transparent; }

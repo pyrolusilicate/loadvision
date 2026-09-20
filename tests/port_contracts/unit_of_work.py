@@ -157,6 +157,32 @@ class UnitOfWorkContract:
         with uow_factory() as uow:
             assert uow.assessments.get(assessment.id) == assessment
 
+    def test_a_newer_estimate_replaces_the_stored_one_and_keeps_the_id(
+        self, uow_factory: UnitOfWorkFactory
+    ) -> None:
+        stored = make_assessment(model_version=ModelVersionId("v1"))
+        newer = make_assessment(
+            model_version=ModelVersionId("v2"),
+            load_pct=LoadPercent(80.0),
+            created_at=T0 + timedelta(hours=1),
+        )
+        with uow_factory() as uow:
+            store_assessment(uow, stored)
+            uow.model_versions.add(make_model_version("v2"))
+            uow.commit()
+        with uow_factory() as uow:
+            uow.assessments.replace(newer)
+            uow.commit()
+        with uow_factory() as uow:
+            assert uow.assessments.get(stored.id) == newer
+            assert uow.assessments.list_by_shipment(stored.shipment_id) == [newer]
+
+    def test_replacing_an_assessment_that_is_not_stored_is_refused(
+        self, uow_factory: UnitOfWorkFactory
+    ) -> None:
+        with uow_factory() as uow, pytest.raises(ValueError, match="not stored"):
+            uow.assessments.replace(make_assessment())
+
     def test_duplicate_photo_in_a_shipment_raises_and_unit_of_work_stays_usable(
         self, uow_factory: UnitOfWorkFactory
     ) -> None:

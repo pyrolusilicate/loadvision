@@ -38,6 +38,11 @@ def jpeg(
     return encode(picture(width, height, mode), "JPEG", **options)
 
 
+def dark_jpeg(width: int = 300, height: int = 400, *, value: int = 5) -> bytes:
+    """Returns a photo shot in the dark: one dim colour, nothing to make out."""
+    return encode(Image.new("RGB", (width, height), (value, value, value)), "JPEG", quality=95)
+
+
 def png(width: int = 300, height: int = 400, *, mode: str = "RGB") -> bytes:
     return encode(picture(width, height, mode), "PNG")
 

@@ -22,12 +22,13 @@ from loadvision.application.model_versions import (
 from loadvision.application.operators import Authenticate, SignIn, SignOut
 from loadvision.application.ports import ImageStorage, LoadPredictor
 from loadvision.application.review_queue import ReviewQueue
-from loadvision.application.submit_label import SubmitLabel
+from loadvision.application.submit_label import MarkReadable, SubmitLabel
 from loadvision.application.training_jobs import (
     CountTrainingLabels,
     GetTrainingJob,
     ListTrainingJobPage,
     ListTrainingJobs,
+    ReleaseTrainingJob,
     StartTraining,
 )
 from loadvision.errors import ERROR_CATALOG, ErrorCode
@@ -37,6 +38,7 @@ from loadvision.ml.inference.active_model import ActiveModel
 from tests import image_files
 from tests.builders import T0
 from tests.fakes.clock import FixedClock, SequentialIds
+from tests.fakes.heatmaps import FakeHeatmaps
 from tests.fakes.image_storage import InMemoryImageStorage
 from tests.fakes.in_memory_db import InMemoryStore
 
@@ -44,6 +46,9 @@ LIMITS = ImageLimits(
     max_bytes=2_000_000, max_pixels=1_000_000, min_side=256, media_types=frozenset(MediaType)
 )
 MAX_BODY_BYTES = 1_000_000
+MIN_BRIGHTNESS = 20.0
+# Not the 0.5 of `configs/app.yaml`: a page must take the threshold it is given.
+UNREADABLE_OOD = 0.6
 PHOTO = image_files.jpeg()
 PHOTO_SHA256 = prepare_image(PHOTO, LIMITS).sha256
 XML = {"Content-Type": "application/xml; charset=utf-8"}
@@ -79,12 +84,15 @@ class Service:
     model: ActiveModel
     reloads: ReloadCounter
     worker: WorkerSwitch
+    heatmaps: FakeHeatmaps | None
 
 
 def make_service(
     predictor: LoadPredictor | None = None,
     storage: InMemoryImageStorage | None = None,
     photos: ImageStorage | None = None,
+    *,
+    heatmaps: bool = False,
 ) -> Service:
     """Builds the service on fakes, with the operator pages mounted like in production.
 
@@ -92,6 +100,7 @@ def make_service(
         predictor: Model the service answers with, or None while it is loading.
         storage: Where assessments save photos.
         photos: Where the pages read photos from; the same storage when None.
+        heatmaps: Whether the pages can draw maps of what the model saw.
     """
     store = InMemoryStore()
     storage = InMemoryImageStorage() if storage is None else storage
@@ -105,6 +114,8 @@ def make_service(
             uow_factory=store.unit_of_work,
             storage=storage,
             limits=LIMITS,
+            min_brightness=MIN_BRIGHTNESS,
+            unreadable_ood=UNREADABLE_OOD,
             clock=clock,
             new_id=SequentialIds(),
         ),
@@ -124,6 +135,7 @@ def make_service(
         max_body_bytes=MAX_BODY_BYTES,
     )
     worker = WorkerSwitch()
+    drawing = FakeHeatmaps() if heatmaps else None
     ui = UiServices(
         sign_in=SignIn(uow_factory=store.unit_of_work, clock=clock),
         authenticate=Authenticate(uow_factory=store.unit_of_work, clock=clock),
@@ -132,6 +144,7 @@ def make_service(
         review_queue=ReviewQueue(uow_factory=store.unit_of_work),
         get_assessment=services.get_assessment,
         submit_label=services.submit_label,
+        mark_readable=MarkReadable(uow_factory=store.unit_of_work),
         get_shipment=services.get_shipment,
         list_models=services.list_models,
         activate_model=services.activate_model,
@@ -140,11 +153,13 @@ def make_service(
         ),
         reload_model=reloads,
         start_training=services.start_training,
+        release_training_job=ReleaseTrainingJob(uow_factory=store.unit_of_work, clock=clock),
         training_job_page=ListTrainingJobPage(uow_factory=store.unit_of_work),
         count_training_labels=CountTrainingLabels(uow_factory=store.unit_of_work),
         worker_online=worker,
         storage=storage if photos is None else photos,
         model=model,
+        draw_heatmap=drawing,
     )
     client = TestClient(create_app(services, ui=ui), raise_server_exceptions=False)
     return Service(
@@ -155,6 +170,7 @@ def make_service(
         model=model,
         reloads=reloads,
         worker=worker,
+        heatmaps=drawing,
     )
 
 

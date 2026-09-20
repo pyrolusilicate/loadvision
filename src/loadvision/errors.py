@@ -24,6 +24,7 @@ class ErrorCode(StrEnum):
     ROUTE_NOT_FOUND = "ROUTE_NOT_FOUND"
     METHOD_NOT_ALLOWED = "METHOD_NOT_ALLOWED"
     TRAINING_ALREADY_RUNNING = "TRAINING_ALREADY_RUNNING"
+    TRAINING_MODE_NOT_SUPPORTED = "TRAINING_MODE_NOT_SUPPORTED"
     MODEL_VERSION_STATUS_CONFLICT = "MODEL_VERSION_STATUS_CONFLICT"
     MODEL_NOT_READY = "MODEL_NOT_READY"
     MODEL_INFERENCE_FAILED = "MODEL_INFERENCE_FAILED"
@@ -127,6 +128,12 @@ ERROR_CATALOG: Final[Mapping[ErrorCode, ErrorSpec]] = MappingProxyType(
             409,
             "Дообучение уже выполняется.",
             "Дождитесь завершения текущей задачи и запустите дообучение снова.",
+        ),
+        ErrorCode.TRAINING_MODE_NOT_SUPPORTED: ErrorSpec(
+            400,
+            "Этот сервис умеет только быстрое дообучение.",
+            "Отправьте запрос без Mode или с Mode=fast: головы на замороженных энкодерах. "
+            "Полное дообучение энкодера идёт не через очередь, а на машине с GPU.",
         ),
         ErrorCode.MODEL_VERSION_STATUS_CONFLICT: ErrorSpec(
             409,

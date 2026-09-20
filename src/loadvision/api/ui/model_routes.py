@@ -31,6 +31,10 @@ _TOO_FEW_LABELS: Final = (
     f"Дообучение запускается от {_NEEDED_LABELS}: подтвердите загрузку в очереди проверки.",
 )
 _NO_WORKER: Final = ("Воркер не запущен.", "Запустите воркер и нажмите ещё раз.")
+_WORKER_ALIVE: Final = (
+    "Воркер запущен, задача идёт.",
+    "Снять можно только задачу, которая осталась от упавшего воркера.",
+)
 
 
 @router.get("/models")
@@ -88,6 +92,20 @@ async def start_job(request: Request, session: SignedIn) -> Response:
     if not await run_in_threadpool(services.worker_online):
         return await _jobs_page(request, session, status_code=409, error=_NO_WORKER)
     await run_in_threadpool(services.start_training, TrainingMode.FAST)
+    return RedirectResponse(_JOBS, status_code=303)
+
+
+@router.post("/jobs/release")
+async def release_job(request: Request, session: SignedIn) -> Response:
+    """Ends a job left running by a worker that is gone, so the queue takes new ones again.
+
+    Only while no worker is connected: a job of a worker that is alive is a job that runs.
+    """
+    await checked_form(request, session)
+    services = ui_services_of(request)
+    if await run_in_threadpool(services.worker_online):
+        return await _jobs_page(request, session, status_code=409, error=_WORKER_ALIVE)
+    await run_in_threadpool(services.release_training_job)
     return RedirectResponse(_JOBS, status_code=303)
 
 

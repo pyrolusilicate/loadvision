@@ -29,14 +29,18 @@
   <a class="tile" href="{{ ui }}/assessments/{{ a.id }}">
     <img src="{{ ui }}/photos/{{ a.image_sha256 }}" alt="Фото перевозки {{ a.shipment_id.value }}" loading="lazy">
     <span class="tile-body">
+      {% if item.label and item.label.source.value == 'model' %}
+      <strong>Нечитаемое фото</strong>
+      {% else %}
       <strong class="load">{{ a.load_pct.value|load }}%</strong>
+      {% endif %}
       <span>{{ a.shipment_id.value }}</span>
       <span class="muted">{{ a.created_at|time }}</span>
       {% if item.label %}
         {% if item.label.unusable %}<span class="badge bad">непригодно</span>
         {% else %}<span class="badge ok">подтверждено {{ item.label.load_pct.value|load }}%</span>{% endif %}
       {% endif %}
-      {% if a.review_reasons %}<span class="badge warn">проверить</span>{% endif %}
+      {% if a.review_reasons and not item.label %}<span class="badge warn">проверить</span>{% endif %}
     </span>
   </a>
   {% endfor %}

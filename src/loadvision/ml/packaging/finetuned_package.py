@@ -22,6 +22,7 @@ from loadvision.ml.packaging.model_package import (
     write_package,
 )
 from loadvision.ml.pipeline.stages.build_package import (
+    OOD_PERCENTILE,
     cv_block,
     write_licenses,
     write_ood,
@@ -67,7 +68,7 @@ def build_finetuned_package(
     data_hash: str,
     created_at: datetime,
     device: str,
-    ood_percentile: float = 99.0,
+    ood_percentile: float = OOD_PERCENTILE,
 ) -> ModelPackage:
     """Writes a one-member package that answers what the fine-tuned model answers.
 
@@ -90,7 +91,8 @@ def build_finetuned_package(
         data_hash: SHA-256 of the dataset manifest.
         created_at: Build time, timezone-aware.
         device: Torch device the encoder runs on while embedding the training photos.
-        ood_percentile: Where the unusual-scene threshold sits among the training scores.
+        ood_percentile: Where the unusual-scene threshold sits among the training scores;
+            99.9 means one training photo in a thousand would be flagged.
 
     Returns:
         The written package, loaded back and verified.

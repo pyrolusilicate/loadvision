@@ -31,12 +31,15 @@ def test_a_queued_job_waits_for_the_worker() -> None:
 
 
 @pytest.mark.unit
-def test_the_mode_is_recorded() -> None:
+def test_the_queue_refuses_a_mode_it_cannot_run() -> None:
     store = InMemoryStore()
 
-    job = start(store, FixedClock(T0), SequentialIds())(TrainingMode.FULL)
+    # Fine-tuning an encoder is not what the worker does; it would only fail minutes later.
+    with pytest.raises(LoadvisionError) as caught:
+        start(store, FixedClock(T0), SequentialIds())(TrainingMode.FULL)
 
-    assert job.mode is TrainingMode.FULL
+    assert caught.value.code is ErrorCode.TRAINING_MODE_NOT_SUPPORTED
+    assert store.training_jobs == {}
 
 
 @pytest.mark.unit

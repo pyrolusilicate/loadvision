@@ -52,6 +52,10 @@ LICENSES_DIR: Final = Path("licenses")
 _NOTICE_FILE: Final = "NOTICE.md"
 
 # Averaging ten neighbours: one nearest photo is noisy, a hundred washes the score out.
+# Where the unusual-scene threshold sits among the training scores. Measured on v2 and 1023
+# dataset photos: at 99 the flag fired on 13 ordinary photos of trucks, at 99.9 on one, while
+# the frames a person calls broken score three times the threshold and are flagged either way.
+OOD_PERCENTILE: Final = 99.9
 _OOD_NEIGHBOURS: Final = 10
 
 _PERCENT: Final = 100.0
@@ -69,7 +73,7 @@ class BuildPackage:
         members: Encoder and head of every ensemble member.
         chain: Postprocessing steps, fitted on the out-of-fold predictions.
         ood_percentile: Where the unusual-scene threshold sits in the distribution of training
-            scores; 99 means one training photo in a hundred would be flagged.
+            scores; 99.9 means one training photo in a thousand would be flagged.
         package_version: Package version in the `ModelVersionId` format.
         now: Build time; the current time when omitted.
         folds_file: Canonical folds file, recorded next to the CV metrics.
@@ -84,7 +88,7 @@ class BuildPackage:
     licenses_dir: Path = LICENSES_DIR
     device: str = "cpu"
     now: datetime | None = None
-    ood_percentile: float = 99.0
+    ood_percentile: float = OOD_PERCENTILE
 
     @property
     def name(self) -> str:
@@ -284,7 +288,9 @@ def write_ood(
     """Writes the training embeddings a photo is compared against, with their threshold.
 
     The threshold is a percentile of the training scores themselves, so the service flags the
-    scenes that are unusual for this very model rather than for a number someone chose.
+    scenes that are unusual for this very model rather than for a number someone chose. The
+    percentile is high on purpose: a flag on an ordinary photo of a truck costs the operator a
+    pointless check, and the frames worth flagging are far above any of them.
 
     Args:
         root: Package folder.

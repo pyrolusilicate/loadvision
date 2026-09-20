@@ -1,3 +1,4 @@
+import base64
 import functools
 import time
 from pathlib import Path
@@ -20,7 +21,7 @@ from loadvision.infrastructure.db.session import PostgresUnitOfWork
 from loadvision.settings import DEFAULT_CONFIG_PATH, Settings
 from tests.api.service import PHOTO, PHOTO_SHA256, XML, child, document, request_body
 from tests.api.ui_pages import LOGIN, PASSWORD, form_token
-from tests.image_files import png
+from tests.image_files import dark_jpeg, png
 from tests.model_packages import build_numpy_package
 
 VERSION = "baseline-v0"
@@ -35,7 +36,11 @@ RETRY_SECONDS = 0.2
 @pytest.fixture
 def settings(tmp_path: Path) -> Settings:
     data = yaml.safe_load(DEFAULT_CONFIG_PATH.read_text(encoding="utf-8"))
-    data["storage"] = {"images_dir": tmp_path / "images", "models_dir": tmp_path / "models"}
+    data["storage"] = {
+        "images_dir": tmp_path / "images",
+        "models_dir": tmp_path / "models",
+        "heatmaps_dir": tmp_path / "heatmaps",
+    }
     data["model"] = {
         "version": VERSION,
         "check_seconds": CHECK_SECONDS,
@@ -125,6 +130,29 @@ def test_service_assesses_labels_and_reports_on_postgres(
         active = uow.model_versions.get_active()
     assert active is not None
     assert active.version == ModelVersionId(VERSION)
+
+
+@pytest.mark.integration
+def test_a_photo_shot_in_the_dark_is_answered_with_the_reason_to_check_it(
+    settings: Settings, engine: Engine, tmp_path: Path
+) -> None:
+    """The brightness floor of `configs/app.yaml` reaches the answer of the running service."""
+    build_package(settings, tmp_path)
+    app = build_service_app(settings, engine)
+    photo = base64.b64encode(dark_jpeg()).decode()
+
+    with TestClient(app) as client:
+        wait_for_model(app)
+        created = client.post("/api/v1/assessments", content=request_body(image=photo), headers=XML)
+
+    root = document(created)
+    review = child(root, "Review")
+    assert review.get("needed") == "true"
+    assert [reason.text for reason in review] == ["too_dark"]
+    brightness = child(root, "Signals").attrib["brightness"]
+    assert float(brightness) < settings.review.min_brightness
+    # The second half of the same policy comes from the same settings.
+    assert services_of(app).assess_photo.unreadable_ood == settings.review.unreadable_ood
 
 
 @pytest.mark.integration

@@ -2,6 +2,7 @@
 
 import logging
 from typing import Final
+from urllib.parse import urlencode
 
 from fastapi import APIRouter
 from starlette.concurrency import run_in_threadpool
@@ -14,7 +15,7 @@ from loadvision.api.ui.pages import catalog_error, page
 from loadvision.api.ui.services import ui_services_of
 from loadvision.api.ui.session import SignedIn, checked_form
 from loadvision.api.ui.templates import UI_PREFIX
-from loadvision.application.assess_photo import AssessPhotoRequest
+from loadvision.application.assess_photo import AssessPhotoRequest, AssessPhotoResult
 from loadvision.domain.operator import OperatorSession
 from loadvision.errors import ErrorCode, LoadvisionError
 from loadvision.settings import MEBIBYTE
@@ -24,6 +25,9 @@ router = APIRouter()
 # What the result page says about the assessment it opens with.
 NEW_RESULT: Final = "new"
 REUSED_RESULT: Final = "reused"
+AGAIN_RESULT: Final = "again"
+# Query parameter that names the model version whose estimate was replaced.
+PREVIOUS_PARAM: Final = "from"
 _NO_PHOTO: Final = ("Фото не выбрано.", "Выберите файл с фото грузового отсека.")
 
 _logger = logging.getLogger(__name__)
@@ -68,10 +72,19 @@ async def assess(request: Request, session: SignedIn) -> Response:
         )
         status, message, hint = catalog_error(error.code)
         return _form(request, session, number=number, status_code=status, error=(message, hint))
-    outcome = REUSED_RESULT if result.reused else NEW_RESULT
+    query = _result_query(result)
     return RedirectResponse(
-        f"{UI_PREFIX}/assessments/{result.assessment.id}?result={outcome}", status_code=303
+        f"{UI_PREFIX}/assessments/{result.assessment.id}?{query}", status_code=303
     )
+
+
+def _result_query(result: AssessPhotoResult) -> str:
+    """Tells the result page what happened to the photo, with values encoded for an address."""
+    if result.reused:
+        return urlencode({"result": REUSED_RESULT})
+    if result.replaced is None:
+        return urlencode({"result": NEW_RESULT})
+    return urlencode({"result": AGAIN_RESULT, PREVIOUS_PARAM: result.replaced.value})
 
 
 def _form(
