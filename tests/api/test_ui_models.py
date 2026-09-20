@@ -305,6 +305,8 @@ def test_the_page_counts_confirmed_loads_against_what_the_gate_needs(service: Se
     text = text_of(get(service, "/ui/jobs"))
 
     assert "Подтвержденных оценок, которых активная модель ещё не видела: 3." in text
+    # The gate counts stricter, and the page says so: the two numbers are allowed to differ.
+    assert f"у порога {NEEDED} лучше иметь запас" in text
 
 
 @pytest.mark.api
