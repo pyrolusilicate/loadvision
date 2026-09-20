@@ -26,6 +26,7 @@ from loadvision.ml.pipeline.stage import new_run_id
 from loadvision.ml.pipeline.stages import DEFAULT_CHAIN, DEFAULT_FOLDS
 from loadvision.ml.pipeline.stages.train_folds import OOF_FILE, read_oof, write_oof
 from loadvision.ml.training.finetune import (
+    FOLDS_DIR,
     FinetuneSettings,
     LoadRegressor,
     fit,
@@ -43,7 +44,6 @@ TEST_RAW_FILE: Final = "test_raw.csv"
 # Every fold model's own test predictions; `test_raw.csv` of an out-of-fold run is their mean.
 TEST_FOLDS_FILE: Final = "test_folds.csv"
 # Weights of every fold model, `folds/fold_<n>/`, in the files a model package carries.
-FOLDS_DIR: Final = "folds"
 
 _logger = logging.getLogger(__name__)
 

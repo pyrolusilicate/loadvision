@@ -31,6 +31,8 @@ _FULL: Final = "full"
 _FAR: Final = "far"
 _DEPTH: Final = "depth"
 
+# Where a run keeps the model of every fold; the packaging reads them back.
+FOLDS_DIR: Final = "folds"
 ENCODER_FILE: Final = "encoder.safetensors"
 HEAD_FILE: Final = "head.npz"
 

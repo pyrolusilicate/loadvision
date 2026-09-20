@@ -34,7 +34,7 @@ TOP_SHOWN: Final = 10
 
 # Settings that change how fast a run goes but not what it learns; a --full run and an
 # out-of-fold run of the same member may differ in them.
-_INCIDENTAL: Final = frozenset({"workers"})
+_INCIDENTAL: Final = frozenset({"workers", "checkpointing"})
 
 # Inputs beyond the photo itself; two runs of one encoder differ by them.
 _EXTRA_INPUTS: Final = ("far_view", "depth")
