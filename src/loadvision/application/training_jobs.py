@@ -134,7 +134,12 @@ class ListTrainingJobPage:
 
 @dataclass(frozen=True, slots=True, kw_only=True)
 class CountTrainingLabels:
-    """Counts the confirmed labels a retraining would learn from.
+    """Counts the confirmed loads the active model has not learned from yet.
+
+    Not every confirmed load there is: the ones that went into the model already teach it
+    nothing new. The count is tied to the active version and not to the last retraining on
+    purpose - a candidate the gate refused leaves the model as it was, and the labels it was
+    built from still wait for a model that learns them.
 
     Attributes:
         uow_factory: Opens database transactions.
@@ -143,9 +148,18 @@ class CountTrainingLabels:
     uow_factory: UnitOfWorkFactory
 
     def __call__(self) -> int:
-        """Returns how many photos have a confirmed load; unusable photos do not count."""
+        """Returns how many photos carry a confirmed load the active version has not seen.
+
+        Unusable photos never count: they teach nothing. Without an active version every
+        confirmed load is new, because there is no model that could have seen one.
+        """
         with self.uow_factory() as uow:
-            return len(uow.labels.list_for_training())
+            active = uow.model_versions.get_active()
+            labels = uow.labels.list_for_training()
+        if active is None:
+            return len(labels)
+        # A label replaced by a later confirmation counts again: its load is new to the model.
+        return sum(1 for label in labels if label.updated_at > active.created_at)
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)

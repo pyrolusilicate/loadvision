@@ -75,6 +75,9 @@ services:
       - ./runs:/app/runs
       - ./storage:/app/storage
       - ./configs:/app/configs
+      # A package carries the licence text of every checkpoint it ships, and the build stops
+      # without it: the texts travel with the repository, like the configs above.
+      - ./licenses:/app/licenses:ro
       # Encoder checkpoints downloaded for training, kept between containers.
       - hf-cache:/home/loadvision/.cache/huggingface
     depends_on:
