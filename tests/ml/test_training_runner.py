@@ -133,7 +133,10 @@ def test_a_run_ends_in_a_package_the_service_can_load(workspace) -> None:
     assert outcome.package_path is not None
     # The gate's own check is not enough: the package must load the way the service loads it.
     package = ModelPackage.load(outcome.package_path)
-    assert package.manifest.version == "v2"
+    # Named after its run, not after the fixed version of the experiment config: a candidate
+    # must never write over a package the service already has.
+    assert package.manifest.version == outcome.run_id
+    assert package.manifest.version != CONFIG["version"]
     assert outcome.gate_report["added"] == 6
 
 
