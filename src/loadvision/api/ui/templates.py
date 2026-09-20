@@ -3,11 +3,14 @@
 import hashlib
 from datetime import datetime
 from pathlib import Path
+from types import MappingProxyType
 from typing import Final
 
 from starlette.templating import Jinja2Templates
 
 from loadvision.api.xml.schemas import LOAD_PCT_PLACES, format_decimal
+from loadvision.application.ports import ExplanationKind
+from loadvision.domain.assessment import ReviewReason
 from loadvision.domain.timestamps import format_utc_seconds
 
 UI_PREFIX: Final = "/ui"
@@ -17,6 +20,43 @@ HOME_PAGE: Final = f"{UI_PREFIX}/assess"
 _HERE: Final = Path(__file__).parent
 _STYLESHEET: Final = _HERE / "static" / "panel.css"
 _VERSION_CHARS: Final = 12
+
+# What an assessment card says about each reason to check the prediction.
+REVIEW_NOTES: Final = MappingProxyType(
+    {
+        ReviewReason.UNUSUAL_SCENE: (
+            "Фото не похоже на снимки кузовов, на которых училась модель: закрыт объектив, "
+            "засвет, в кадре не кузов или непривычный ракурс."
+        ),
+        ReviewReason.LOW_CONFIDENCE: "Модели ансамбля сильно расходятся в оценке.",
+        ReviewReason.TOO_DARK: "В кадре слишком темно, груз не разглядеть.",
+        ReviewReason.BLURRY: "Фото размыто.",
+    }
+)
+
+# What a card can show in place of the photo, in the order of the switch above it.
+PHOTO_VIEW: Final = ""
+VIEW_NAMES: Final = MappingProxyType(
+    {
+        PHOTO_VIEW: "Фото",
+        ExplanationKind.ATTENTION.value: "Внимание",
+        ExplanationKind.CONTRIBUTION.value: "Вклад в ответ",
+    }
+)
+# From this load the contribution map says little: the model is at its ceiling and paints the
+# cargo as pulling the answer down. Measured by A on the v2 package.
+CONTRIBUTION_CEILING: Final = 95.0
+VIEW_NOTES: Final = MappingProxyType(
+    {
+        ExplanationKind.ATTENTION.value: (
+            "Это тепловая карта, показывает куда смотрит модель для принятия решения."
+        ),
+        ExplanationKind.CONTRIBUTION.value: (
+            "Это тепловая карта, которая показывает какие зоны повлияли на ответ модели. "
+            "Красные зоны тянут оценку модели вверх, синие зоны тянут оценку вниз."
+        ),
+    }
+)
 
 templates: Final = Jinja2Templates(directory=_HERE / "templates")
 
@@ -39,6 +79,10 @@ def human_time(value: datetime) -> str:
 
 
 templates.env.globals["ui"] = UI_PREFIX
+templates.env.globals["review_notes"] = REVIEW_NOTES
+templates.env.globals["view_names"] = VIEW_NAMES
+templates.env.globals["view_notes"] = VIEW_NOTES
+templates.env.globals["contribution_ceiling"] = CONTRIBUTION_CEILING
 templates.env.globals["stylesheet"] = _stylesheet
 templates.env.filters["load"] = _load
 templates.env.filters["time"] = human_time

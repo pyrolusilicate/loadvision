@@ -75,16 +75,34 @@ class ImageSettings(_Section):
         )
 
 
+class ReviewSettings(_Section):
+    """When the service asks a person to check a photo itself.
+
+    Attributes:
+        min_brightness: Mean brightness, from 0 to 255, below which the frame is too dark to
+            judge the load by. The unusual-scene threshold is not here: every model package
+            carries its own in `manifest.ood.threshold`.
+        unreadable_ood: Distance to the training photos from which the pages stop showing the
+            prediction at all: nothing of a truck body is in the frame, so the number would
+            only mislead.
+    """
+
+    min_brightness: float = Field(ge=0, le=255)
+    unreadable_ood: float = Field(gt=0)
+
+
 class StorageSettings(_Section):
     """Folders of the files the service keeps.
 
     Attributes:
         images_dir: Uploaded photos by SHA-256.
         models_dir: Model packages, one folder per version.
+        heatmaps_dir: Drawn maps of what the model saw; they can be deleted at any time.
     """
 
     images_dir: Path
     models_dir: Path
+    heatmaps_dir: Path
 
 
 class LoggingSettings(_Section):
@@ -155,6 +173,7 @@ class Settings(_Section):
 
     api: ApiSettings
     images: ImageSettings
+    review: ReviewSettings
     storage: StorageSettings
     logging: LoggingSettings
     runs: RunsSettings

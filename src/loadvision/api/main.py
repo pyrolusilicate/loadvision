@@ -17,6 +17,7 @@ from loadvision.api.app import create_app
 from loadvision.api.services import ApiServices
 from loadvision.api.ui.services import UiServices
 from loadvision.application.assess_photo import AssessPhoto
+from loadvision.application.explain_photo import ExplainPhoto
 from loadvision.application.get_assessment import GetAssessment
 from loadvision.application.get_shipment import GetShipment
 from loadvision.application.load_served_model import LoadServedModel
@@ -26,23 +27,27 @@ from loadvision.application.model_versions import (
     RollbackModel,
 )
 from loadvision.application.operators import Authenticate, SignIn, SignOut
-from loadvision.application.ports import UnitOfWorkFactory
+from loadvision.application.ports import ExplanationKind, UnitOfWorkFactory
 from loadvision.application.review_queue import ReviewQueue
-from loadvision.application.submit_label import SubmitLabel
+from loadvision.application.submit_label import MarkReadable, SubmitLabel
 from loadvision.application.training_jobs import (
     CountTrainingLabels,
     GetTrainingJob,
     ListTrainingJobPage,
     ListTrainingJobs,
+    ReleaseTrainingJob,
     StartTraining,
 )
 from loadvision.domain.model_version import ModelVersionId
 from loadvision.domain.timestamps import utc_now
 from loadvision.infrastructure.db.activity import worker_connected
 from loadvision.infrastructure.db.session import PostgresUnitOfWork, create_database_engine
+from loadvision.infrastructure.storage.heatmap_store import HeatmapStore
 from loadvision.infrastructure.storage.local_storage import LocalImageStorage
 from loadvision.ml.devices import resolve_device
+from loadvision.ml.inference.active_explainer import ActiveExplainer
 from loadvision.ml.inference.active_model import ActiveModel
+from loadvision.ml.inference.explainer import load_explainer
 from loadvision.ml.inference.model_follower import ModelFollower
 from loadvision.ml.inference.predictor import PackagePredictor
 from loadvision.ml.packaging.model_package import ModelPackage
@@ -104,11 +109,30 @@ def build_service_app(settings: Settings, engine: Engine) -> FastAPI:
         retry_seconds=settings.model.retry_seconds,
     )
     storage = LocalImageStorage(settings.storage.images_dir)
+    heatmaps = HeatmapStore(settings.storage.heatmaps_dir)
+    explainers = ActiveExplainer(
+        functools.partial(load_explainer, settings.storage.models_dir, device)
+    )
+    explain_photo = ExplainPhoto(storage=storage, limits=settings.images.limits())
+
+    def draw_heatmap(sha256: str, kind: ExplanationKind, version: ModelVersionId) -> bytes:
+        """Returns the map of what the model saw, drawing it only when it is not stored yet."""
+        # The store answers before the explainer is built, so a map drawn before a restart
+        # costs a file read and not another copy of the encoder.
+        drawn = heatmaps.read(sha256, version, kind)
+        if drawn is not None:
+            return drawn
+        png = explain_photo(sha256, kind, explainers.of(version))
+        heatmaps.write(sha256, version, kind, png)
+        return png
+
     services = ApiServices(
         assess_photo=AssessPhoto(
             uow_factory=uow_factory,
             storage=storage,
             limits=settings.images.limits(),
+            min_brightness=settings.review.min_brightness,
+            unreadable_ood=settings.review.unreadable_ood,
             clock=utc_now,
             new_id=uuid.uuid4,
         ),
@@ -133,17 +157,20 @@ def build_service_app(settings: Settings, engine: Engine) -> FastAPI:
         review_queue=ReviewQueue(uow_factory=uow_factory),
         get_assessment=services.get_assessment,
         submit_label=services.submit_label,
+        mark_readable=MarkReadable(uow_factory=uow_factory),
         get_shipment=services.get_shipment,
         list_models=services.list_models,
         activate_model=services.activate_model,
         rollback_model=RollbackModel(uow_factory=uow_factory, activate=services.activate_model),
         reload_model=follower.check,
         start_training=services.start_training,
+        release_training_job=ReleaseTrainingJob(uow_factory=uow_factory, clock=utc_now),
         training_job_page=ListTrainingJobPage(uow_factory=uow_factory),
         count_training_labels=CountTrainingLabels(uow_factory=uow_factory),
         worker_online=functools.partial(worker_connected, engine),
         storage=storage,
         model=model,
+        draw_heatmap=draw_heatmap,
     )
 
     @asynccontextmanager

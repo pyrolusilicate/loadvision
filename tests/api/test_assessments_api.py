@@ -118,6 +118,22 @@ def test_same_photo_again_returns_the_stored_assessment(service: Service) -> Non
 
 
 @pytest.mark.api
+def test_same_photo_after_a_model_change_is_assessed_again(service: Service) -> None:
+    first = document(post(service.client, request_body()))
+
+    service.model.activate(FakePredictor(version="fake-2", loads={PHOTO_SHA256: 30.0}))
+    response = post(service.client, request_body())
+
+    assert response.status_code == 201
+    again = document(response)
+    assert again.get("reused") == "false"
+    assert again.get("id") == first.get("id")
+    assert child(again, "LoadPct").text == "30.0"
+    assert child(again, "Model").get("version") == "fake-2"
+    assert len(service.store.assessments) == 1
+
+
+@pytest.mark.api
 def test_base64_wrapped_at_76_characters_is_accepted(service: Service) -> None:
     data = base64.b64encode(PHOTO).decode()
     wrapped = "\n".join(data[start : start + 76] for start in range(0, len(data), 76))

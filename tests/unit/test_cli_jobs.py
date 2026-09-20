@@ -30,9 +30,19 @@ def test_a_job_is_queued(store: InMemoryStore, caplog: pytest.LogCaptureFixture)
 
 @pytest.mark.unit
 def test_the_mode_reaches_the_job(store: InMemoryStore) -> None:
-    assert main(["jobs", "start", "--mode", "full"]) == 0
+    assert main(["jobs", "start", "--mode", "fast"]) == 0
     [job] = store.training_jobs.values()
-    assert job.mode is TrainingMode.FULL
+    assert job.mode is TrainingMode.FAST
+
+
+@pytest.mark.unit
+def test_a_mode_the_queue_cannot_run_is_reported(
+    store: InMemoryStore, caplog: pytest.LogCaptureFixture
+) -> None:
+    assert main(["jobs", "start", "--mode", "full"]) == 1
+
+    assert store.training_jobs == {}
+    assert "TRAINING_MODE_NOT_SUPPORTED" in caplog.text
 
 
 @pytest.mark.unit

@@ -13,20 +13,22 @@ _SHA256_HEX_RE: Final = re.compile(SHA256_HEX_PATTERN)
 
 
 class LabelSource(StrEnum):
-    """Where a label came from."""
+    """Where a label came from; `MODEL` is the service itself, every other source is a person."""
 
     API = "api"
     UI = "ui"
     IMPORT = "import"
+    MODEL = "model"
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
 class ConfirmedLabel:
-    """A person's verdict about one photo: the confirmed load, or that the photo is unusable.
+    """The verdict about one photo: the confirmed load, or that the photo is unusable.
 
     A label belongs to the photo, not to an assessment, so every assessment of the same photo
     shows it. An unusable photo, such as a covered lens or a black frame, has no load and never
-    goes into training.
+    goes into training. The verdict is a person's, except for the frame the service itself finds
+    unreadable: that one carries `LabelSource.MODEL` and a person can cancel it.
 
     Attributes:
         image_sha256: Lowercase hex SHA-256 of the photo.

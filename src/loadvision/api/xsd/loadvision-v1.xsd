@@ -208,6 +208,7 @@
       <xs:enumeration value="ROUTE_NOT_FOUND"/>
       <xs:enumeration value="METHOD_NOT_ALLOWED"/>
       <xs:enumeration value="TRAINING_ALREADY_RUNNING"/>
+      <xs:enumeration value="TRAINING_MODE_NOT_SUPPORTED"/>
       <xs:enumeration value="MODEL_VERSION_STATUS_CONFLICT"/>
       <xs:enumeration value="MODEL_NOT_READY"/>
       <xs:enumeration value="MODEL_INFERENCE_FAILED"/>
@@ -237,6 +238,7 @@
       <xs:enumeration value="ROUTE_NOT_FOUND"/>
       <xs:enumeration value="METHOD_NOT_ALLOWED"/>
       <xs:enumeration value="TRAINING_ALREADY_RUNNING"/>
+      <xs:enumeration value="TRAINING_MODE_NOT_SUPPORTED"/>
       <xs:enumeration value="MODEL_VERSION_STATUS_CONFLICT"/>
       <xs:enumeration value="MODEL_NOT_READY"/>
       <xs:enumeration value="MODEL_INFERENCE_FAILED"/>
@@ -252,7 +254,8 @@
     <xs:annotation>
       <xs:documentation>
         Оценить фото и привязать оценку к перевозке. Повтор того же фото в той же перевозке
-        возвращает сохранённую оценку с reused="true".
+        возвращает сохранённую оценку с reused="true". Если с прошлого раза сменилась активная
+        модель, фото оценивается заново: ответ приходит с reused="false" и с тем же id оценки.
       </xs:documentation>
     </xs:annotation>
     <xs:complexType>

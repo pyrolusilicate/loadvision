@@ -156,7 +156,10 @@ class PipelineTrainingRunner:
             write_folds(self._folds_file, extended)
 
     def _pipeline(self, run_id: str, dataset: Path) -> RunSummary:
-        config = {**self._config, "folds": str(self._folds_file)}
+        # The candidate is named after its run. The experiment config names one fixed version,
+        # and a retraining that reuses it writes over a package the service may already serve;
+        # the run id also says which run folder the numbers behind the version live in.
+        config = {**self._config, "folds": str(self._folds_file), "version": run_id}
         ctx = RunContext(
             run_id=run_id,
             runs_dir=self._runs_dir,

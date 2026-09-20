@@ -11,13 +11,23 @@
   </form>
 </div>
 <p>Воркер: {% if worker_online %}<span class="badge ok">запущен</span>{% else %}<span class="badge bad">не запущен</span>{% endif %}</p>
-<p>Подтверждённых загрузок: {{ labels }}.</p>
-<p class="caption">Новая дообученная модель проверяется, если подтверждённых загрузок не меньше {{ needed }}.</p>
+<p>Подтвержденных оценок, которых активная модель ещё не видела: {{ labels }}.</p>
+<p class="caption">Кнопка запускает быстрое дообучение. Головы модели дообучаются на замороженных энкодерах.</p>
+<p class="caption">Гейт при запуске считает строже: подтверждение, совпавшее с меткой обучающего набора, новым для него не будет. Поэтому у порога {{ needed }} лучше иметь запас.</p>
 {% if error %}
 <p class="note bad" role="alert"><strong>{{ error[0] }}</strong> {{ error[1] }}</p>
 {% endif %}
 {% if jobs.number == 1 and jobs.items and jobs.items[0].status.value == 'queued' %}
 <p class="note warn">Задача ждёт запуск воркера.</p>
+{% endif %}
+{% if jobs.number == 1 and jobs.items and jobs.items[0].status.value == 'running' and not worker_online %}
+<div class="note warn">
+  <p>Задача помечена идущей, но воркера нет: он упал или его остановили. Пока она висит, новые дообучения не запускаются.</p>
+  <form method="post" action="{{ ui }}/jobs/release">
+    <input type="hidden" name="csrf" value="{{ session.csrf }}">
+    <button type="submit" class="warn">Снять зависшую задачу</button>
+  </form>
+</div>
 {% endif %}
 {% if not jobs.total %}
 <p class="note">Задач ещё не было.</p>
