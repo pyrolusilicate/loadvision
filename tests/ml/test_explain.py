@@ -8,7 +8,7 @@ import torch
 from PIL import Image
 
 from loadvision.imaging.prepared_image import MediaType, PreparedImage
-from loadvision.ml.inference.explain import Explainer
+from loadvision.ml.inference.explain import Explainer, MapKind
 from loadvision.ml.inference.heatmap import render
 from loadvision.ml.inference.predictor import RidgeHead
 from loadvision.ml.models.backbones import Backbone
@@ -112,3 +112,18 @@ def test_a_drawn_map_has_no_holes() -> None:
         # Stretching the grid overshoots below zero; a power of a negative number is NaN, and
         # NaN turned into a pixel is a black hole in the picture.
         assert (drawn.sum(-1) > 0).all()
+
+
+@pytest.mark.ml
+@pytest.mark.parametrize("kind", ["attention", "contribution"])
+def test_one_call_draws_the_asked_map(kind: MapKind) -> None:
+    backbone = small_vit()
+    explainer = Explainer(backbone, head(backbone), "cpu")
+    image = photo()
+
+    drawn = explainer.picture(image, kind)
+
+    # The same picture as computing and drawing in two steps, in one call for the service.
+    wanted = explainer.explain(image, contribution=kind == "contribution")
+    assert drawn == render(image, wanted, kind)
+    assert Image.open(io.BytesIO(drawn)).size == (image.width, image.height)
