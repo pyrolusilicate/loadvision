@@ -8,7 +8,7 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, Final
+from typing import Any, Final, NamedTuple
 
 import numpy as np
 from numpy.typing import NDArray
@@ -316,8 +316,29 @@ def write_ood(
     }
 
 
+class Credit(NamedTuple):
+    """One more set of weights a package carries besides the encoders of its members.
+
+    Attributes:
+        name: Checkpoint name, as its source calls it.
+        license: SPDX identifier, naming a text in the licences folder.
+        origin: Who published it, for the NOTICE.
+        source: Where it comes from.
+    """
+
+    name: str
+    license: str
+    origin: str
+    source: str
+
+
 def write_licenses(
-    root: Path, backbones: Sequence[Backbone], licenses_dir: Path, *, fine_tuned: bool = False
+    root: Path,
+    backbones: Sequence[Backbone],
+    licenses_dir: Path,
+    *,
+    fine_tuned: bool = False,
+    extra: Sequence[Credit] = (),
 ) -> list[str]:
     """Copies the licence of every checkpoint into the package and writes the NOTICE.
 
@@ -332,6 +353,8 @@ def write_licenses(
         licenses_dir: Folder holding one text per SPDX identifier the registry names.
         fine_tuned: Whether the package carries weights fine-tuned by the team rather than
             the untouched checkpoints.
+        extra: Weights besides the members' encoders, such as a depth model; they are never
+            fine-tuned by us.
 
     Returns:
         Package paths of the licence texts and the NOTICE, sorted.
@@ -343,10 +366,14 @@ def write_licenses(
         backbone.spec.timm_name: backbone.spec
         for backbone in sorted(backbones, key=lambda item: item.spec.timm_name)
     }
+    credits = [
+        Credit(timm_name, spec.license, spec.origin, f"https://huggingface.co/timm/{timm_name}")
+        for timm_name, spec in checkpoints.items()
+    ]
     folder = root / "licenses"
     folder.mkdir(parents=True, exist_ok=True)
     written: list[str] = []
-    for name in sorted({spec.license for spec in checkpoints.values()}):
+    for name in sorted({item.license for item in [*credits, *extra]}):
         source = licenses_dir / f"{name}.txt"
         if not source.is_file():
             raise FileNotFoundError(
@@ -368,14 +395,24 @@ def write_licenses(
         "их тексты лежат рядом в этой же папке.",
         "",
     ]
-    for timm_name, spec in checkpoints.items():
+    for item in credits:
         lines += [
-            f"## {timm_name}",
+            f"## {item.name}",
             "",
-            f"- происхождение: {spec.origin}",
-            f"- лицензия: {spec.license}, текст в `licenses/{spec.license}.txt`",
-            f"- источник: https://huggingface.co/timm/{timm_name}",
+            f"- происхождение: {item.origin}",
+            f"- лицензия: {item.license}, текст в `licenses/{item.license}.txt`",
+            f"- источник: {item.source}",
             change,
+            "",
+        ]
+    for item in extra:
+        lines += [
+            f"## {item.name}",
+            "",
+            f"- происхождение: {item.origin}",
+            f"- лицензия: {item.license}, текст в `licenses/{item.license}.txt`",
+            f"- источник: {item.source}",
+            "- веса не изменялись",
             "",
         ]
     (folder / _NOTICE_FILE).write_text("\n".join(lines), encoding="utf-8")

@@ -20,6 +20,7 @@ from pydantic import (
 
 from loadvision.domain.model_version import ModelVersionId
 from loadvision.domain.timestamps import format_utc
+from loadvision.imaging.crops import WHOLE
 
 MANIFEST_FILE: Final = "manifest.json"
 
@@ -94,6 +95,8 @@ class Member(_Schema):
         head: Head file that turns backbone output into a load percent.
         weight: Share of the member in the ensemble average.
         preprocessing: Input preparation for this backbone.
+        inputs: What the encoder is shown, by key of the input registry of `imaging/crops.py`.
+            The head reads the vectors in this order, so it must match the training.
     """
 
     backbone: RegistryKey
@@ -102,6 +105,7 @@ class Member(_Schema):
     head: PackagePath
     weight: float = Field(ge=0, le=1)
     preprocessing: Preprocessing
+    inputs: tuple[RegistryKey, ...] = Field(default=(WHOLE,), min_length=1)
 
     @model_validator(mode="after")
     def _require_weights_for_neural_runtimes(self) -> Self:
@@ -138,6 +142,23 @@ class OodConfig(_Schema):
     k: int = Field(ge=1)
     threshold: float = Field(ge=0)
     reference: PackagePath
+
+
+class DepthRef(_Schema):
+    """Depth model whose grid the members read next to the photo.
+
+    A member of such a package is fed the embedding of its encoder and this grid, in that
+    order, so the head sees exactly what it was fitted on.
+
+    Attributes:
+        model: Folder inside the package with the depth checkpoint.
+        rows: Rows of the grid the depth map is pooled into.
+        cols: Columns of that grid.
+    """
+
+    model: PackagePath
+    rows: int = Field(ge=1)
+    cols: int = Field(ge=1)
 
 
 class PostprocessStep(_Schema):
@@ -179,6 +200,8 @@ class Manifest(_Schema):
         members: Models of the ensemble; their weights sum to 1.
         cv: CV metrics; None when the models were not evaluated on the shared folds.
         ood: Out-of-distribution score settings; None disables the score.
+        depth: Depth model the members read alongside the photo; None when they read the photo
+            alone.
         postprocess: Steps applied to the ensemble output in list order; every prediction is
             clipped to [0, 100] after them, so clipping is not a step.
         folds: Folds of the CV metrics; None when `cv` is None.
@@ -194,6 +217,7 @@ class Manifest(_Schema):
     members: tuple[Member, ...] = Field(min_length=1)
     cv: CvMetrics | None = None
     ood: OodConfig | None = None
+    depth: DepthRef | None = None
     postprocess: tuple[PostprocessStep, ...] = ()
     folds: FoldsRef | None = None
     licenses: tuple[PackagePath, ...] = ()

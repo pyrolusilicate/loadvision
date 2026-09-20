@@ -23,6 +23,10 @@ from loadvision.settings import load_settings
 
 DEFAULT_BASELINE_DIR: Final = Path("baseline")
 
+# Settings that change how a run goes but not what it learns: loader processes, and whether
+# block activations were recomputed to fit into a smaller graphics card.
+INCIDENTAL: Final = frozenset({"workers", "checkpointing"})
+
 _logger = logging.getLogger(__name__)
 
 
@@ -55,16 +59,21 @@ def add_commands(groups: "argparse._SubParsersAction[argparse.ArgumentParser]") 
 
     finetuned = commands.add_parser(
         "build-finetuned",
-        help="package an encoder fine-tuned by `finetune --full`",
+        help="package a model fine-tuned by `finetune`",
         description=(
-            "Packages the model of a `finetune --full` run with the calibration and the metrics "
+            "Packages a `finetune` run: the model of a --full run, or the five fold models of "
+            "an out-of-fold run averaged in equal shares, the way its submission was made. "
+            "Packages the model with the calibration and the metrics "
             "of the out-of-fold run of the same settings. The package is written into the full "
             "run's folder; `register` puts it into the models folder."
         ),
     )
-    finetuned.add_argument("full_run", type=Path, help="folder of the finetune --full run")
+    finetuned.add_argument("run_dir", type=Path, help="folder of the finetune run to package")
     finetuned.add_argument(
-        "--oof-run", type=Path, required=True, help="folder of the out-of-fold run it matches"
+        "--oof-run",
+        type=Path,
+        help="out-of-fold run the calibration and the metrics come from; the run itself when "
+        "it is the one being packaged",
     )
     add_data_option(finetuned)
     finetuned.add_argument("--version", required=True, help="package version, such as v2")
@@ -159,7 +168,10 @@ def build_baseline(args: argparse.Namespace) -> int:
 
 
 def build_finetuned(args: argparse.Namespace) -> int:
-    """Builds the package of a fine-tuned model into `<full_run>/package`.
+    """Builds the package of a fine-tuned run into `<run>/package`.
+
+    A run on every photo is packaged as one member; an out-of-fold run as its fold models
+    averaged in equal shares, which is the model its submission was made with.
 
     Returns:
         Exit code 0.
@@ -169,28 +181,34 @@ def build_finetuned(args: argparse.Namespace) -> int:
             not match each other or the dataset.
     """
     # Imported here: building needs torch, the other model commands do not.
-    from loadvision.ml.packaging.finetuned_package import build_finetuned_package
+    from loadvision.ml.packaging.finetuned_package import (
+        build_finetuned_package,
+        build_folds_package,
+    )
     from loadvision.ml.pipeline.stages import DEFAULT_CHAIN
     from loadvision.ml.pipeline.stages.build_package import LICENSES_DIR
     from loadvision.ml.pipeline.stages.train_folds import OOF_FILE, read_oof
 
     version = version_of(args.version)
-    out_dir = args.full_run / "package"
+    out_dir = args.run_dir / "package"
     if out_dir.exists():
         raise CommandError(f"{out_dir} already exists")
-    full, oof_run = _run_settings(args.full_run), _run_settings(args.oof_run)
-    if not full["full"] or oof_run["full"]:
-        raise CommandError("pass a finetune --full run and then the out-of-fold run")
-    if _learned(full) != _learned(oof_run):
+    run = _run_settings(args.run_dir)
+    oof_run_dir = args.oof_run or args.run_dir
+    oof_run = _run_settings(oof_run_dir)
+    if oof_run["full"]:
+        raise CommandError(f"{oof_run_dir} is a --full run; the calibration needs folds")
+    if _learned(run) != _learned(oof_run):
         raise CommandError("the two runs were fine-tuned with different settings")
+    build = build_finetuned_package if run["full"] else build_folds_package
     try:
-        package = build_finetuned_package(
-            args.full_run,
+        package = build(
+            args.run_dir,
             out_dir,
-            encoder=full["settings"]["encoder"],
+            encoder=run["settings"]["encoder"],
             train=load_split(args.data, "train"),
-            oof=read_oof(args.oof_run / OOF_FILE),
-            oof_file=args.oof_run / OOF_FILE,
+            oof=read_oof(oof_run_dir / OOF_FILE),
+            oof_file=oof_run_dir / OOF_FILE,
             chain=[(name, dict(params)) for name, params in DEFAULT_CHAIN],
             folds_file=Path(oof_run["folds"]),
             licenses_dir=LICENSES_DIR,
@@ -199,10 +217,17 @@ def build_finetuned(args: argparse.Namespace) -> int:
             data_hash=dataset_hash(args.data),
             created_at=utc_now(),
             device=args.device,
+            depth=bool(run["settings"].get("depth")),
+            far_view=bool(run["settings"].get("far_view")),
         )
     except ValueError as error:
         raise CommandError(str(error)) from error
-    _logger.info("built model package %s in %s", package.version.value, package.root)
+    _logger.info(
+        "built model package %s of %d member(s) in %s",
+        package.version.value,
+        len(package.manifest.members),
+        package.root,
+    )
     return 0
 
 
@@ -215,8 +240,8 @@ def _run_settings(folder: Path) -> dict[str, Any]:
 
 
 def _learned(run: dict[str, Any]) -> dict[str, Any]:
-    """Settings that change what a run learns; the number of loader workers does not."""
-    return {key: value for key, value in run["settings"].items() if key != "workers"}
+    """Settings that change what a run learns, unlike how fast or on what it ran."""
+    return {key: value for key, value in run["settings"].items() if key not in INCIDENTAL}
 
 
 def fetch_weights(args: argparse.Namespace) -> int:

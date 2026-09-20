@@ -12,6 +12,7 @@ from loadvision.application.ports import Prediction
 from loadvision.domain.assessment import LoadPercent, ReviewReason
 from loadvision.domain.model_version import ModelVersionId
 from loadvision.errors import LoadvisionError
+from loadvision.imaging import crops
 from loadvision.imaging.prepared_image import MediaType, PreparedImage
 from loadvision.imaging.preprocessing import preprocess
 from loadvision.ml.inference.ood import OodReference
@@ -127,8 +128,13 @@ class PackagePredictor:
     `uncertainty` is how far the members are apart. A photo whose OOD score is above the
     threshold of the package is marked as an unusual scene.
 
-    Members that name the same checkpoint at the same input size run it once and pool its
-    tokens each in their own way, so an ensemble of four costs two runs of the encoder.
+    Members that name the same checkpoint at the same input size run it once per input and
+    pool its tokens each in their own way, so an ensemble of four costs two runs of the
+    encoder. A member may be shown more than the whole frame: `Member.inputs` names what it
+    sees, and its head reads the vectors in that order.
+
+    A package may name a depth model; then every torch member is fed its encoder embedding
+    together with the depth grid of the photo, in that order, the way its head was fitted.
 
     Args:
         package: Verified model package.
@@ -154,6 +160,7 @@ class PackagePredictor:
             for member in package.manifest.members
         )
         self._postprocess = self._load_postprocess(package)
+        self._depth = self._load_depth(package)
         self._ood = self._load_ood(package)
         self._check_on_blank_photo()
 
@@ -177,6 +184,20 @@ class PackagePredictor:
             return load_backbone(member.backbone, self._device, weights)
         except KeyError as error:
             raise ModelPackageError(f"unknown backbone {member.backbone!r}") from error
+
+    def _load_depth(self, package: ModelPackage) -> object | None:
+        config = package.manifest.depth
+        if config is None:
+            return None
+        # Imported here with torch: a package of numpy members needs neither.
+        from loadvision.ml.models.depth import DepthEncoder
+
+        # A folder, not a file, so it is taken from the root; every file inside it is listed
+        # in the manifest and was verified when the package was loaded.
+        try:
+            return DepthEncoder.load(package.root / config.model, self._device)
+        except (OSError, ValueError) as error:
+            raise ModelPackageError(f"depth model: {error}") from error
 
     def _load_ood(self, package: ModelPackage) -> OodReference | None:
         config = package.manifest.ood
@@ -248,7 +269,8 @@ class PackagePredictor:
         out-of-distribution score is the distance from that very embedding to the training ones.
         """
         values: dict[int, tuple[float, NDArray[np.float64] | None]] = {}
-        groups: dict[tuple[str, str, str], list[tuple[int, _LoadedMember]]] = {}
+        groups: dict[tuple[str, str, str, str], list[tuple[int, _LoadedMember]]] = {}
+        depth = None if self._depth is None else _depth_grid(self._depth, image)
         for key, loaded in members.items():
             if loaded.encoder is None:
                 preprocessing = loaded.member.preprocessing
@@ -258,33 +280,46 @@ class PackagePredictor:
             groups.setdefault(_group_key(loaded), []).append((key, loaded))
 
         for sharing in groups.values():
-            values.update(self._torch_group(sharing, image))
+            values.update(self._torch_group(sharing, image, depth))
         return values
 
     def _torch_group(
-        self, sharing: list[tuple[int, _LoadedMember]], image: PreparedImage
+        self,
+        sharing: list[tuple[int, _LoadedMember]],
+        image: PreparedImage,
+        depth: NDArray[np.float64] | None = None,
     ) -> dict[int, tuple[float, NDArray[np.float64] | None]]:
         import torch
 
         first = _backbone(sharing[0][1])
-        totals: dict[int, NDArray[np.float64]] = {}
+        wanted = {name for _key, loaded in sharing for name in loaded.member.inputs}
+        # One run of the encoder per input and view for the whole group; its members differ
+        # only in how they pool the tokens, and that is cheap next to the encoder itself.
+        totals: dict[tuple[int, str], NDArray[np.float64]] = {}
         with torch.inference_mode():
-            for view in first.views:
-                # One run of the encoder per view for the whole group; its members differ only
-                # in how they pool the tokens, and that is cheap next to the encoder itself.
-                tokens = first.tokens(first.prepare([image], view).to(self._device))
-                for key, loaded in sharing:
-                    backbone = _backbone(loaded)
-                    pooled = backbone.pool(tokens)
-                    if view.mirrored:
-                        pooled = backbone.unmirror(pooled)
-                    vector = pooled.float().cpu().numpy()[0].astype(np.float64)
-                    totals[key] = vector if key not in totals else totals[key] + vector
+            for name in wanted:
+                shown = crops.get(name)(image)
+                for view in first.views:
+                    tokens = first.tokens(first.prepare([shown], view).to(self._device))
+                    for key, loaded in sharing:
+                        if name not in loaded.member.inputs:
+                            continue
+                        backbone = _backbone(loaded)
+                        pooled = backbone.pool(tokens)
+                        if view.mirrored:
+                            pooled = backbone.unmirror(pooled)
+                        vector = pooled.float().cpu().numpy()[0].astype(np.float64)
+                        cell = (key, name)
+                        totals[cell] = vector if cell not in totals else totals[cell] + vector
         views = len(first.views)
         computed: dict[int, tuple[float, NDArray[np.float64] | None]] = {}
         for key, loaded in sharing:
-            embedding = totals[key] / views
-            computed[key] = (loaded.head.apply(embedding), embedding)
+            vectors = [totals[(key, name)] / views for name in loaded.member.inputs]
+            # The head was fitted on the vectors of its inputs in this order, followed by the
+            # depth grid. The first vector, the photo as a whole, is what the
+            # out-of-distribution score compares.
+            parts = vectors if depth is None else [*vectors, depth]
+            computed[key] = (loaded.head.apply(np.concatenate(parts)), vectors[0])
         return computed
 
     def _predict_one(self, image: PreparedImage) -> Prediction:
@@ -329,17 +364,27 @@ class PackagePredictor:
         return frozenset({ReviewReason.UNUSUAL_SCENE})
 
 
+def _depth_grid(encoder: Any, image: PreparedImage) -> NDArray[np.float64]:
+    return np.asarray(encoder.grid(image), dtype=np.float64)
+
+
 def _backbone(loaded: _LoadedMember) -> Any:
     return loaded.encoder
 
 
-def _group_key(loaded: _LoadedMember) -> tuple[str, str, str]:
-    """What members must share to run the encoder once: the checkpoint, the input, the views."""
+def _group_key(loaded: _LoadedMember) -> tuple[str, str, str, str]:
+    """What members must share to run the encoder once: the very weights, the input, the views.
+
+    The weights file is part of the key, not only the checkpoint name: an ensemble of models
+    fine-tuned from one checkpoint, such as the five models of a cross-validation, names the
+    same architecture five times and must still run each of them.
+    """
     backbone = _backbone(loaded)
     preprocessing = loaded.member.preprocessing
     numbers = ",".join(f"{key}={value:g}" for key, value in sorted(preprocessing.params.items()))
     return (
         f"{backbone.spec.timm_name}:{backbone.spec.height}x{backbone.spec.width}",
+        loaded.member.weights or "",
         f"{preprocessing.name}({numbers})",
         ",".join(backbone.spec.views),
     )
