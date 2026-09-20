@@ -1,7 +1,7 @@
 """Draws an explanation map over the photo it was computed from."""
 
 import io
-from typing import Final, Literal
+from typing import Final
 
 import numpy as np
 from numpy.typing import NDArray
@@ -9,9 +9,7 @@ from PIL import Image
 
 from loadvision.imaging.prepared_image import PreparedImage
 from loadvision.imaging.preprocessing import letterbox_region
-from loadvision.ml.inference.explain import Explanation
-
-type MapKind = Literal["attention", "contribution"]
+from loadvision.ml.inference.explain import Explanation, MapKind
 
 _UP: Final = np.array([230, 50, 40], np.float32)  # red: raises the answer
 _DOWN: Final = np.array([40, 110, 235], np.float32)  # blue: lowers it

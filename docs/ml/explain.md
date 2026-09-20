@@ -11,8 +11,19 @@
 
 ## Код
 
-- `ml/inference/explain.py`: `Explainer.from_package(package, device)` и `explainer.explain(image, contribution=True) -> Explanation`. В `Explanation` сетки патчей (37×28 для DINOv2 B): `attention` от 0 до 1, `contribution` от -1 до 1 или `None`.
-- `ml/inference/heatmap.py`: `render(image, explanation, "attention" | "contribution") -> bytes` - PNG в размере исходного фото. Сетка кладётся ровно на те пиксели, которые видела модель, с учётом полей при вписывании в окно (`imaging/preprocessing.letterbox_region`).
+Под порт `LoadExplainer` сервиса достаточно одного вызова:
+
+```python
+Explainer.from_package(package, device)          # рядом с предиктором, один раз
+explainer.picture(image: PreparedImage, kind) -> bytes   # kind: "attention" | "contribution"
+```
+
+`picture` считает только то, что нужно запрошенной карте, и возвращает PNG в размере исходного фото.
+
+Если понадобятся сами числа, есть и раздельные шаги:
+
+- `explainer.explain(image, contribution=True) -> Explanation`: сетки патчей (37×28 для DINOv2 B), `attention` от 0 до 1, `contribution` от -1 до 1 или `None`;
+- `heatmap.render(image, explanation, kind) -> bytes`: рисует одну из сеток поверх фото. Сетка кладётся ровно на те пиксели, которые видела модель, с учётом полей при вписывании в окно (`imaging/preprocessing.letterbox_region`).
 
 Предиктор и `application/ports.py` не менялись: объяснение - отдельный класс, ответ модели по-прежнему даёт `PackagePredictor`.
 

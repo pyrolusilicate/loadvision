@@ -2,7 +2,7 @@
 
 from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Any, Final, Self, cast
+from typing import Any, Final, Literal, Self, cast
 
 import numpy as np
 import torch
@@ -14,6 +14,8 @@ from loadvision.ml.inference.predictor import RidgeHead
 from loadvision.ml.models.backbones import Backbone, load_backbone
 from loadvision.ml.packaging.manifest import Runtime
 from loadvision.ml.packaging.model_package import ModelPackage, ModelPackageError
+
+type MapKind = Literal["attention", "contribution"]
 
 # The strongest percent of patches sets the colour scale, so one hot patch does not wash out
 # the rest of the map.
@@ -121,6 +123,26 @@ class Explainer:
             box_height=self._backbone.spec.height,
             box_width=self._backbone.spec.width,
         )
+
+    def picture(self, image: PreparedImage, kind: MapKind) -> bytes:
+        """Draws one map of a photo, computing only what that map needs.
+
+        This is the whole job behind one operator request: the service hands over the photo
+        and which map was asked for, and gets a picture back.
+
+        Args:
+            image: Decoded photo.
+            kind: Which map to draw. "attention" costs one forward pass, "contribution" adds
+                a backward pass and is about twice as slow.
+
+        Returns:
+            PNG bytes, the photo's own size.
+        """
+        # Imported here: the drawing reads `Explanation` from this module, so importing it at
+        # the top would close a circle.
+        from loadvision.ml.inference.heatmap import render
+
+        return render(image, self.explain(image, contribution=kind == "contribution"), kind)
 
     def _answer(self, pixels: torch.Tensor) -> torch.Tensor:
         pooled = self._backbone.pool(self._backbone.tokens(pixels))
