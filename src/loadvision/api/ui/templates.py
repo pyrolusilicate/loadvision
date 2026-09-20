@@ -43,6 +43,9 @@ VIEW_NAMES: Final = MappingProxyType(
         ExplanationKind.CONTRIBUTION.value: "Вклад в ответ",
     }
 )
+# From this load the contribution map says little: the model is at its ceiling and paints the
+# cargo as pulling the answer down. Measured by A on the v2 package.
+CONTRIBUTION_CEILING: Final = 95.0
 VIEW_NOTES: Final = MappingProxyType(
     {
         ExplanationKind.ATTENTION.value: (
@@ -78,6 +81,7 @@ templates.env.globals["ui"] = UI_PREFIX
 templates.env.globals["review_notes"] = REVIEW_NOTES
 templates.env.globals["view_names"] = VIEW_NAMES
 templates.env.globals["view_notes"] = VIEW_NOTES
+templates.env.globals["contribution_ceiling"] = CONTRIBUTION_CEILING
 templates.env.globals["stylesheet"] = _stylesheet
 templates.env.filters["load"] = _load
 templates.env.filters["time"] = human_time

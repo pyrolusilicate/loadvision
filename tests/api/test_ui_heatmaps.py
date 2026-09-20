@@ -53,6 +53,20 @@ def test_a_chosen_map_is_shown_in_place_of_the_photo(
 
 
 @pytest.mark.api
+def test_the_contribution_map_says_when_it_has_little_to_say(drawing: Service) -> None:
+    # The model is at its ceiling on a full body, so the map paints the cargo as pulling down.
+    full = make_service(FakePredictor(loads={PHOTO_SHA256: 100.0}), heatmaps=True)
+    sign_in(full)
+    post(full.client, request_body())
+
+    caveat = "На полном кузове она говорит мало"
+
+    assert caveat in text_of(get(full, f"{ASSESSMENT}?view=contribution"))
+    assert caveat not in text_of(get(full, f"{ASSESSMENT}?view=attention"))
+    assert caveat not in text_of(get(drawing, f"{ASSESSMENT}?view=contribution"))
+
+
+@pytest.mark.api
 def test_a_view_the_service_does_not_know_falls_back_to_the_photo(drawing: Service) -> None:
     card = page(get(drawing, f"{ASSESSMENT}?view=occlusion"))
 

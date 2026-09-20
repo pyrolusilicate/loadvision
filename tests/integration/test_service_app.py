@@ -36,7 +36,11 @@ RETRY_SECONDS = 0.2
 @pytest.fixture
 def settings(tmp_path: Path) -> Settings:
     data = yaml.safe_load(DEFAULT_CONFIG_PATH.read_text(encoding="utf-8"))
-    data["storage"] = {"images_dir": tmp_path / "images", "models_dir": tmp_path / "models"}
+    data["storage"] = {
+        "images_dir": tmp_path / "images",
+        "models_dir": tmp_path / "models",
+        "heatmaps_dir": tmp_path / "heatmaps",
+    }
     data["model"] = {
         "version": VERSION,
         "check_seconds": CHECK_SECONDS,

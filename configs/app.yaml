@@ -21,6 +21,8 @@ review:
 storage:
   images_dir: storage/images
   models_dir: storage/models
+  # Drawn maps; deleting the folder costs nothing, the next request draws them again.
+  heatmaps_dir: storage/heatmaps
 
 logging:
   format: json

@@ -97,10 +97,12 @@ class StorageSettings(_Section):
     Attributes:
         images_dir: Uploaded photos by SHA-256.
         models_dir: Model packages, one folder per version.
+        heatmaps_dir: Drawn maps of what the model saw; they can be deleted at any time.
     """
 
     images_dir: Path
     models_dir: Path
+    heatmaps_dir: Path
 
 
 class LoggingSettings(_Section):
