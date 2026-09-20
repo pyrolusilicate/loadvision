@@ -125,7 +125,6 @@ def test_a_frame_the_model_refused_is_shown_without_a_prediction(service: Servic
     # Everything the card still says stands inside the red block, as on a marked photo.
     assert card.xpath("//div[@class='note bad']//dt/text()") == [
         "Время оценки",
-        "Время расчёта",
         "Непохожесть на обучающие",
         "Яркость кадра",
     ]

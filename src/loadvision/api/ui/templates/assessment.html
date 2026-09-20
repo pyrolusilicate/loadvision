@@ -8,8 +8,22 @@
 {% endmacro %}
 <div class="pair">
   <figure class="photo">
+    {% if view %}
+    <img src="{{ ui }}/photos/{{ a.image_sha256 }}/heatmap?kind={{ view }}" alt="Карта «{{ view_names[view] }}» для фото перевозки {{ a.shipment_id.value }}">
+    {% else %}
     <img src="{{ ui }}/photos/{{ a.image_sha256 }}" alt="Фото перевозки {{ a.shipment_id.value }}">
-    <figcaption class="muted">{{ details.image.width }}×{{ details.image.height }} · {{ details.image.media_type.value }}</figcaption>
+    {% endif %}
+    {% if heatmaps %}
+    <nav class="views">
+      {% for value, name in view_names.items() %}
+      <a href="?view={{ value|urlencode }}"{% if value == view %} aria-current="true"{% endif %}>{{ name }}</a>
+      {% endfor %}
+    </nav>
+    {% endif %}
+    <figcaption class="muted">
+      {% if view %}Карта показана на кадре, который видит модель: {{ view_notes[view] }}
+      {% else %}{{ details.image.width }}×{{ details.image.height }} · {{ details.image.media_type.value }}{% endif %}
+    </figcaption>
   </figure>
   <section class="card">
     <p><a href="{{ ui }}/shipments/{{ a.shipment_id.value|urlencode }}">Перевозка {{ a.shipment_id.value }}</a></p>
@@ -19,7 +33,6 @@
       <p>В кадре нет ничего похожего на кузов: закрыт объектив, кадр испорчен или это снимок чего-то другого. Фото отмечено непригодным, перевозка его не считает.</p>
       <dl>
         <dt>Время оценки</dt><dd>{{ a.created_at|time }}</dd>
-        <dt>Время расчёта</dt><dd>{{ a.processing_ms }} мс</dd>
         {{ measurements(a.signals) }}
       </dl>
     </div>
@@ -46,7 +59,6 @@
     <dl>
       <dt>Модель</dt><dd>{{ a.model_version.value }}</dd>
       <dt>Время оценки</dt><dd>{{ a.created_at|time }}</dd>
-      <dt>Время расчёта</dt><dd>{{ a.processing_ms }} мс</dd>
       {% if a.signals.uncertainty is not none %}<dt>Разброс ансамбля</dt><dd>{{ a.signals.uncertainty|load }} п.п.</dd>{% endif %}
       {% if not a.review_reasons or details.label %}{{ measurements(a.signals) }}{% endif %}
     </dl>

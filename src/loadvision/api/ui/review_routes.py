@@ -22,7 +22,7 @@ from loadvision.api.ui.pagination import TILES_PER_PAGE, pager
 from loadvision.api.ui.services import ui_services_of
 from loadvision.api.ui.session import SignedIn, checked_form
 from loadvision.api.ui.templates import UI_PREFIX
-from loadvision.application.ports import AssessmentOrder, ReviewStatus
+from loadvision.application.ports import AssessmentOrder, ExplanationKind, ReviewStatus
 from loadvision.application.submit_label import SubmitLabelRequest
 from loadvision.domain.assessment import SHA256_HEX_PATTERN, LoadPercent
 from loadvision.domain.confirmed_label import LabelSource
@@ -35,6 +35,8 @@ router = APIRouter()
 _SHA256_RE: Final = re.compile(SHA256_HEX_PATTERN)
 # A photo never changes under its hash, so a browser may keep it for a day.
 _PHOTO_CACHE: Final = "private, max-age=86400, immutable"
+# A map is redrawn when the model changes, so a browser keeps it for a minute, not a day.
+_MAP_CACHE: Final = "private, max-age=60"
 _UNUSABLE_ACTION: Final = "unusable"
 _QUEUE: Final = f"{UI_PREFIX}/"
 # Filters and orders of the queue in the words of the page.
@@ -97,6 +99,7 @@ async def assessment(
     assessment_id: str,
     result: str = "",
     previous: Annotated[str, Query(alias=PREVIOUS_PARAM)] = "",
+    view: str = "",
 ) -> Response:
     """Shows one assessment: the photo, the prediction and the form for the verdict.
 
@@ -119,11 +122,18 @@ async def assessment(
         session,
         details=details,
         unreadable=unreadable,
+        heatmaps=services.draw_heatmap is not None,
+        view=_view_or_photo(view),
         created=result == NEW_RESULT,
         reused=result == REUSED_RESULT,
         again=result == AGAIN_RESULT,
         previous=_version_or_blank(previous),
     )
+
+
+def _view_or_photo(value: str) -> str:
+    """The map the address asks for, or nothing at all, which means the photo itself."""
+    return value if value in {kind.value for kind in ExplanationKind} else ""
 
 
 def _version_or_blank(value: str) -> str:
@@ -190,6 +200,29 @@ async def photo(request: Request, _session: SignedIn, sha256: str) -> Response:
     if raw is None or media_type is None:
         raise LoadvisionError(ErrorCode.ROUTE_NOT_FOUND, f"photo {sha256} is not stored")
     return Response(raw, media_type=media_type.value, headers={"Cache-Control": _PHOTO_CACHE})
+
+
+@router.get("/photos/{sha256}/heatmap")
+async def heatmap(
+    request: Request, _session: SignedIn, sha256: str, kind: ExplanationKind
+) -> Response:
+    """Returns the map of what the model saw on the photo, as PNG.
+
+    The map is drawn here and not when the photo is assessed: an assessment costs exactly as
+    much as it did before, and a map only when somebody opens one.
+    """
+    services = ui_services_of(request)
+    if services.draw_heatmap is None:
+        raise LoadvisionError(ErrorCode.ROUTE_NOT_FOUND, "this service draws no maps")
+    if _SHA256_RE.fullmatch(sha256) is None:
+        raise LoadvisionError(ErrorCode.ROUTE_NOT_FOUND, "malformed photo hash")
+    predictor = services.model.current()
+    if predictor is None:
+        raise LoadvisionError(ErrorCode.MODEL_NOT_READY, services.model.failure)
+    png = await run_in_threadpool(services.draw_heatmap, sha256, kind, predictor.version)
+    # Not the long cache of a photo: a map belongs to a model version, and the address says
+    # nothing about the version.
+    return Response(png, media_type="image/png", headers={"Cache-Control": _MAP_CACHE})
 
 
 def _queue_params(*, status: ReviewStatus, order: AssessmentOrder) -> dict[str, str]:

@@ -37,6 +37,7 @@ from loadvision.ml.inference.active_model import ActiveModel
 from tests import image_files
 from tests.builders import T0
 from tests.fakes.clock import FixedClock, SequentialIds
+from tests.fakes.heatmaps import FakeHeatmaps
 from tests.fakes.image_storage import InMemoryImageStorage
 from tests.fakes.in_memory_db import InMemoryStore
 
@@ -82,12 +83,15 @@ class Service:
     model: ActiveModel
     reloads: ReloadCounter
     worker: WorkerSwitch
+    heatmaps: FakeHeatmaps | None
 
 
 def make_service(
     predictor: LoadPredictor | None = None,
     storage: InMemoryImageStorage | None = None,
     photos: ImageStorage | None = None,
+    *,
+    heatmaps: bool = False,
 ) -> Service:
     """Builds the service on fakes, with the operator pages mounted like in production.
 
@@ -95,6 +99,7 @@ def make_service(
         predictor: Model the service answers with, or None while it is loading.
         storage: Where assessments save photos.
         photos: Where the pages read photos from; the same storage when None.
+        heatmaps: Whether the pages can draw maps of what the model saw.
     """
     store = InMemoryStore()
     storage = InMemoryImageStorage() if storage is None else storage
@@ -129,6 +134,7 @@ def make_service(
         max_body_bytes=MAX_BODY_BYTES,
     )
     worker = WorkerSwitch()
+    drawing = FakeHeatmaps() if heatmaps else None
     ui = UiServices(
         sign_in=SignIn(uow_factory=store.unit_of_work, clock=clock),
         authenticate=Authenticate(uow_factory=store.unit_of_work, clock=clock),
@@ -151,6 +157,7 @@ def make_service(
         worker_online=worker,
         storage=storage if photos is None else photos,
         model=model,
+        draw_heatmap=drawing,
     )
     client = TestClient(create_app(services, ui=ui), raise_server_exceptions=False)
     return Service(
@@ -161,6 +168,7 @@ def make_service(
         model=model,
         reloads=reloads,
         worker=worker,
+        heatmaps=drawing,
     )
 
 

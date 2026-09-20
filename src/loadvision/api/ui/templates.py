@@ -9,6 +9,7 @@ from typing import Final
 from starlette.templating import Jinja2Templates
 
 from loadvision.api.xml.schemas import LOAD_PCT_PLACES, format_decimal
+from loadvision.application.ports import ExplanationKind
 from loadvision.domain.assessment import ReviewReason
 from loadvision.domain.timestamps import format_utc_seconds
 
@@ -30,6 +31,26 @@ REVIEW_NOTES: Final = MappingProxyType(
         ReviewReason.LOW_CONFIDENCE: "Модели ансамбля сильно расходятся в оценке.",
         ReviewReason.TOO_DARK: "В кадре слишком темно, груз не разглядеть.",
         ReviewReason.BLURRY: "Фото размыто.",
+    }
+)
+
+# What a card can show in place of the photo, in the order of the switch above it.
+PHOTO_VIEW: Final = ""
+VIEW_NAMES: Final = MappingProxyType(
+    {
+        PHOTO_VIEW: "Фото",
+        ExplanationKind.ATTENTION.value: "Внимание",
+        ExplanationKind.CONTRIBUTION.value: "Вклад в ответ",
+    }
+)
+VIEW_NOTES: Final = MappingProxyType(
+    {
+        ExplanationKind.ATTENTION.value: (
+            "видно, куда модель смотрит. Поднимает место процент или опускает, карта не говорит."
+        ),
+        ExplanationKind.CONTRIBUTION.value: (
+            "видно, какие места тянут процент вверх, а какие вниз."
+        ),
     }
 )
 
@@ -55,6 +76,8 @@ def human_time(value: datetime) -> str:
 
 templates.env.globals["ui"] = UI_PREFIX
 templates.env.globals["review_notes"] = REVIEW_NOTES
+templates.env.globals["view_names"] = VIEW_NAMES
+templates.env.globals["view_notes"] = VIEW_NOTES
 templates.env.globals["stylesheet"] = _stylesheet
 templates.env.filters["load"] = _load
 templates.env.filters["time"] = human_time

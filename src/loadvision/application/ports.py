@@ -51,6 +51,45 @@ class Prediction:
     review_reasons: frozenset[ReviewReason] = field(default_factory=frozenset[ReviewReason])
 
 
+class ExplanationKind(StrEnum):
+    """Which map of what the model saw a page asks for.
+
+    `ATTENTION` shows where the model looked and costs one pass of the encoder.
+    `CONTRIBUTION` also says which way a place pulls the answer and costs a pass back as well.
+    """
+
+    ATTENTION = "attention"
+    CONTRIBUTION = "contribution"
+
+
+class LoadExplainer(Protocol):
+    """Draws what the model saw on one photo.
+
+    Kept apart from `LoadPredictor` on purpose: a map is drawn when a person asks for one, so
+    assessing a photo costs exactly as much as it did before.
+    """
+
+    @property
+    def version(self) -> ModelVersionId:
+        """Version of the model package the maps are drawn with."""
+        ...
+
+    def explain(self, image: PreparedImage, kind: ExplanationKind) -> bytes:
+        """Returns the photo with the map drawn over it, as PNG bytes.
+
+        Args:
+            image: Decoded photo, prepared the same way as for a prediction.
+            kind: Which map to draw.
+
+        Returns:
+            PNG bytes.
+
+        Raises:
+            Exception: Any model failure; the use case reports it as MODEL_INFERENCE_FAILED.
+        """
+        ...
+
+
 class LoadPredictor(Protocol):
     """Model that estimates cargo load from photos."""
 

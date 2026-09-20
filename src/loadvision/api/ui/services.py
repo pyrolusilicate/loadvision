@@ -11,7 +11,7 @@ from loadvision.application.get_assessment import GetAssessment
 from loadvision.application.get_shipment import GetShipment
 from loadvision.application.model_versions import ActivateModel, ListModelVersions, RollbackModel
 from loadvision.application.operators import Authenticate, SignIn, SignOut
-from loadvision.application.ports import ImageStorage
+from loadvision.application.ports import ExplanationKind, ImageStorage
 from loadvision.application.review_queue import ReviewQueue
 from loadvision.application.submit_label import MarkReadable, SubmitLabel
 from loadvision.application.training_jobs import (
@@ -19,7 +19,11 @@ from loadvision.application.training_jobs import (
     ListTrainingJobPage,
     StartTraining,
 )
+from loadvision.domain.model_version import ModelVersionId
 from loadvision.ml.inference.active_model import ActiveModel
+
+# Draws the map of what the model saw: photo hash, which map, and the version that answered.
+type DrawHeatmap = Callable[[str, ExplanationKind, ModelVersionId], bytes]
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
@@ -46,6 +50,8 @@ class UiServices:
         worker_online: Whether a worker is running to take a retraining from the queue.
         storage: Photo bytes, shown on the pages.
         model: The model the service answers with, for the header.
+        draw_heatmap: Draws what the model saw on a photo, or None when the service carries no
+            explainer; then the pages offer no maps.
     """
 
     sign_in: SignIn
@@ -67,6 +73,7 @@ class UiServices:
     worker_online: Callable[[], bool]
     storage: ImageStorage
     model: ActiveModel
+    draw_heatmap: DrawHeatmap | None = None
 
 
 def ui_services_of(request: Request) -> UiServices:
