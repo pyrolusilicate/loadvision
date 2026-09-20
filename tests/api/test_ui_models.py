@@ -1,4 +1,5 @@
 from datetime import timedelta
+from uuid import UUID
 
 import pytest
 
@@ -254,6 +255,46 @@ def test_without_a_running_worker_retraining_is_refused(service: Service) -> Non
     jobs = page(get(service, "/ui/jobs"))
     assert jobs.xpath("//form[@action='/ui/jobs']/button/@disabled")
     assert jobs.xpath("//span[contains(@class, 'badge')]/text()")[-1] == "не запущен"
+
+
+@pytest.mark.api
+def test_a_job_left_by_a_dead_worker_can_be_taken_off(service: Service) -> None:
+    token = sign_in(service)
+    confirm_loads(service, NEEDED)
+    # An id of its own: the service hands out UUID(int=1) to the job started at the end.
+    running = make_job(UUID(int=99)).started(at=T0, base_version=None)
+    service.store.training_jobs[running.id] = running
+    service.worker.online = False
+
+    offered = page(get(service, "/ui/jobs"))
+    assert offered.xpath("//form[@action='/ui/jobs/release']/button/text()") == [
+        "Снять зависшую задачу"
+    ]
+    assert "новые дообучения не запускаются" in text_of(get(service, "/ui/jobs"))
+
+    submit(service, "/ui/jobs/release", csrf=token)
+
+    ended = service.store.training_jobs[running.id]
+    assert ended.status.value == "failed"
+    assert ended.error_code is ErrorCode.INTERNAL_ERROR
+    # The queue is free again, so a retraining can be started once the worker is back.
+    service.worker.online = True
+    assert submit(service, "/ui/jobs", csrf=token).status_code == 303
+
+
+@pytest.mark.api
+def test_a_running_job_of_a_live_worker_is_not_taken_off(service: Service) -> None:
+    token = sign_in(service)
+    running = make_job().started(at=T0, base_version=None)
+    service.store.training_jobs[running.id] = running
+
+    response = submit(service, "/ui/jobs/release", csrf=token)
+
+    assert response.status_code == 409
+    assert "Воркер запущен, задача идёт." in text_of(response)
+    assert service.store.training_jobs[running.id] == running
+    # And the page of a live worker offers no such button at all.
+    assert page(get(service, "/ui/jobs")).xpath("//form[@action='/ui/jobs/release']") == []
 
 
 @pytest.mark.api

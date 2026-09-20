@@ -19,6 +19,15 @@
 {% if jobs.number == 1 and jobs.items and jobs.items[0].status.value == 'queued' %}
 <p class="note warn">Задача ждёт запуск воркера.</p>
 {% endif %}
+{% if jobs.number == 1 and jobs.items and jobs.items[0].status.value == 'running' and not worker_online %}
+<div class="note warn">
+  <p>Задача помечена идущей, но воркера нет: он упал или его остановили. Пока она висит, новые дообучения не запускаются.</p>
+  <form method="post" action="{{ ui }}/jobs/release">
+    <input type="hidden" name="csrf" value="{{ session.csrf }}">
+    <button type="submit" class="warn">Снять зависшую задачу</button>
+  </form>
+</div>
+{% endif %}
 {% if not jobs.total %}
 <p class="note">Задач ещё не было.</p>
 {% else %}

@@ -6,7 +6,7 @@ from uuid import UUID
 
 from loadvision.application.paging import Page, page_number
 from loadvision.application.ports import Clock, IdFactory, UnitOfWorkFactory
-from loadvision.domain.training_job import TrainingJob, TrainingMode
+from loadvision.domain.training_job import TrainingJob, TrainingJobStatus, TrainingMode
 from loadvision.errors import ErrorCode, LoadvisionError
 
 DEFAULT_LIMIT: Final = 20
@@ -52,6 +52,42 @@ class StartTraining:
             uow.training_jobs.add(job)
             uow.commit()
         return job
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class ReleaseTrainingJob:
+    """Ends a job whose worker is gone, so the queue takes new ones again.
+
+    A worker that dies in the middle of a run - a killed container, a machine that went away -
+    leaves its job running, and the queue refuses every new job while one is unfinished. From
+    the outside nothing tells a dead run from a slow one, so a person says it: the pages offer
+    this only while no worker is connected at all.
+
+    Attributes:
+        uow_factory: Opens database transactions.
+        clock: Current time, timezone-aware.
+    """
+
+    uow_factory: UnitOfWorkFactory
+    clock: Clock
+
+    def __call__(self) -> TrainingJob | None:
+        """Ends the running job.
+
+        Returns:
+            The job that was ended, or None when nothing was running. A queued job is left
+            alone: it waits for a worker, it does not block anything.
+        """
+        with self.uow_factory() as uow:
+            job = uow.training_jobs.find_unfinished()
+            if job is None or job.status is not TrainingJobStatus.RUNNING:
+                return None
+            # The same code a crash of the runner writes: the job produced no package, and
+            # nobody can say more than that about a worker that is not there any more.
+            ended = job.failed(at=self.clock(), run_id=None, error_code=ErrorCode.INTERNAL_ERROR)
+            uow.training_jobs.update(ended)
+            uow.commit()
+        return ended
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)

@@ -35,6 +35,7 @@ from loadvision.application.training_jobs import (
     GetTrainingJob,
     ListTrainingJobPage,
     ListTrainingJobs,
+    ReleaseTrainingJob,
     StartTraining,
 )
 from loadvision.domain.model_version import ModelVersionId
@@ -163,6 +164,7 @@ def build_service_app(settings: Settings, engine: Engine) -> FastAPI:
         rollback_model=RollbackModel(uow_factory=uow_factory, activate=services.activate_model),
         reload_model=follower.check,
         start_training=services.start_training,
+        release_training_job=ReleaseTrainingJob(uow_factory=uow_factory, clock=utc_now),
         training_job_page=ListTrainingJobPage(uow_factory=uow_factory),
         count_training_labels=CountTrainingLabels(uow_factory=uow_factory),
         worker_online=functools.partial(worker_connected, engine),

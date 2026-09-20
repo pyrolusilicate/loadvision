@@ -28,6 +28,7 @@ from loadvision.application.training_jobs import (
     GetTrainingJob,
     ListTrainingJobPage,
     ListTrainingJobs,
+    ReleaseTrainingJob,
     StartTraining,
 )
 from loadvision.errors import ERROR_CATALOG, ErrorCode
@@ -152,6 +153,7 @@ def make_service(
         ),
         reload_model=reloads,
         start_training=services.start_training,
+        release_training_job=ReleaseTrainingJob(uow_factory=store.unit_of_work, clock=clock),
         training_job_page=ListTrainingJobPage(uow_factory=store.unit_of_work),
         count_training_labels=CountTrainingLabels(uow_factory=store.unit_of_work),
         worker_online=worker,

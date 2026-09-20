@@ -6,23 +6,29 @@
   {% if signals.ood_score is not none %}<dt>Непохожесть на обучающие</dt><dd>{{ '%.3f'|format(signals.ood_score) }}</dd>{% endif %}
   {% if signals.brightness is not none %}<dt>Яркость кадра</dt><dd>{{ '%.0f'|format(signals.brightness) }} из 255</dd>{% endif %}
 {% endmacro %}
+{# A frame the model refused holds no truck body, so there is nothing to draw a map of. #}
+{% set maps = heatmaps and not unreadable %}
+{% set map = view if maps else '' %}
 <div class="pair">
   <figure class="photo">
-    {% if view %}
-    <img src="{{ ui }}/photos/{{ a.image_sha256 }}/heatmap?kind={{ view }}" alt="Карта «{{ view_names[view] }}» для фото перевозки {{ a.shipment_id.value }}">
-    {% else %}
-    <img src="{{ ui }}/photos/{{ a.image_sha256 }}" alt="Фото перевозки {{ a.shipment_id.value }}">
-    {% endif %}
-    {% if heatmaps %}
+    <div class="loading">
+      <span>{% if map %}Карта считается, это займёт секунду{% else %}Фото загружается{% endif %}</span>
+      {% if map %}
+      <img src="{{ ui }}/photos/{{ a.image_sha256 }}/heatmap?kind={{ map }}" alt="Карта «{{ view_names[map] }}» для фото перевозки {{ a.shipment_id.value }}">
+      {% else %}
+      <img src="{{ ui }}/photos/{{ a.image_sha256 }}" alt="Фото перевозки {{ a.shipment_id.value }}">
+      {% endif %}
+    </div>
+    {% if maps %}
     <nav class="views">
       {% for value, name in view_names.items() %}
-      <a href="?view={{ value|urlencode }}"{% if value == view %} aria-current="true"{% endif %}>{{ name }}</a>
+      <a href="?view={{ value|urlencode }}"{% if value == map %} aria-current="true"{% endif %}>{{ name }}</a>
       {% endfor %}
     </nav>
     {% endif %}
     <figcaption class="muted">
-      {% if view %}Карта показана на кадре, который видит модель: {{ view_notes[view] }}
-      {%- if view == 'contribution' and a.load_pct.value >= contribution_ceiling %} На полном кузове она говорит мало: модель упирается в потолок. Смотрите «Внимание».{% endif %}
+      {% if map %}{{ view_notes[map] }}
+      {%- if map == 'contribution' and a.load_pct.value >= contribution_ceiling %} На полном кузове она говорит мало: модель упирается в потолок. Смотрите «Внимание».{% endif %}
       {% else %}{{ details.image.width }}×{{ details.image.height }} · {{ details.image.media_type.value }}{% endif %}
     </figcaption>
   </figure>

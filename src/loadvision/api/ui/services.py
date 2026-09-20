@@ -17,6 +17,7 @@ from loadvision.application.submit_label import MarkReadable, SubmitLabel
 from loadvision.application.training_jobs import (
     CountTrainingLabels,
     ListTrainingJobPage,
+    ReleaseTrainingJob,
     StartTraining,
 )
 from loadvision.domain.model_version import ModelVersionId
@@ -45,6 +46,7 @@ class UiServices:
         rollback_model: Brings back the previous version.
         reload_model: Starts loading the active version now rather than at the next check.
         start_training: Queues a retraining.
+        release_training_job: Ends a job left running by a worker that is gone.
         training_job_page: One page of retrainings, newest first.
         count_training_labels: Confirmed loads a retraining would learn from.
         worker_online: Whether a worker is running to take a retraining from the queue.
@@ -68,6 +70,7 @@ class UiServices:
     rollback_model: RollbackModel
     reload_model: Callable[[], object]
     start_training: StartTraining
+    release_training_job: ReleaseTrainingJob
     training_job_page: ListTrainingJobPage
     count_training_labels: CountTrainingLabels
     worker_online: Callable[[], bool]

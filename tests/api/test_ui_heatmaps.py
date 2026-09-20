@@ -67,6 +67,36 @@ def test_the_contribution_map_says_when_it_has_little_to_say(drawing: Service) -
 
 
 @pytest.mark.api
+@pytest.mark.parametrize("path", [ASSESSMENT, f"{ASSESSMENT}?view=attention"])
+def test_a_frame_the_model_refused_gets_no_maps(path: str) -> None:
+    # There is no truck body in the frame, so there is nothing to show a map of.
+    refused = make_service(FakePredictor(ood_score=0.9), heatmaps=True)
+    sign_in(refused)
+    post(refused.client, request_body())
+
+    card = page(get(refused, path))
+
+    assert card.xpath("//nav[@class='views']") == []
+    assert card.xpath("//figure[@class='photo']//img/@src") == [f"/ui/photos/{PHOTO_SHA256}"]
+    assert refused.heatmaps is not None
+    assert refused.heatmaps.asked == []
+
+
+@pytest.mark.api
+@pytest.mark.parametrize(
+    ("path", "waiting"),
+    [(ASSESSMENT, "Фото загружается"), (f"{ASSESSMENT}?view=attention", "Карта считается")],
+)
+def test_the_place_of_the_picture_says_what_is_coming(
+    drawing: Service, path: str, waiting: str
+) -> None:
+    card = page(get(drawing, path))
+
+    # The label waits behind the picture, so an empty box never stands there without a word.
+    assert card.xpath("//div[@class='loading']/span/text()")[0].startswith(waiting)
+
+
+@pytest.mark.api
 def test_a_view_the_service_does_not_know_falls_back_to_the_photo(drawing: Service) -> None:
     card = page(get(drawing, f"{ASSESSMENT}?view=occlusion"))
 

@@ -99,6 +99,11 @@ input[type="file"] { font: inherit; padding: 10px; border: 1px dashed var(--line
 .note > * + * { margin-top: 6px; }
 .note dt { color: inherit; opacity: 0.75; }
 
+/* A map takes a second to draw; the label waits in its place and the picture covers it. */
+.loading { display: grid; place-items: center; min-height: 240px; }
+.loading > * { grid-area: 1 / 1; }
+.loading span { color: var(--muted); font-size: 14px; }
+
 /* Switch above the photo: the photo itself or one of the maps of what the model saw. */
 .views { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
 .views a {
