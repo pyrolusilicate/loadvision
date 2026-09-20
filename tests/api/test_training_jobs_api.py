@@ -56,8 +56,16 @@ def test_a_queued_job_comes_back_with_its_id(service: Service) -> None:
 
 @pytest.mark.api
 def test_the_mode_of_the_request_is_used(service: Service) -> None:
-    root = document(post(service, request_body("full")))
-    assert root.get("mode") == "full"
+    root = document(post(service, request_body("fast")))
+    assert root.get("mode") == "fast"
+
+
+@pytest.mark.api
+def test_a_mode_this_service_cannot_run_is_refused_at_once(service: Service) -> None:
+    # The schema knows `full`, this service does not run it: better a refusal than a job that
+    # waits, gets taken and fails minutes later.
+    assert_error(post(service, request_body("full")), ErrorCode.TRAINING_MODE_NOT_SUPPORTED)
+    assert service.store.training_jobs == {}
 
 
 @pytest.mark.api

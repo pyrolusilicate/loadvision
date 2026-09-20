@@ -39,8 +39,15 @@ class StartTraining:
             The queued job.
 
         Raises:
-            LoadvisionError: `TRAINING_ALREADY_RUNNING` if a job is queued or running.
+            LoadvisionError: `TRAINING_MODE_NOT_SUPPORTED` for any mode but `FAST`;
+                `TRAINING_ALREADY_RUNNING` if a job is queued or running.
         """
+        # The queue has one runner and it retrains heads on frozen encoders. A job of another
+        # mode would wait, get taken and fail minutes later; a refusal here says it at once.
+        if mode is not TrainingMode.FAST:
+            raise LoadvisionError(
+                ErrorCode.TRAINING_MODE_NOT_SUPPORTED, f"the queue runs {TrainingMode.FAST} only"
+            )
         with self.uow_factory() as uow:
             unfinished = uow.training_jobs.find_unfinished()
             if unfinished is not None:
