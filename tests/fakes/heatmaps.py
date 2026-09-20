@@ -8,13 +8,13 @@ from loadvision.application.ports import ExplanationKind
 from loadvision.domain.model_version import ModelVersionId
 
 
-def _png() -> bytes:
+def _picture() -> bytes:
     buffer = io.BytesIO()
-    Image.new("RGB", (2, 2), (200, 40, 40)).save(buffer, "PNG")
+    Image.new("RGB", (8, 8), (200, 40, 40)).save(buffer, "JPEG")
     return buffer.getvalue()
 
 
-PNG = _png()
+PICTURE = _picture()
 
 
 class FakeHeatmaps:
@@ -25,4 +25,4 @@ class FakeHeatmaps:
 
     def __call__(self, sha256: str, kind: ExplanationKind, version: ModelVersionId) -> bytes:
         self.asked.append((sha256, kind, version))
-        return PNG
+        return PICTURE

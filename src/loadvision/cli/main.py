@@ -4,7 +4,19 @@ import argparse
 import logging
 from collections.abc import Sequence
 
-from loadvision.cli.commands import data, eval, features, jobs, model, operators, predict, train
+from loadvision.cli.commands import (
+    bench,
+    blend,
+    data,
+    eval,
+    features,
+    finetune,
+    jobs,
+    model,
+    operators,
+    predict,
+    train,
+)
 from loadvision.cli.errors import CommandError
 from loadvision.errors import LoadvisionError
 
@@ -31,6 +43,9 @@ def main(argv: Sequence[str] | None = None) -> int:
     features.add_commands(groups)
     eval.add_commands(groups)
     train.add_commands(groups)
+    finetune.add_commands(groups)
+    blend.add_commands(groups)
+    bench.add_commands(groups)
     model.add_commands(groups)
     jobs.add_commands(groups)
     operators.add_commands(groups)

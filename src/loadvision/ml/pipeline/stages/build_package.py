@@ -42,7 +42,7 @@ from loadvision.ml.pipeline.stages.train_folds import OOF_FILE, Chain, read_fact
 from loadvision.ml.pipeline.stages.train_folds import Member as MemberSpec
 from loadvision.ml.training.embedding_cache import embed_samples
 from loadvision.ml.training.head_trainer import fit_head
-from loadvision.ml.training.postprocess_fit import fit_chain
+from loadvision.ml.training.postprocess_fit import FittedChain, fit_chain
 from loadvision.settings import GIT_COMMIT_ENV
 
 PACKAGE_DIR: Final = "package"
@@ -52,6 +52,10 @@ LICENSES_DIR: Final = Path("licenses")
 _NOTICE_FILE: Final = "NOTICE.md"
 
 # Averaging ten neighbours: one nearest photo is noisy, a hundred washes the score out.
+# Where the unusual-scene threshold sits among the training scores. Measured on v2 and 1023
+# dataset photos: at 99 the flag fired on 13 ordinary photos of trucks, at 99.9 on one, while
+# the frames a person calls broken score three times the threshold and are flagged either way.
+OOD_PERCENTILE: Final = 99.9
 _OOD_NEIGHBOURS: Final = 10
 
 _PERCENT: Final = 100.0
@@ -84,10 +88,7 @@ class BuildPackage:
     licenses_dir: Path = LICENSES_DIR
     device: str = "cpu"
     now: datetime | None = None
-    # Measured on v2 and 1023 dataset photos: at 99 the flag fired on 13 ordinary photos of
-    # trucks, at 99.9 on one, while the frames a person calls broken score three times the
-    # threshold and are flagged either way.
-    ood_percentile: float = 99.9
+    ood_percentile: float = OOD_PERCENTILE
 
     @property
     def name(self) -> str:
@@ -217,86 +218,13 @@ class BuildPackage:
     def _ood(
         self, root: Path, pooled: tuple[int, str, NDArray[np.float64]] | None
     ) -> dict[str, Any]:
-        """Writes the training embeddings a photo is compared against, with their threshold.
-
-        The threshold is a percentile of the training scores themselves, so the service flags
-        the scenes that are unusual for this very model rather than for a number someone chose.
-        The percentile is high on purpose: a flag on an ordinary photo of a truck costs the
-        operator a pointless check, and the frames worth flagging are far above any of them.
-        """
         if pooled is None:
             return {}
         index, backbone, embeddings = pooled
-        reference = OodReference.build(backbone, embeddings)
-        path = root / "ood" / "reference.npz"
-        reference.save(path)
-        scores = np.array(
-            [reference.score(row, _OOD_NEIGHBOURS) for row in embeddings], dtype=np.float64
-        )
-        return {
-            "ood": {
-                "member": index,
-                "k": _OOD_NEIGHBOURS,
-                "threshold": float(np.percentile(scores, self.ood_percentile)),
-                "reference": str(path.relative_to(root)),
-            }
-        }
+        return write_ood(root, index, backbone, embeddings, self.ood_percentile)
 
     def _licenses(self, root: Path, backbones: Sequence[Backbone]) -> list[str]:
-        """Copies the licence of every checkpoint into the package and writes the NOTICE.
-
-        The package carries the weights, so it has to carry their terms with them: Apache-2.0
-        asks for the licence text and the attribution to travel with any copy. A checkpoint
-        whose licence has no text here stops the build instead of shipping unlicensed weights.
-
-        Args:
-            root: Package folder.
-            backbones: Loaded encoders of the members, in member order.
-
-        Returns:
-            Package paths of the licence texts and the NOTICE, sorted.
-
-        Raises:
-            FileNotFoundError: If a licence named by the registry has no text in
-                `licenses_dir`.
-        """
-        checkpoints = {
-            backbone.spec.timm_name: backbone.spec
-            for backbone in sorted(backbones, key=lambda item: item.spec.timm_name)
-        }
-        folder = root / "licenses"
-        folder.mkdir(parents=True, exist_ok=True)
-        written: list[str] = []
-        for name in sorted({spec.license for spec in checkpoints.values()}):
-            source = self.licenses_dir / f"{name}.txt"
-            if not source.is_file():
-                raise FileNotFoundError(
-                    f"{source} is missing; a package may not ship weights under {name} "
-                    f"without their licence text"
-                )
-            shutil.copyfile(source, folder / f"{name}.txt")
-            written.append(f"licenses/{name}.txt")
-
-        lines = [
-            "# NOTICE",
-            "",
-            "Пакет несёт предобученные веса. Каждый чекпоинт остаётся под своей лицензией;",
-            "их тексты лежат рядом в этой же папке.",
-            "",
-        ]
-        for timm_name, spec in checkpoints.items():
-            lines += [
-                f"## {timm_name}",
-                "",
-                f"- происхождение: {spec.origin}",
-                f"- лицензия: {spec.license}, текст в `licenses/{spec.license}.txt`",
-                f"- источник: https://huggingface.co/timm/{timm_name}",
-                "- веса не изменялись",
-                "",
-            ]
-        (folder / _NOTICE_FILE).write_text("\n".join(lines), encoding="utf-8")
-        written.append(f"licenses/{_NOTICE_FILE}")
-        return sorted(written)
+        return write_licenses(root, backbones, self.licenses_dir)
 
     def _fitted_steps(
         self,
@@ -308,38 +236,10 @@ class BuildPackage:
     ) -> list[PostprocessStep]:
         if not self.chain:
             return []
-        fitted = fit_chain(self.chain, raw, labels, read_facts(ctx, train))
-        steps: list[PostprocessStep] = []
-        for index, step in enumerate(fitted.steps):
-            path = step.save_curves_to(root / "postprocess" / f"step_{index}.npz")
-            steps.append(
-                PostprocessStep.model_validate(
-                    {
-                        "name": step.name,
-                        "params": step.params,
-                        "file": None if path is None else str(path.relative_to(root)),
-                    }
-                )
-            )
-        return steps
+        return write_steps(root, fit_chain(self.chain, raw, labels, read_facts(ctx, train)))
 
     def _cv(self, ctx: RunContext) -> dict[str, Any]:
-        path = ctx.run_dir / OOF_FILE
-        with path.open(newline="", encoding="utf-8") as file:
-            rows = list(csv.DictReader(file))
-        labels = np.array([float(row["label"]) for row in rows])
-        predicted = np.array([float(row["predicted"]) for row in rows])
-        metrics = summary(labels, predicted, [int(row["fold"]) for row in rows])
-        return {
-            "cv": CvMetrics(
-                mae=metrics["mae"],
-                within_10=metrics["within_10"] * _PERCENT,
-                mae_by_range=mae_by_range(labels, predicted),
-            ).model_dump(mode="json"),
-            "folds": FoldsRef(
-                file=str(self.folds_file), sha256=file_sha256(self.folds_file)
-            ).model_dump(mode="json"),
-        }
+        return cv_block(ctx.run_dir / OOF_FILE, self.folds_file)
 
 
 def _member(backbone: Backbone, head: Path, weights: Path, weight: float) -> Member:
@@ -380,3 +280,156 @@ def _git_commit() -> str:
 
 def _data_hash(ctx: RunContext) -> str:
     return file_sha256(ctx.run_dir / DATASET_TABLE)
+
+
+def write_ood(
+    root: Path, member: int, backbone: str, embeddings: NDArray[np.float64], percentile: float
+) -> dict[str, Any]:
+    """Writes the training embeddings a photo is compared against, with their threshold.
+
+    The threshold is a percentile of the training scores themselves, so the service flags the
+    scenes that are unusual for this very model rather than for a number someone chose. The
+    percentile is high on purpose: a flag on an ordinary photo of a truck costs the operator a
+    pointless check, and the frames worth flagging are far above any of them.
+
+    Args:
+        root: Package folder.
+        member: Index of the member whose embeddings these are.
+        backbone: Registry key of that member's encoder.
+        embeddings: One row per training photo, from that very encoder.
+        percentile: Where the unusual-scene threshold sits among the training scores.
+
+    Returns:
+        The `ood` block of the manifest.
+    """
+    reference = OodReference.build(backbone, embeddings)
+    path = root / "ood" / "reference.npz"
+    reference.save(path)
+    scores = np.array([reference.score(row, _OOD_NEIGHBOURS) for row in embeddings])
+    return {
+        "ood": {
+            "member": member,
+            "k": _OOD_NEIGHBOURS,
+            "threshold": float(np.percentile(scores, percentile)),
+            "reference": str(path.relative_to(root)),
+        }
+    }
+
+
+def write_licenses(
+    root: Path, backbones: Sequence[Backbone], licenses_dir: Path, *, fine_tuned: bool = False
+) -> list[str]:
+    """Copies the licence of every checkpoint into the package and writes the NOTICE.
+
+    The package carries the weights, so it has to carry their terms with them: Apache-2.0
+    asks for the licence text and the attribution to travel with any copy, and for a note
+    when the weights were changed. A checkpoint whose licence has no text stops the build
+    instead of shipping unlicensed weights.
+
+    Args:
+        root: Package folder.
+        backbones: Loaded encoders of the members, in member order.
+        licenses_dir: Folder holding one text per SPDX identifier the registry names.
+        fine_tuned: Whether the package carries weights fine-tuned by the team rather than
+            the untouched checkpoints.
+
+    Returns:
+        Package paths of the licence texts and the NOTICE, sorted.
+
+    Raises:
+        FileNotFoundError: If a licence named by the registry has no text in `licenses_dir`.
+    """
+    checkpoints = {
+        backbone.spec.timm_name: backbone.spec
+        for backbone in sorted(backbones, key=lambda item: item.spec.timm_name)
+    }
+    folder = root / "licenses"
+    folder.mkdir(parents=True, exist_ok=True)
+    written: list[str] = []
+    for name in sorted({spec.license for spec in checkpoints.values()}):
+        source = licenses_dir / f"{name}.txt"
+        if not source.is_file():
+            raise FileNotFoundError(
+                f"{source} is missing; a package may not ship weights under {name} "
+                f"without their licence text"
+            )
+        shutil.copyfile(source, folder / f"{name}.txt")
+        written.append(f"licenses/{name}.txt")
+
+    change = (
+        "- веса дообучены командой Loadvision на размеченных фото кузовов: изменены все слои"
+        if fine_tuned
+        else "- веса не изменялись"
+    )
+    lines = [
+        "# NOTICE",
+        "",
+        "Пакет несёт веса предобученных моделей. Каждый чекпоинт остаётся под своей лицензией;",
+        "их тексты лежат рядом в этой же папке.",
+        "",
+    ]
+    for timm_name, spec in checkpoints.items():
+        lines += [
+            f"## {timm_name}",
+            "",
+            f"- происхождение: {spec.origin}",
+            f"- лицензия: {spec.license}, текст в `licenses/{spec.license}.txt`",
+            f"- источник: https://huggingface.co/timm/{timm_name}",
+            change,
+            "",
+        ]
+    (folder / _NOTICE_FILE).write_text("\n".join(lines), encoding="utf-8")
+    written.append(f"licenses/{_NOTICE_FILE}")
+    return sorted(written)
+
+
+def write_steps(root: Path, fitted: FittedChain) -> list[PostprocessStep]:
+    """Writes the curves of a fitted chain into the package and describes its steps.
+
+    Args:
+        root: Package folder.
+        fitted: Chain fitted on the out-of-fold predictions.
+
+    Returns:
+        The `postprocess` entries of the manifest, in chain order.
+    """
+    steps: list[PostprocessStep] = []
+    for index, step in enumerate(fitted.steps):
+        path = step.save_curves_to(root / "postprocess" / f"step_{index}.npz")
+        steps.append(
+            PostprocessStep.model_validate(
+                {
+                    "name": step.name,
+                    "params": step.params,
+                    "file": None if path is None else str(path.relative_to(root)),
+                }
+            )
+        )
+    return steps
+
+
+def cv_block(oof: Path, folds_file: Path) -> dict[str, Any]:
+    """Out-of-fold metrics of a package and the folds they were measured on.
+
+    Args:
+        oof: `oof.csv` the package was measured by.
+        folds_file: Folds file of that measurement.
+
+    Returns:
+        The `cv` and `folds` blocks of the manifest.
+    """
+    with oof.open(newline="", encoding="utf-8") as file:
+        rows = list(csv.DictReader(file))
+    labels = np.array([float(row["label"]) for row in rows])
+    predicted = np.array([float(row["predicted"]) for row in rows])
+    metrics = summary(labels, predicted, [int(row["fold"]) for row in rows])
+    return {
+        "cv": CvMetrics(
+            mae=metrics["mae"],
+            within_10=metrics["within_10"] * _PERCENT,
+            mae_by_range=mae_by_range(labels, predicted),
+        ).model_dump(mode="json"),
+        "folds": FoldsRef(file=str(folds_file), sha256=file_sha256(folds_file)).model_dump(
+            mode="json"
+        ),
+    }

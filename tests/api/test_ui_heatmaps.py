@@ -6,7 +6,7 @@ from loadvision.application.ports import ExplanationKind
 from loadvision.domain.model_version import ModelVersionId
 from tests.api.service import PHOTO_SHA256, Service, make_service, post, request_body
 from tests.api.ui_pages import get, page, sign_in, text_of
-from tests.fakes.heatmaps import PNG
+from tests.fakes.heatmaps import PICTURE
 from tests.fakes.predictor import FakePredictor
 
 ASSESSMENT = f"/ui/assessments/{UUID(int=1)}"
@@ -81,8 +81,8 @@ def test_the_map_is_drawn_by_the_model_that_answers_now(
     response = drawing.client.get(f"{MAP}?kind={kind.value}")
 
     assert response.status_code == 200
-    assert response.headers["content-type"] == "image/png"
-    assert response.content == PNG
+    assert response.headers["content-type"] == "image/jpeg"
+    assert response.content == PICTURE
     assert drawing.heatmaps is not None
     assert drawing.heatmaps.asked == [(PHOTO_SHA256, kind, ModelVersionId("fake-1"))]
 

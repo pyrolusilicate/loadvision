@@ -7,7 +7,7 @@ from loadvision.errors import ErrorCode, LoadvisionError
 from loadvision.imaging.prepared_image import MediaType, PreparedImage
 from loadvision.imaging.validator import ImageLimits, prepare_image
 from tests import image_files
-from tests.fakes.heatmaps import PNG
+from tests.fakes.heatmaps import PICTURE
 from tests.fakes.image_storage import InMemoryImageStorage
 
 LIMITS = ImageLimits(
@@ -31,7 +31,7 @@ class StubExplainer:
         self.images.append(image)
         if self.error is not None:
             raise self.error
-        return PNG
+        return PICTURE
 
 
 def use_case(storage: InMemoryImageStorage) -> ExplainPhoto:
@@ -50,9 +50,9 @@ def test_the_map_is_drawn_on_the_photo_as_the_model_sees_it() -> None:
     storage, sha256 = stored_photo()
     explainer = StubExplainer()
 
-    png = use_case(storage)(sha256, ExplanationKind.ATTENTION, explainer)
+    picture = use_case(storage)(sha256, ExplanationKind.ATTENTION, explainer)
 
-    assert png == PNG
+    assert picture == PICTURE
     # The same bytes the prediction was made on, decoded the same way.
     assert [image.sha256 for image in explainer.images] == [sha256]
 

@@ -4,13 +4,22 @@ The drawing itself lives in `ml/inference/explain.py`; this is the thin piece th
 shape the application asks for and names the model version the maps belong to.
 """
 
+import io
 from pathlib import Path
-from typing import Any
+from typing import Any, Final
+
+from PIL import Image
 
 from loadvision.application.ports import ExplanationKind, LoadExplainer
 from loadvision.domain.model_version import ModelVersionId
 from loadvision.imaging.prepared_image import PreparedImage
 from loadvision.ml.packaging.model_package import ModelPackage
+
+# A map is a photo with a coloured layer over it, and the pages scale it to the screen anyway.
+# Measured on a map of a 1440x1920 photo: PNG as drawn is 5352 KB, this is 538 KB and costs
+# 91 ms of re-encoding, which the store pays once.
+MAP_MAX_SIDE: Final = 1600
+MAP_QUALITY: Final = 85
 
 
 class PackageExplainer:
@@ -31,8 +40,17 @@ class PackageExplainer:
         return self._version
 
     def explain(self, image: PreparedImage, kind: ExplanationKind) -> bytes:
-        """Returns the photo with the map drawn over it, as PNG bytes."""
-        return bytes(self._explainer.picture(image, kind.value))
+        """Returns the photo with the map drawn over it, as JPEG bytes."""
+        return _for_a_page(bytes(self._explainer.picture(image, kind.value)))
+
+
+def _for_a_page(picture: bytes) -> bytes:
+    """Fits a drawn map into a size a browser is happy to download."""
+    with Image.open(io.BytesIO(picture)) as drawn:
+        drawn.thumbnail((MAP_MAX_SIDE, MAP_MAX_SIDE))
+        buffer = io.BytesIO()
+        drawn.convert("RGB").save(buffer, "JPEG", quality=MAP_QUALITY, progressive=True)
+    return buffer.getvalue()
 
 
 def load_explainer(models_dir: Path, device: str, version: ModelVersionId) -> LoadExplainer:
@@ -54,11 +72,7 @@ def load_explainer(models_dir: Path, device: str, version: ModelVersionId) -> Lo
     """
     # Imported here and not at the top: the module pulls in torch, and a service that draws no
     # maps must start without paying for it.
-    # The ignore goes away with the merge of the branch that brings `explain.py`; until then
-    # this build has no drawing, and a map request fails with MODEL_INFERENCE_FAILED.
-    from loadvision.ml.inference.explain import (  # pyright: ignore[reportMissingImports]
-        Explainer,
-    )
+    from loadvision.ml.inference.explain import Explainer
 
     package = ModelPackage.load(models_dir / version.value)
     return PackageExplainer(Explainer.from_package(package, device), package.version)

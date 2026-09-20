@@ -81,4 +81,4 @@ class HeatmapStore:
         if _SHA256_RE.fullmatch(sha256) is None:
             raise ValueError("sha256 must be 64 lowercase hex characters")
         folder = self._root / version.value / sha256[:_SHARD_CHARS]
-        return folder / f"{sha256}-{kind.value}.png"
+        return folder / f"{sha256}-{kind.value}.jpg"

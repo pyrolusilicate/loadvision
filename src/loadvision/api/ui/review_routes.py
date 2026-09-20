@@ -37,6 +37,7 @@ _SHA256_RE: Final = re.compile(SHA256_HEX_PATTERN)
 _PHOTO_CACHE: Final = "private, max-age=86400, immutable"
 # A map is redrawn when the model changes, so a browser keeps it for a minute, not a day.
 _MAP_CACHE: Final = "private, max-age=60"
+_MAP_TYPE: Final = "image/jpeg"
 _UNUSABLE_ACTION: Final = "unusable"
 _QUEUE: Final = f"{UI_PREFIX}/"
 # Filters and orders of the queue in the words of the page.
@@ -219,10 +220,10 @@ async def heatmap(
     predictor = services.model.current()
     if predictor is None:
         raise LoadvisionError(ErrorCode.MODEL_NOT_READY, services.model.failure)
-    png = await run_in_threadpool(services.draw_heatmap, sha256, kind, predictor.version)
+    picture = await run_in_threadpool(services.draw_heatmap, sha256, kind, predictor.version)
     # Not the long cache of a photo: a map belongs to a model version, and the address says
     # nothing about the version.
-    return Response(png, media_type="image/png", headers={"Cache-Control": _MAP_CACHE})
+    return Response(picture, media_type=_MAP_TYPE, headers={"Cache-Control": _MAP_CACHE})
 
 
 def _queue_params(*, status: ReviewStatus, order: AssessmentOrder) -> dict[str, str]:

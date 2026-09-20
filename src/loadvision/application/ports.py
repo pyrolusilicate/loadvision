@@ -75,14 +75,15 @@ class LoadExplainer(Protocol):
         ...
 
     def explain(self, image: PreparedImage, kind: ExplanationKind) -> bytes:
-        """Returns the photo with the map drawn over it, as PNG bytes.
+        """Returns the photo with the map drawn over it, as JPEG bytes.
 
         Args:
             image: Decoded photo, prepared the same way as for a prediction.
             kind: Which map to draw.
 
         Returns:
-            PNG bytes.
+            JPEG bytes: a map is a photo with a coloured layer over it, and PNG of a photo
+            weighs ten times as much.
 
         Raises:
             Exception: Any model failure; the use case reports it as MODEL_INFERENCE_FAILED.

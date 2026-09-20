@@ -2,7 +2,6 @@
 
 import argparse
 import logging
-from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -12,34 +11,15 @@ from numpy.typing import NDArray
 from loadvision.cli.dataset import train_samples
 from loadvision.cli.errors import CommandError
 from loadvision.cli.paths import embeddings_cache
-from loadvision.imaging.quality import aspect
+from loadvision.ml.data.facts import photo_facts
 from loadvision.ml.data.manifest import Sample
 from loadvision.ml.data.splits import Folds, read_folds
 from loadvision.ml.evaluation.ensemble import Member, ensemble_out_of_fold
-from loadvision.ml.pipeline.stages import DEFAULT_FOLDS
-from loadvision.ml.postprocess import ASPECT, Facts
-from loadvision.ml.training.embedding_cache import read_image
+from loadvision.ml.evaluation.postprocess_search import cross_fitted
+from loadvision.ml.pipeline.stages import DEFAULT_CHAIN, DEFAULT_FOLDS
+from loadvision.ml.postprocess import Facts
 
 _logger = logging.getLogger(__name__)
-
-
-def photo_facts(samples: Sequence[Sample]) -> Facts:
-    """Reads what conditional postprocessing steps look at, in the order of `samples`.
-
-    The pipeline takes these from the `manifest.csv` of its run; a sweep has no run, so it
-    decodes the photos itself. Both go through the same decoder and the same definition of
-    proportions, so a chain measured here behaves the same way inside the package.
-
-    Args:
-        samples: Photos, in prediction order.
-
-    Returns:
-        Fact name to one number per photo.
-
-    Raises:
-        LoadvisionError: If a photo cannot be decoded.
-    """
-    return {ASPECT: np.array([aspect(read_image(s.path)) for s in samples], dtype=np.float64)}
 
 
 @dataclass(frozen=True, slots=True)
@@ -80,15 +60,20 @@ def members_of(args: argparse.Namespace, default: tuple[str, ...]) -> list[Membe
         raise CommandError(str(error)) from error
 
 
-def dataset_of(data_dir: Path) -> Dataset:
-    """Reads the labelled split and the canonical folds.
+def dataset_of(data_dir: Path, folds_file: Path = DEFAULT_FOLDS) -> Dataset:
+    """Reads the labelled split and a folds file, the canonical one by default.
+
+    Args:
+        data_dir: Dataset root.
+        folds_file: Folds to measure on; the seed files serve to see how a result moves when
+            only the split changes.
 
     Raises:
         CommandError: If the dataset is broken.
         FileNotFoundError: If a dataset file or the folds file is missing.
     """
     samples = train_samples(data_dir)
-    folds = read_folds(DEFAULT_FOLDS)
+    folds = read_folds(folds_file)
     return Dataset(
         samples=samples,
         labels=np.array([sample.label for sample in samples], dtype=np.float64),
@@ -116,3 +101,27 @@ def ensemble_predictions(
     for part in result.members:
         _logger.info("%s: oof mae %.3f", part.member, part.mae)
     return result.predictions
+
+
+def calibrated(
+    data: Dataset, raw: NDArray[np.float64], facts: Facts | None = None
+) -> NDArray[np.float64] | None:
+    """Calibrates out-of-fold predictions with the shipped chain, fitted fold by fold.
+
+    A curve never sees the photos it is judged on. If it cannot be fitted, for example
+    because a collapsed model answers nearly the same number everywhere, the run keeps its raw
+    predictions instead of failing: on a rented GPU the training already paid for is the
+    expensive part. `facts` saves decoding every photo again when many blends are scored.
+    """
+    chain = [(name, dict(params)) for name, params in DEFAULT_CHAIN]
+    try:
+        return cross_fitted(
+            chain,
+            raw,
+            data.labels,
+            data.numbers,
+            photo_facts(data.samples) if facts is None else facts,
+        )
+    except ValueError as error:
+        _logger.warning("calibration skipped, raw predictions kept: %s", error)
+        return None

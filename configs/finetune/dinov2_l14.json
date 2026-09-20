@@ -1,0 +1,13 @@
+{
+  "encoder": "dinov2_vitl14",
+  "epochs": 10,
+  "batch_size": 8,
+  "lr": 5e-05,
+  "head_lr_scale": 10.0,
+  "layer_decay": 0.8,
+  "weight_decay": 0.05,
+  "warmup_epochs": 1.0,
+  "flip": true,
+  "seed": 0,
+  "workers": 8
+}
