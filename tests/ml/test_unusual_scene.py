@@ -8,8 +8,9 @@ import pytest
 
 from loadvision.application.ports import Prediction
 from loadvision.domain.assessment import ReviewReason
+from loadvision.imaging.prepared_image import PreparedImage
 from loadvision.ml.inference.ood import OodReference
-from loadvision.ml.inference.predictor import PackagePredictor
+from loadvision.ml.inference.predictor import PackagePredictor, _build_id
 from loadvision.ml.inference.unusable_frames import frames_fingerprint
 from loadvision.ml.models import backbones
 from tests.builders import make_image
@@ -30,6 +31,15 @@ def offline(monkeypatch: pytest.MonkeyPatch) -> None:
 
 def predict(root: Path, threshold: float, cache: Path | None = None) -> Prediction:
     """Predicts one photo with a package of the tiny encoder and the given OOD threshold."""
+    predictor, image = built(root, threshold, cache)
+    [prediction] = predictor.predict([image])
+    return prediction
+
+
+def built(
+    root: Path, threshold: float, cache: Path | None = None
+) -> tuple[PackagePredictor, PreparedImage]:
+    """Builds a package of the tiny encoder and returns its predictor with one photo to try."""
     write_checkpoint(root / WEIGHTS)
     probe = backbones.load_backbone(BACKBONE, "cpu", root / WEIGHTS)
     np.savez(
@@ -52,8 +62,7 @@ def predict(root: Path, threshold: float, cache: Path | None = None) -> Predicti
         members=[member],
         ood={"member": 0, "k": 1, "threshold": threshold, "reference": REFERENCE},
     )
-    [prediction] = PackagePredictor(package, scale_cache=cache).predict([make_image()])
-    return prediction
+    return PackagePredictor(package, scale_cache=cache), make_image()
 
 
 def measured_score(tmp_path: Path) -> float:
@@ -100,7 +109,27 @@ def test_the_package_measures_where_empty_frames_land_on_its_own_scale(tmp_path:
 
 
 @pytest.mark.ml
-def test_the_measured_scale_is_kept_and_read_back(tmp_path: Path) -> None:
+def test_the_score_alone_is_the_score_of_a_whole_prediction(tmp_path: Path) -> None:
+    """Tools walk folders of photos with the short path; it must not answer differently."""
+    predictor, image = built(tmp_path / "alone", NEVER)
+
+    [prediction] = predictor.predict([image])
+
+    assert prediction.ood_score is not None
+    assert predictor.ood_score(image) == prediction.ood_score
+
+
+@pytest.mark.ml
+def test_the_band_is_the_two_ends_the_package_measures(tmp_path: Path) -> None:
+    predictor, image = built(tmp_path / "band-ends", NEVER)
+
+    [prediction] = predictor.predict([image])
+
+    assert predictor.band == (prediction.ood_threshold, prediction.ood_unusable)
+
+
+@pytest.mark.ml
+def test_the_measured_scale_is_kept(tmp_path: Path) -> None:
     """Measuring costs one prediction per frame; a restart must not pay for it again."""
     cache = tmp_path / "scale" / "v1.scale.json"
 
@@ -109,6 +138,20 @@ def test_the_measured_scale_is_kept_and_read_back(tmp_path: Path) -> None:
     stored = json.loads(cache.read_text(encoding="utf-8"))
     assert stored["unusable"] == first.ood_unusable
     assert stored["frames"] == frames_fingerprint()
+    assert stored["build"] == _build_id("cpu")
+
+
+@pytest.mark.ml
+def test_a_kept_scale_is_read_back(tmp_path: Path) -> None:
+    """The number the service uses comes from the file, not from a second measurement."""
+    cache = tmp_path / "v1.scale.json"
+    predict(tmp_path / "keep", NEVER, cache=cache)
+    stored = json.loads(cache.read_text(encoding="utf-8"))
+    # A number no measurement produces: the frames land where they land, never a metre further.
+    stored["unusable"] += 1.0
+    cache.write_text(json.dumps(stored), encoding="utf-8")
+
+    assert predict(tmp_path / "again", NEVER, cache=cache).ood_unusable == stored["unusable"]
 
 
 @pytest.mark.ml
@@ -116,7 +159,14 @@ def test_a_scale_measured_with_other_frames_is_not_reused(tmp_path: Path) -> Non
     """The stored number is only worth keeping while the frames behind it are the same."""
     cache = tmp_path / "v1.scale.json"
     cache.write_text(
-        json.dumps({"version": "v1", "frames": "not-our-frames", "unusable": 0.5}),
+        json.dumps(
+            {
+                "version": "v1",
+                "frames": "not-our-frames",
+                "build": _build_id("cpu"),
+                "unusable": 0.5,
+            }
+        ),
         encoding="utf-8",
     )
 
@@ -124,6 +174,34 @@ def test_a_scale_measured_with_other_frames_is_not_reused(tmp_path: Path) -> Non
 
     assert prediction.ood_unusable != 0.5
     assert json.loads(cache.read_text(encoding="utf-8"))["frames"] == frames_fingerprint()
+
+
+@pytest.mark.ml
+def test_a_scale_measured_on_another_build_is_not_reused(tmp_path: Path) -> None:
+    """The same frames through the same weights land elsewhere on another torch build."""
+    cache = tmp_path / "v1.scale.json"
+    cache.write_text(
+        json.dumps(
+            {
+                "version": "v1",
+                "frames": frames_fingerprint(),
+                "build": "cuda torch-2.4.0+cu121 Linux-x86_64",
+                "unusable": 0.5,
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    prediction = predict(tmp_path / "elsewhere", NEVER, cache=cache)
+
+    assert prediction.ood_unusable != 0.5
+    assert json.loads(cache.read_text(encoding="utf-8"))["build"] == _build_id("cpu")
+
+
+@pytest.mark.ml
+def test_the_build_tells_the_devices_apart() -> None:
+    """A package measured on the processor says nothing about the same package on the card."""
+    assert _build_id("cpu") != _build_id("cuda")
 
 
 @pytest.mark.ml
