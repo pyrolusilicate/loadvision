@@ -1,5 +1,7 @@
 """LoadPredictor implementation backed by a model package."""
 
+import json
+import logging
 from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
@@ -16,10 +18,13 @@ from loadvision.imaging import crops
 from loadvision.imaging.prepared_image import MediaType, PreparedImage
 from loadvision.imaging.preprocessing import preprocess
 from loadvision.ml.inference.ood import OodReference
+from loadvision.ml.inference.unusable_frames import frames_fingerprint, unusable_frames
 from loadvision.ml.packaging.baseline_package import BASELINE_BACKBONE
 from loadvision.ml.packaging.manifest import Member, Runtime
 from loadvision.ml.packaging.model_package import ModelPackage, ModelPackageError
 from loadvision.ml.postprocess import ASPECT, Applier, load_curves, make_chain
+
+_logger = logging.getLogger(__name__)
 
 _HEAD_KEYS: Final = frozenset({"mean", "scale", "weights", "intercept"})
 
@@ -139,6 +144,8 @@ class PackagePredictor:
     Args:
         package: Verified model package.
         device: Torch device for members with the torch runtime.
+        scale_cache: File the measured scale of this package is kept in, so a restart does
+            not pay for it again; None measures it every time.
 
     Raises:
         ModelPackageError: If a member needs a runtime or backbone that is not supported, its
@@ -148,7 +155,9 @@ class PackagePredictor:
             not on the first request.
     """
 
-    def __init__(self, package: ModelPackage, device: str = "cpu") -> None:
+    def __init__(
+        self, package: ModelPackage, device: str = "cpu", scale_cache: Path | None = None
+    ) -> None:
         self._package = package
         self._device = device
         self._members = tuple(
@@ -163,6 +172,7 @@ class PackagePredictor:
         self._depth = self._load_depth(package)
         self._ood = self._load_ood(package)
         self._check_on_blank_photo()
+        self._unusable = self._scale(scale_cache)
 
     def _load_encoder(self, member: Member) -> object | None:
         if member.runtime is Runtime.NUMPY:
@@ -338,12 +348,66 @@ class PackagePredictor:
             )
         spread = max(values) - min(values) if len(values) > 1 else None
         ood_score = self._ood_score(computed)
+        ood = self._package.manifest.ood
         return Prediction(
             load_pct=LoadPercent(_clip(corrected)),
             uncertainty=spread,
             ood_score=ood_score,
+            # The score alone says nothing: the caller compares it with the scale of this
+            # package, not with a number of its own.
+            ood_threshold=None if ood is None or ood_score is None else ood.threshold,
+            ood_unusable=None if ood_score is None else self._unusable,
             review_reasons=self._review_reasons(ood_score),
         )
+
+    def _scale(self, cache: Path | None) -> float | None:
+        """Returns the measured scale of this package, from the cache when it is still valid.
+
+        The measurement is the same every time: the same frames through the same weights. What
+        makes a stored number stale is a different package or a different set of frames, and
+        both are named in the file.
+
+        Args:
+            cache: File to read and write, or None to measure without keeping the result.
+
+        Returns:
+            The distance at which empty frames land, or None when the package measures none.
+        """
+        frames = frames_fingerprint()
+        stored = _read_scale(cache) if cache is not None else None
+        if stored is not None and stored.get("frames") == frames:
+            measured = stored.get("unusable")
+            if isinstance(measured, int | float):
+                _logger.info("scale of %s read from %s", self._package.manifest.version, cache)
+                return float(measured)
+        measured = self._measure_unusable()
+        if cache is not None and measured is not None:
+            _write_scale(cache, self._package.manifest.version, frames, measured)
+        return measured
+
+    def _measure_unusable(self) -> float | None:
+        """Returns where frames holding nothing land on the scale of this package.
+
+        Costs one prediction per frame, once, when the package loads. Without it the caller
+        would have only the threshold, which says where the training photos end but nothing
+        about where a grey wall or noise begins.
+
+        Returns:
+            The smallest distance the empty frames reach, or None when the package measures
+            no distances at all.
+        """
+        if self._ood is None:
+            return None
+        # The distance only, not a whole prediction: the head, the ensemble average and the
+        # postprocessing say nothing about where a frame sits, and this runs at load time.
+        by_key = dict(enumerate(self._members))
+        scores = [self._ood_score(self._features(by_key, frame)) for frame in unusable_frames()]
+        measured = [score for score in scores if score is not None]
+        if not measured:
+            return None
+        floor = min(measured)
+        _logger.info("frames with nothing in them start at %.4f on this package", floor)
+        return floor
 
     def _ood_score(
         self, computed: dict[int, tuple[float, NDArray[np.float64] | None]]
@@ -362,6 +426,25 @@ class PackagePredictor:
         if config is None or ood_score is None or ood_score <= config.threshold:
             return frozenset()
         return frozenset({ReviewReason.UNUSUAL_SCENE})
+
+
+def _read_scale(path: Path) -> dict[str, Any] | None:
+    """Reads a stored measurement; anything unreadable is treated as no measurement at all."""
+    try:
+        stored = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    return stored if isinstance(stored, dict) else None
+
+
+def _write_scale(path: Path, version: str, frames: str, unusable: float) -> None:
+    """Keeps a measurement beside the packages; losing it costs only the next measurement."""
+    record = {"version": version, "frames": frames, "unusable": unusable}
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps(record, indent=2) + "\n", encoding="utf-8")
+    except OSError as error:
+        _logger.warning("the scale of %s was measured but not kept: %s", version, error)
 
 
 def _depth_grid(encoder: Any, image: PreparedImage) -> NDArray[np.float64]:

@@ -11,10 +11,11 @@ from starlette.responses import RedirectResponse, Response
 from loadvision.api.path_params import version_from_path
 from loadvision.api.ui.pages import page
 from loadvision.api.ui.pagination import ROWS_PER_PAGE, pager
-from loadvision.api.ui.services import ui_services_of
+from loadvision.api.ui.services import UiServices, ui_services_of
 from loadvision.api.ui.session import SignedIn, checked_form
 from loadvision.api.ui.templates import UI_PREFIX
 from loadvision.application.paging import slice_page
+from loadvision.domain.model_version import ModelVersionStatus
 from loadvision.domain.operator import OperatorSession
 from loadvision.domain.training_job import TrainingMode
 from loadvision.ml.training.gate import DEFAULT_RULES
@@ -42,11 +43,34 @@ async def models(
     request: Request, session: SignedIn, number: Annotated[int, Query(alias="page")] = 1
 ) -> Response:
     """Shows the registered versions with their status, newest first."""
+    services = ui_services_of(request)
     # Versions come a few a day, so the list is paged in memory.
-    versions = slice_page(
-        await run_in_threadpool(ui_services_of(request).list_models), number, ROWS_PER_PAGE
+    versions = slice_page(await run_in_threadpool(services.list_models), number, ROWS_PER_PAGE)
+    return page(
+        request,
+        "models.html",
+        session,
+        versions=versions,
+        pager=pager(versions, _MODELS),
+        switching_to=_switching_to(services),
     )
-    return page(request, "models.html", session, versions=versions, pager=pager(versions, _MODELS))
+
+
+def _switching_to(services: UiServices) -> str:
+    """Returns the version that was activated but is not answering yet, or an empty string.
+
+    A newly activated version loads in the background while the previous one keeps answering,
+    so the service never goes quiet. From the outside that looks like nothing happened, and
+    the page says otherwise.
+    """
+    serving = services.model.current()
+    if serving is None:
+        return ""
+    rows = services.list_models()
+    active = next((row for row in rows if row.status is ModelVersionStatus.ACTIVE), None)
+    if active is None or active.version == serving.version:
+        return ""
+    return active.version.value
 
 
 @router.post("/models/{version}/activate")

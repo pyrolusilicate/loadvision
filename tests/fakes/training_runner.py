@@ -38,8 +38,15 @@ class FakeTrainingRunner:
         return self._outcome
 
 
+# The one line a real gate writes about its decision, numbers included.
+GATE_REASON = "кандидат не хуже активной на 716 общих фото: -0.021 при допуске +0.30"
+
+
 def succeeded(
-    *, package_path: Path = Path("runs/run-1/package"), gate_passed: bool = True
+    *,
+    package_path: Path = Path("runs/run-1/package"),
+    gate_passed: bool = True,
+    reason: str = GATE_REASON,
 ) -> TrainingOutcome:
     """Outcome of a run that produced a package."""
     return TrainingOutcome(
@@ -47,5 +54,5 @@ def succeeded(
         status=TrainingStatus.SUCCEEDED,
         package_path=package_path,
         gate_passed=gate_passed,
-        gate_report={"mae_candidate": 7.0, "mae_active": 7.5},
+        gate_report={"mae_candidate": 7.0, "mae_active": 7.5, "reason": reason},
     )

@@ -198,6 +198,7 @@ training_jobs: Final = Table(
     Column("base_version", Text, ForeignKey(model_versions.c.version)),
     Column("result_version", Text, ForeignKey(model_versions.c.version)),
     Column("gate_passed", Boolean),
+    Column("gate_reason", Text),
     Column("error_code", Text),
     _aware("created_at"),
     _aware("started_at", nullable=True),

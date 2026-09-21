@@ -134,6 +134,10 @@ def _filtered(statement: Select[Any], status: ReviewStatus) -> Select[Any]:
             return statement.where(label.where(confirmed_labels.c.unusable).exists())
 
 
+def _percent_or_none(percent: LoadPercent | None) -> float | None:
+    return None if percent is None else percent.value
+
+
 def _values(assessment: Assessment) -> dict[str, object]:
     signals = assessment.signals
     return {
@@ -141,6 +145,7 @@ def _values(assessment: Assessment) -> dict[str, object]:
         "shipment_id": assessment.shipment_id.value,
         "image_sha256": assessment.image_sha256,
         "load_pct": assessment.load_pct.value,
+        "declared_load_pct": _percent_or_none(assessment.declared_load_pct),
         "uncertainty": signals.uncertainty,
         "ood_score": signals.ood_score,
         "brightness": signals.brightness,
@@ -160,6 +165,9 @@ def _assessment(row: Row[Any]) -> Assessment:
         shipment_id=ShipmentId(row.shipment_id),
         image_sha256=row.image_sha256,
         load_pct=LoadPercent(row.load_pct),
+        declared_load_pct=(
+            None if row.declared_load_pct is None else LoadPercent(row.declared_load_pct)
+        ),
         model_version=ModelVersionId(row.model_version),
         processing_ms=row.processing_ms,
         created_at=row.created_at,

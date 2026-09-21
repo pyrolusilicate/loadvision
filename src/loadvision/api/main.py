@@ -9,6 +9,7 @@ import uuid
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from pathlib import Path
+from typing import Final
 
 from fastapi import FastAPI
 from sqlalchemy import Engine
@@ -55,6 +56,9 @@ from loadvision.observability.logging import configure_logging
 from loadvision.settings import Settings, database_url, load_settings
 
 _logger = logging.getLogger(__name__)
+
+# What a package's measured scale is kept in, next to the package folder.
+SCALE_SUFFIX: Final = ".scale.json"
 
 
 def create_service_app() -> FastAPI:
@@ -132,7 +136,8 @@ def build_service_app(settings: Settings, engine: Engine) -> FastAPI:
             storage=storage,
             limits=settings.images.limits(),
             min_brightness=settings.review.min_brightness,
-            unreadable_ood=settings.review.unreadable_ood,
+            unusual_band_share=settings.review.unusual_band_share,
+            unreadable_band_share=settings.review.unreadable_band_share,
             clock=utc_now,
             new_id=uuid.uuid4,
         ),
@@ -196,4 +201,10 @@ def load_package(models_dir: Path, device: str, version: ModelVersionId) -> Pack
     Raises:
         ModelPackageError: If the package is missing, invalid or not supported.
     """
-    return PackagePredictor(ModelPackage.load(models_dir / version.value), device)
+    return PackagePredictor(
+        ModelPackage.load(models_dir / version.value),
+        device,
+        # Beside the package, not inside it: every file inside is listed in the manifest with
+        # its hash, and this one is ours, not the model's.
+        scale_cache=models_dir / f"{version.value}{SCALE_SUFFIX}",
+    )

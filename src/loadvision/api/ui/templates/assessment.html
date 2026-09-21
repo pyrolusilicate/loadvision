@@ -49,13 +49,27 @@
     </form>
     {% else %}
     {% if created %}
-    <p class="note ok">Фото оценено и сохранено в перевозке.</p>
+    <p class="note ok">Фото оценено и сохранено в перевозке.{% if same_as %} Это же фото уже оценивалось в перевозке <a href="{{ ui }}/shipments/{{ same_as|urlencode }}">{{ same_as }}</a>: прогноз взят оттуда.{% endif %}</p>
     {% elif again %}
     <p class="note ok">Новая модель пересчитала оценку{% if previous %}, которую раньше дала модель {{ previous }}{% endif %}.</p>
     {% elif reused %}
     <p class="note">Это фото уже было в перевозке {{ a.shipment_id.value }}: показана сохранённая оценка, модель её не пересчитывала.</p>
     {% endif %}
     <h1><span class="load">{{ a.load_pct.value|load }}%</span> <span class="muted">прогноз модели</span></h1>
+    {% set verdict = a.discrepancy(declared_tolerance) %}
+    {% if verdict %}
+    <div class="note {% if verdict.value == 'matches' %}ok{% else %}warn{% endif %}">
+      <p><strong>{{ declared_notes[verdict] }}</strong></p>
+      <dl>
+        <dt>По документам</dt><dd>{{ a.declared_load_pct.value|load }}%</dd>
+        <dt>Расхождение</dt>
+        <dd>{{ (a.load_pct.value - a.declared_load_pct.value)|load }} п.п.</dd>
+      </dl>
+      {% if verdict.value == 'matches' %}
+      <p class="muted">Разница меньше {{ declared_tolerance|load }} п.п. — это внутри собственной ошибки модели, поэтому расхождением её не считаем.</p>
+      {% endif %}
+    </div>
+    {% endif %}
     {% if a.review_reasons and not details.label %}
     <div class="note warn">
       <p><strong>Прогноз может быть неверным.</strong></p>
@@ -66,15 +80,13 @@
     <dl>
       <dt>Модель</dt><dd>{{ a.model_version.value }}</dd>
       <dt>Время оценки</dt><dd>{{ a.created_at|time }}</dd>
-      {% if a.signals.uncertainty is not none %}<dt>Разброс ансамбля</dt><dd>{{ a.signals.uncertainty|load }} п.п.</dd>{% endif %}
-      {% if not a.review_reasons or details.label %}{{ measurements(a.signals) }}{% endif %}
     </dl>
 
     <h2>Подтверждённая загрузка</h2>
     {% if details.label %}
     <p class="note {% if details.label.unusable %}bad{% else %}ok{% endif %}">
       {% if details.label.unusable %}Фото отмечено непригодным{% else %}Загрузка {{ details.label.load_pct.value|load }}%{% endif %}
-      {% if details.label.author %} – {{ details.label.author }}{% endif %}, {{ details.label.updated_at|time }}.
+      {% if details.label.author %}: {{ details.label.author }}{% endif %}, {{ details.label.updated_at|time }}.
       Оценка оператора заменила оценку модели.
     </p>
     {% endif %}

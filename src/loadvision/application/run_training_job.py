@@ -121,9 +121,16 @@ class RunTrainingJob:
             run_id=outcome.run_id,
             result_version=version,
             gate_passed=outcome.gate_passed,
+            gate_reason=_reason_of(outcome),
         )
 
     def _save(self, job: TrainingJob) -> None:
         with self.uow_factory() as uow:
             uow.training_jobs.update(job)
             uow.commit()
+
+
+def _reason_of(outcome: TrainingOutcome) -> str | None:
+    """Returns the one line the gate wrote about its decision, if the run reached the gate."""
+    reason = outcome.gate_report.get("reason")
+    return reason if isinstance(reason, str) else None

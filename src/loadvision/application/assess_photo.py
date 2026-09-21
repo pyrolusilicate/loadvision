@@ -12,6 +12,7 @@ from loadvision.application.ports import (
     ImageRecord,
     ImageStorage,
     LoadPredictor,
+    Prediction,
     UnitOfWork,
     UnitOfWorkFactory,
 )
@@ -33,11 +34,14 @@ class AssessPhotoRequest:
         shipment_id: Shipment number as received; validated by the use case.
         image: Photo file bytes as received.
         request_id: Id of the API request, or None outside the API.
+        declared_load_pct: Load from the customer's report, or None when the caller knows
+            none; stored with the assessment so the two numbers can be compared.
     """
 
     shipment_id: str
     image: bytes
     request_id: str | None = None
+    declared_load_pct: LoadPercent | None = None
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
@@ -51,12 +55,15 @@ class AssessPhotoResult:
             that answers now, and nothing was computed again.
         replaced: Model version whose estimate of this photo the new one replaced, or None if
             the shipment had no assessment of this photo.
+        taken_from: Shipment whose stored estimate of this same photo was used instead of
+            running the model again, or None when the model did run.
     """
 
     assessment: Assessment
     image: ImageRecord
     reused: bool
     replaced: ModelVersionId | None = None
+    taken_from: ShipmentId | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -64,6 +71,11 @@ class _Estimate:
     load_pct: LoadPercent
     signals: Signals
     review_reasons: frozenset[ReviewReason]
+    # The two ends of the model's own scale: where its training photos end and where frames
+    # with nothing in them land. None for an estimate read back from the database, which is
+    # only ever reused and never judged again.
+    ood_threshold: float | None = None
+    ood_unusable: float | None = None
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
@@ -82,8 +94,13 @@ class AssessPhoto:
         limits: Size and format limits of uploaded photos.
         min_brightness: Frames darker than this are sent to a person; the load cannot be seen
             on them, whatever the model answers.
-        unreadable_ood: Distance to the training photos from which the frame holds nothing of a
-            truck body; such a photo is marked unusable on the spot.
+        unusual_band_share: Where the line "show this to a person" stands inside the band
+            between the far edge of the training photos and the distance at which empty frames
+            land, as a share of that band. A share, not a distance and not a multiple: the
+            model measures both ends of the band itself, so the same share keeps its meaning
+            on a model with a different scale.
+        unreadable_band_share: Where the line "show no prediction at all" stands in that same
+            band. Above it the frame holds nothing of a truck body.
         clock: Current time, timezone-aware.
         new_id: New assessment ids.
         timer: Monotonic seconds, for the processing time.
@@ -93,7 +110,8 @@ class AssessPhoto:
     storage: ImageStorage
     limits: ImageLimits
     min_brightness: float
-    unreadable_ood: float
+    unusual_band_share: float
+    unreadable_band_share: float
     clock: Clock
     new_id: IdFactory
     timer: Callable[[], float] = time.perf_counter
@@ -128,6 +146,11 @@ class AssessPhoto:
 
         estimate = self._predict(image, predictor) if cached is None else _estimate_of(cached)
         now = self.clock()
+        # A norm sent once stays with the photo: a newer model reassessing it must not erase
+        # the number the measurement is compared against.
+        declared = request.declared_load_pct
+        if declared is None and stored is not None:
+            declared = stored.declared_load_pct
         assessment = Assessment(
             # An estimate of another model version is replaced, so the address of the
             # assessment a person or a client already knows keeps working.
@@ -141,6 +164,7 @@ class AssessPhoto:
             signals=estimate.signals,
             review_reasons=estimate.review_reasons,
             request_id=request.request_id,
+            declared_load_pct=declared,
         )
 
         # The file goes first: a failed commit leaves an unused file, never a record whose
@@ -154,7 +178,13 @@ class AssessPhoto:
                     uow.assessments.add(assessment)
                 else:
                     uow.assessments.replace(assessment)
-                self._mark_unreadable(uow, assessment, now, judged=cached is not None)
+                self._mark_unreadable(
+                    uow,
+                    assessment,
+                    now,
+                    judged=cached is not None,
+                    estimate=estimate,
+                )
                 record = _image_record(uow, assessment)
                 uow.commit()
         except AssessmentAlreadyExistsError as error:
@@ -171,10 +201,17 @@ class AssessPhoto:
             image=record,
             reused=False,
             replaced=None if stored is None else stored.model_version,
+            taken_from=None if cached is None else cached.shipment_id,
         )
 
     def _mark_unreadable(
-        self, uow: UnitOfWork, assessment: Assessment, now: datetime, *, judged: bool
+        self,
+        uow: UnitOfWork,
+        assessment: Assessment,
+        now: datetime,
+        *,
+        judged: bool,
+        estimate: _Estimate,
     ) -> None:
         """Marks a frame that holds nothing of a truck body unusable, as the model sees it.
 
@@ -187,9 +224,12 @@ class AssessPhoto:
             assessment: The assessment just stored.
             now: Time of the verdict.
             judged: Whether this photo was assessed by this model version before.
+            estimate: What the model answered, with both ends of its own scale; a model that
+                gives no band refuses no frame.
         """
+        line = _line(estimate.ood_threshold, estimate.ood_unusable, self.unreadable_band_share)
         score = assessment.signals.ood_score
-        if judged or score is None or score < self.unreadable_ood:
+        if judged or score is None or line is None or score < line:
             return
         if uow.labels.get(assessment.image_sha256) is not None:
             return
@@ -206,6 +246,17 @@ class AssessPhoto:
     @staticmethod
     def _reused(uow: UnitOfWork, stored: Assessment) -> AssessPhotoResult:
         return AssessPhotoResult(assessment=stored, image=_image_record(uow, stored), reused=True)
+
+    def _far_enough(self, prediction: Prediction) -> bool:
+        """Whether the photo is further from the training ones than the line of the service.
+
+        A model that gives no band is taken at its word: the service only overrules a warning
+        it has the numbers to overrule.
+        """
+        line = _line(prediction.ood_threshold, prediction.ood_unusable, self.unusual_band_share)
+        if line is None or prediction.ood_score is None:
+            return True
+        return prediction.ood_score >= line
 
     def _predict(self, image: PreparedImage, predictor: LoadPredictor) -> _Estimate:
         # Measured before the model runs and outside the try: this is arithmetic on the photo
@@ -228,13 +279,38 @@ class AssessPhoto:
                 ErrorCode.MODEL_INFERENCE_FAILED, f"{type(error).__name__}: {error}"
             ) from error
         reasons = set(prediction.review_reasons)
+        # The package raises its flag at the far edge of its own training photos. Real photos
+        # from another camera land there too, so the service keeps its own, wider line and
+        # drops the flag below it; above it the reason stands as the model gave it.
+        if ReviewReason.UNUSUAL_SCENE in reasons and not self._far_enough(prediction):
+            reasons.discard(ReviewReason.UNUSUAL_SCENE)
         if frame_brightness < self.min_brightness:
             reasons.add(ReviewReason.TOO_DARK)
         # Sharpness (imaging/quality.py) is not wired in: a blurred photo is already far from
         # the training ones, and the model package flags it itself.
         return _Estimate(
-            load_pct=prediction.load_pct, signals=signals, review_reasons=frozenset(reasons)
+            load_pct=prediction.load_pct,
+            signals=signals,
+            review_reasons=frozenset(reasons),
+            ood_threshold=prediction.ood_threshold,
+            ood_unusable=prediction.ood_unusable,
         )
+
+
+def _line(edge: float | None, empty: float | None, share: float) -> float | None:
+    """Returns where a line of the service stands on the scale of the model that answered.
+
+    Args:
+        edge: Distance at which the training photos of the model end.
+        empty: Distance at which frames holding nothing land on the same scale.
+        share: Where the line stands between the two, from 0 at the edge to 1 at the frames.
+
+    Returns:
+        The distance, or None when the model gives no band to place a line in.
+    """
+    if edge is None or empty is None or empty <= edge:
+        return None
+    return edge + (empty - edge) * share
 
 
 def _estimate_of(assessment: Assessment) -> _Estimate:

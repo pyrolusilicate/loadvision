@@ -549,6 +549,7 @@ serve = [
     { name = "torchvision", version = "0.29.0", source = { registry = "https://pypi.org/simple" }, marker = "sys_platform != 'linux' or (extra == 'group-10-loadvision-cpu' and extra == 'group-10-loadvision-cuda') or (extra != 'group-10-loadvision-cpu' and extra != 'group-10-loadvision-cuda')" },
     { name = "torchvision", version = "0.29.0+cpu", source = { registry = "https://download.pytorch.org/whl/cpu" }, marker = "(sys_platform == 'linux' and extra == 'group-10-loadvision-cpu') or (extra == 'group-10-loadvision-cpu' and extra == 'group-10-loadvision-cuda')" },
     { name = "torchvision", version = "0.29.0+cu126", source = { registry = "https://download.pytorch.org/whl/cu126" }, marker = "(sys_platform == 'linux' and extra == 'group-10-loadvision-cuda') or (extra == 'group-10-loadvision-cpu' and extra == 'group-10-loadvision-cuda')" },
+    { name = "transformers" },
 ]
 
 [package.metadata]
@@ -599,6 +600,7 @@ serve = [
     { name = "timm", specifier = ">=1.0.29" },
     { name = "torch", specifier = ">=2.14.0" },
     { name = "torchvision", specifier = ">=0.29.0" },
+    { name = "transformers", specifier = ">=5.17.0" },
 ]
 
 [[package]]

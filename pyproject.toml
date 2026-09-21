@@ -172,11 +172,13 @@ serve = [
     "timm>=1.0.29",
     "torch>=2.14.0",
     "torchvision>=0.29.0",
+    # The depth network a package may carry is a transformers model; without it such a package
+    # does not load, and the service would answer with the model it has instead.
+    "transformers>=5.17.0",
 ]
 ml = [
     { include-group = "serve" },
     "scikit-learn>=1.9.1",
-    "transformers>=5.17.0",
 ]
 # Which build of torch Linux gets; exactly one of the two, see [tool.uv.sources].
 cpu = ["torch>=2.14.0", "torchvision>=0.29.0"]

@@ -10,7 +10,7 @@ from starlette.templating import Jinja2Templates
 
 from loadvision.api.xml.schemas import LOAD_PCT_PLACES, format_decimal
 from loadvision.application.ports import ExplanationKind
-from loadvision.domain.assessment import ReviewReason
+from loadvision.domain.assessment import LoadDiscrepancy, ReviewReason
 from loadvision.domain.timestamps import format_utc_seconds
 
 UI_PREFIX: Final = "/ui"
@@ -46,6 +46,18 @@ VIEW_NAMES: Final = MappingProxyType(
 # From this load the contribution map says little: the model is at its ceiling and paints the
 # cargo as pulling the answer down. Measured by A on the v2 package.
 CONTRIBUTION_CEILING: Final = 95.0
+# From this far apart the pages call the measurement and the document different. The API stays
+# out of it and answers the plain difference; the verdict is a reading of that number, and this
+# is where it is read. The size is our own error: the model misses by 5.8 points on average and
+# two experts labelling one body differ by about 10, so a smaller gap is evidence of nothing.
+DECLARED_TOLERANCE: Final = 10.0
+DECLARED_NOTES: Final = MappingProxyType(
+    {
+        LoadDiscrepancy.UNDER: "Загружено меньше, чем по документам",
+        LoadDiscrepancy.OVER: "Загружено больше, чем по документам",
+        LoadDiscrepancy.MATCHES: "Совпадает с документами",
+    }
+)
 VIEW_NOTES: Final = MappingProxyType(
     {
         ExplanationKind.ATTENTION.value: (
@@ -83,6 +95,8 @@ templates.env.globals["review_notes"] = REVIEW_NOTES
 templates.env.globals["view_names"] = VIEW_NAMES
 templates.env.globals["view_notes"] = VIEW_NOTES
 templates.env.globals["contribution_ceiling"] = CONTRIBUTION_CEILING
+templates.env.globals["declared_notes"] = DECLARED_NOTES
+templates.env.globals["declared_tolerance"] = DECLARED_TOLERANCE
 templates.env.globals["stylesheet"] = _stylesheet
 templates.env.filters["load"] = _load
 templates.env.filters["time"] = human_time

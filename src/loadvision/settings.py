@@ -2,10 +2,10 @@
 
 import os
 from pathlib import Path
-from typing import Final, Literal
+from typing import Final, Literal, Self
 
 import yaml
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from loadvision.imaging.prepared_image import MediaType
 from loadvision.imaging.validator import ImageLimits
@@ -82,13 +82,23 @@ class ReviewSettings(_Section):
         min_brightness: Mean brightness, from 0 to 255, below which the frame is too dark to
             judge the load by. The unusual-scene threshold is not here: every model package
             carries its own in `manifest.ood.threshold`.
-        unreadable_ood: Distance to the training photos from which the pages stop showing the
-            prediction at all: nothing of a truck body is in the frame, so the number would
-            only mislead.
+        unusual_band_share: Where the line "send this to a person" stands between the far
+            edge of a model's training photos and the distance at which empty frames land on
+            the same model. A share of that band, not a distance: the model measures both ends
+            itself when it loads, so this number keeps its meaning on any model.
+        unreadable_band_share: Where the line "show no prediction at all" stands in the same
+            band. Above it nothing of a truck body is in the frame.
     """
 
     min_brightness: float = Field(ge=0, le=255)
-    unreadable_ood: float = Field(gt=0)
+    unusual_band_share: float = Field(gt=0, lt=1)
+    unreadable_band_share: float = Field(gt=0, lt=1)
+
+    @model_validator(mode="after")
+    def _lines_in_order(self) -> Self:
+        if self.unusual_band_share >= self.unreadable_band_share:
+            raise ValueError("unusual_band_share must be below unreadable_band_share")
+        return self
 
 
 class StorageSettings(_Section):

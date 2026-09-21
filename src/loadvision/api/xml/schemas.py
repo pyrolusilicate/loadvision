@@ -34,10 +34,13 @@ class AssessmentRequestMessage:
     Attributes:
         shipment_id: Shipment number as sent; the use case validates it.
         image: Photo file bytes decoded from base64.
+        declared_load_pct: Load from the customer's report, or None if the request carried
+            none. Stored beside the measured one so the two can be compared later.
     """
 
     shipment_id: str
     image: bytes
+    declared_load_pct: LoadPercent | None = None
 
 
 def read_assessment_request(root: etree._Element) -> AssessmentRequestMessage:
@@ -52,8 +55,12 @@ def read_assessment_request(root: etree._Element) -> AssessmentRequestMessage:
     Raises:
         LoadvisionError: `INVALID_ENCODING` if the photo is not strict base64.
     """
+    declared = root.findtext(qualified("DeclaredLoadPct"))
     return AssessmentRequestMessage(
-        shipment_id=_text(root, "ShipmentId"), image=decode_base64(_text(root, "Image"))
+        shipment_id=_text(root, "ShipmentId"),
+        image=decode_base64(_text(root, "Image")),
+        # Adding 0.0 turns the "-0" the XSD accepts into 0.0, as in the label request above.
+        declared_load_pct=None if declared is None else LoadPercent(float(declared) + 0.0),
     )
 
 
@@ -123,6 +130,16 @@ def assessment_document(
     etree.SubElement(root, qualified("LoadPct")).text = format_decimal(
         assessment.load_pct.value, LOAD_PCT_PLACES
     )
+    # The deviation is a number, not a verdict: the API says how far the body is from the
+    # report, and whether that far is far enough to act on is the caller's rule.
+    declared = assessment.declared_load_pct
+    if declared is not None:
+        etree.SubElement(
+            root,
+            qualified("Declared"),
+            loadPct=format_decimal(declared.value, LOAD_PCT_PLACES),
+            deviation=format_decimal(assessment.load_pct.value - declared.value, LOAD_PCT_PLACES),
+        )
     # Review is written only when there are reasons: a package without an `ood` section checks
     # nothing, so an empty set means "not checked" and needed="false" would claim more than the
     # service knows.
@@ -232,6 +249,10 @@ def _summary(item: LabeledAssessment) -> dict[str, str]:
         "modelVersion": assessment.model_version.value,
         "createdAt": format_utc(assessment.created_at),
     }
+    if assessment.declared_load_pct is not None:
+        attributes["declaredLoadPct"] = format_decimal(
+            assessment.declared_load_pct.value, LOAD_PCT_PLACES
+        )
     # The same rule as for `Review`: without a review policy, no reasons means "not checked".
     if assessment.review_reasons:
         attributes["needsReview"] = "true"

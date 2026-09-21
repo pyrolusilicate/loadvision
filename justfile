@@ -26,6 +26,16 @@ hooks:
 up:
     docker compose up -d --build api
 
+# Service on this machine without Docker: on a Mac torch answers several times faster this way
+serve:
+    uv run --env-file .env uvicorn --factory loadvision.api.main:create_service_app \
+        --host 127.0.0.1 --port 8000 --no-access-log
+
+# Load test of the running service: p50, p95 and photos per second at a given concurrency
+loadtest clients="4" requests="24":
+    uv run python scripts/loadtest.py --clients {{clients}} --requests {{requests}} \
+        --out runs/loadtest/clients-{{clients}}.json
+
 # Retraining worker in Docker; its packages record the commit the image was built from
 worker:
     GIT_COMMIT=$(git rev-parse HEAD) docker compose up -d --build worker

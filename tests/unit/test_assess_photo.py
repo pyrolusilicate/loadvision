@@ -23,7 +23,7 @@ from tests.builders import T0, make_assessment, make_image_record, make_label
 from tests.fakes.clock import FixedClock, SequentialIds
 from tests.fakes.image_storage import InMemoryImageStorage
 from tests.fakes.in_memory_db import InMemoryStore, InMemoryUnitOfWork
-from tests.fakes.predictor import FakePredictor
+from tests.fakes.predictor import OOD_THRESHOLD, FakePredictor, band_line
 
 LIMITS = ImageLimits(
     max_bytes=2_000_000,
@@ -34,7 +34,10 @@ LIMITS = ImageLimits(
 PHOTO = image_files.jpeg()
 DARK_PHOTO = image_files.dark_jpeg()
 MIN_BRIGHTNESS = 20.0
-UNREADABLE_OOD = 0.45
+UNUSUAL_SHARE = 0.05
+UNREADABLE_SHARE = 0.8
+# The distance those shares stand at on the scale the fake model reports.
+UNREADABLE_OOD = band_line(UNREADABLE_SHARE)
 # Mean brightness of the two photos above, measured by `imaging.quality.brightness`.
 PHOTO_BRIGHTNESS = 127.11
 DARK_BRIGHTNESS = 5.0
@@ -87,14 +90,16 @@ def use_case(
     storage: InMemoryImageStorage,
     uow_factory: UnitOfWorkFactory | None = None,
     min_brightness: float = MIN_BRIGHTNESS,
-    unreadable_ood: float = UNREADABLE_OOD,
+    unusual_band_share: float = UNUSUAL_SHARE,
+    unreadable_band_share: float = UNREADABLE_SHARE,
 ) -> AssessPhoto:
     return AssessPhoto(
         uow_factory=store.unit_of_work if uow_factory is None else uow_factory,
         storage=storage,
         limits=LIMITS,
         min_brightness=min_brightness,
-        unreadable_ood=unreadable_ood,
+        unusual_band_share=unusual_band_share,
+        unreadable_band_share=unreadable_band_share,
         clock=FixedClock(T0),
         new_id=SequentialIds(),
         timer=StepTimer(),
@@ -315,6 +320,33 @@ def test_a_photo_the_model_can_read_gets_no_verdict(
 
 
 @pytest.mark.unit
+def test_the_line_is_read_against_the_scale_of_the_model_that_answered(
+    store: InMemoryStore, storage: InMemoryImageStorage
+) -> None:
+    # One and the same distance. For the model above it is twice its own threshold, so nothing
+    # of a body is in the frame; for a model whose training photos lie further apart it is an
+    # ordinary photo. A distance fixed in the settings would have called both the same.
+    assess = use_case(store, storage)
+
+    assess(request(PHOTO), FakePredictor(ood_score=UNREADABLE_OOD))
+    assess(
+        request(OTHER_PHOTO, shipment_id="RP-2"),
+        FakePredictor(version="fake-2", ood_score=UNREADABLE_OOD, ood_threshold=OOD_THRESHOLD * 2),
+    )
+
+    assert list(store.labels) == [PHOTO_SHA256]
+
+
+@pytest.mark.unit
+def test_a_model_that_measures_no_distance_refuses_no_frame(
+    store: InMemoryStore, storage: InMemoryImageStorage
+) -> None:
+    use_case(store, storage)(request(), FakePredictor(ood_score=UNREADABLE_OOD, ood_threshold=None))
+
+    assert store.labels == {}
+
+
+@pytest.mark.unit
 def test_the_model_never_overrules_a_person(
     store: InMemoryStore, storage: InMemoryImageStorage
 ) -> None:
@@ -425,3 +457,32 @@ def test_parallel_request_that_committed_first_wins(
     assert result.reused is True
     assert result.assessment == competitor
     assert list(store.assessments) == [competitor.id]
+
+
+@pytest.mark.unit
+def test_a_photo_just_past_the_model_line_is_not_sent_to_a_person(
+    store: InMemoryStore, storage: InMemoryImageStorage
+) -> None:
+    """A package flags a scene from its own far edge, which ordinary photos reach too."""
+    just_over = OOD_THRESHOLD * 1.01
+
+    result = use_case(store, storage)(
+        request(),
+        FakePredictor(ood_score=just_over, review_reasons={ReviewReason.UNUSUAL_SCENE}),
+    )
+
+    assert result.assessment.review_reasons == frozenset()
+    assert result.assessment.needs_review is False
+
+
+@pytest.mark.unit
+def test_a_photo_past_the_service_line_is_sent_to_a_person(
+    store: InMemoryStore, storage: InMemoryImageStorage
+) -> None:
+    far = band_line(UNUSUAL_SHARE)
+
+    result = use_case(store, storage)(
+        request(), FakePredictor(ood_score=far, review_reasons={ReviewReason.UNUSUAL_SCENE})
+    )
+
+    assert result.assessment.review_reasons == frozenset({ReviewReason.UNUSUAL_SCENE})

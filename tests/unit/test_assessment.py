@@ -6,11 +6,19 @@ from uuid import UUID
 
 import pytest
 
-from loadvision.domain.assessment import Assessment, LoadPercent, ReviewReason, Signals
+from loadvision.domain.assessment import (
+    Assessment,
+    LoadDiscrepancy,
+    LoadPercent,
+    ReviewReason,
+    Signals,
+)
 from loadvision.domain.model_version import ModelVersionId
 from loadvision.domain.shipment import ShipmentId
 
 SIGNAL_NAMES = [signal.name for signal in fields(Signals)]
+# The gap the service calls meaningful, as `configs/app.yaml` sets it.
+TOLERANCE = 10.0
 
 
 def make_assessment(**overrides: Any) -> Assessment:
@@ -112,3 +120,36 @@ def test_assessment_rejects_negative_processing_time() -> None:
 def test_assessment_rejects_naive_time() -> None:
     with pytest.raises(ValueError, match="created_at"):
         make_assessment(created_at=datetime(2026, 9, 20, 10, 15, 3))
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("load", "declared", "verdict"),
+    [
+        (90.0, 30.0, LoadDiscrepancy.OVER),
+        (30.0, 90.0, LoadDiscrepancy.UNDER),
+        (55.0, 50.0, LoadDiscrepancy.MATCHES),
+        # Exactly on the tolerance is still agreement: the gap has to beat the error, not tie it.
+        (60.0, 50.0, LoadDiscrepancy.MATCHES),
+        (60.1, 50.0, LoadDiscrepancy.OVER),
+    ],
+)
+def test_declared_load_is_compared_with_the_measured_one(
+    load: float, declared: float, verdict: LoadDiscrepancy
+) -> None:
+    assessment = make_assessment(
+        load_pct=LoadPercent(load), declared_load_pct=LoadPercent(declared)
+    )
+
+    assert assessment.discrepancy(TOLERANCE) is verdict
+
+
+@pytest.mark.unit
+def test_nothing_is_said_about_a_shipment_that_declared_nothing() -> None:
+    assert make_assessment().discrepancy(TOLERANCE) is None
+
+
+@pytest.mark.unit
+def test_a_negative_tolerance_is_refused() -> None:
+    with pytest.raises(ValueError, match="tolerance"):
+        make_assessment(declared_load_pct=LoadPercent(50.0)).discrepancy(-1.0)

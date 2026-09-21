@@ -16,6 +16,7 @@ from loadvision.api.ui.assess_routes import (
     NEW_RESULT,
     PREVIOUS_PARAM,
     REUSED_RESULT,
+    TAKEN_FROM_PARAM,
 )
 from loadvision.api.ui.pages import page
 from loadvision.api.ui.pagination import TILES_PER_PAGE, pager
@@ -27,6 +28,7 @@ from loadvision.application.submit_label import SubmitLabelRequest
 from loadvision.domain.assessment import SHA256_HEX_PATTERN, LoadPercent
 from loadvision.domain.confirmed_label import LabelSource
 from loadvision.domain.model_version import ModelVersionId
+from loadvision.domain.shipment import ShipmentId
 from loadvision.errors import ErrorCode, LoadvisionError
 from loadvision.imaging.validator import detect_media_type
 
@@ -100,13 +102,15 @@ async def assessment(
     assessment_id: str,
     result: str = "",
     previous: Annotated[str, Query(alias=PREVIOUS_PARAM)] = "",
+    same_as: Annotated[str, Query(alias=TAKEN_FROM_PARAM)] = "",
     view: str = "",
 ) -> Response:
     """Shows one assessment: the photo, the prediction and the form for the verdict.
 
     `result` comes from the photo form and says whether the photo was just assessed, had been
     assessed for this shipment by the model that answers now, or was assessed again in place
-    of the estimate of the model named by `previous`.
+    of the estimate of the model named by `previous`. `same_as` names the shipment whose
+    stored estimate of this same photo was used instead of running the model again.
     """
     services = ui_services_of(request)
     details = await run_in_threadpool(
@@ -129,7 +133,16 @@ async def assessment(
         reused=result == REUSED_RESULT,
         again=result == AGAIN_RESULT,
         previous=_version_or_blank(previous),
+        same_as=_shipment_or_blank(same_as),
     )
+
+
+def _shipment_or_blank(value: str) -> str:
+    """Returns the shipment number, or nothing when the address carries a malformed one."""
+    try:
+        return ShipmentId(value).value
+    except LoadvisionError:
+        return ""
 
 
 def _view_or_photo(value: str) -> str:
