@@ -4,6 +4,9 @@
 <section class="card form-page">
   <h1>Оценить фото кузова</h1>
   <p class="muted">Модель оценит загрузку от 0 до 100% и сохранит оценку в перевозке.</p>
+  {% if loading %}
+  <p class="note warn" role="status"><strong>Модель загружается.</strong></p>
+  {% endif %}
   {% if error %}
   <p class="note bad" role="alert"><strong>{{ error[0] }}</strong> {{ error[1] }}</p>
   {% endif %}
@@ -15,6 +18,9 @@
     <label for="photo">Фото грузового отсека</label>
     <input id="photo" name="photo" type="file" accept="{{ accept }}" required>
     <p class="muted">{{ formats }}, до {{ max_mb }} МБ, короткая сторона не меньше {{ min_side }} px.</p>
+    <label for="declared_load_pct">Загрузка по документам, % <span class="muted">(опционально)</span></label>
+    <input id="declared_load_pct" name="declared_load_pct" type="number" min="0" max="100" step="0.1"
+           value="{{ declared }}" placeholder="80">
     <button type="submit">Оценить загрузку</button>
   </form>
 </section>

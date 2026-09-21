@@ -35,6 +35,7 @@ async def create_assessment(request: Request) -> Response:
             shipment_id=message.shipment_id,
             image=message.image,
             request_id=request_id_of(request),
+            declared_load_pct=message.declared_load_pct,
         ),
         predictor,
     )

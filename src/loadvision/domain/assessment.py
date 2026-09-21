@@ -53,6 +53,21 @@ class ReviewReason(StrEnum):
     BLURRY = "blurry"
 
 
+class LoadDiscrepancy(StrEnum):
+    """How the measured load compares with the one the shipment was declared with.
+
+    Attributes:
+        UNDER: The body holds less than the report says - the underloaded truck the customer
+            asked to find.
+        OVER: The body holds more than the report says.
+        MATCHES: The two agree closely enough that the difference says nothing.
+    """
+
+    UNDER = "under"
+    OVER = "over"
+    MATCHES = "matches"
+
+
 @dataclass(frozen=True, slots=True, kw_only=True)
 class Signals:
     """Trust signals of one assessment; a signal is None until it is computed.
@@ -90,6 +105,9 @@ class Assessment:
         shipment_id: Shipment the photo belongs to.
         image_sha256: Lowercase hex SHA-256 of the original photo bytes.
         load_pct: Predicted load.
+        declared_load_pct: Load the shipment was declared with in the customer's report, or
+            None when the request carried none. The service never checks it: it is the number
+            the measurement is compared against.
         model_version: Model version that produced the prediction.
         processing_ms: Time spent on the request, in milliseconds.
         created_at: When the assessment was made, timezone-aware.
@@ -108,6 +126,7 @@ class Assessment:
     signals: Signals = field(default_factory=Signals)
     review_reasons: frozenset[ReviewReason] = field(default_factory=frozenset[ReviewReason])
     request_id: str | None = None
+    declared_load_pct: LoadPercent | None = None
 
     def __post_init__(self) -> None:
         """Validates the photo hash, the processing time and the timestamp.
@@ -126,3 +145,26 @@ class Assessment:
     def needs_review(self) -> bool:
         """Whether a person should check the assessment; derived from `review_reasons`."""
         return bool(self.review_reasons)
+
+    def discrepancy(self, tolerance: float) -> LoadDiscrepancy | None:
+        """Compares the measured load with the declared one.
+
+        Args:
+            tolerance: Difference in percentage points from which the two are called apart.
+                Below it the service says nothing: its own error is of that size, so a smaller
+                gap is not evidence of anything.
+
+        Returns:
+            The verdict, or None when the assessment carries no declared load.
+
+        Raises:
+            ValueError: If `tolerance` is negative.
+        """
+        if tolerance < 0:
+            raise ValueError(f"tolerance must be non-negative, got {tolerance!r}")
+        if self.declared_load_pct is None:
+            return None
+        gap = self.load_pct.value - self.declared_load_pct.value
+        if abs(gap) <= tolerance:
+            return LoadDiscrepancy.MATCHES
+        return LoadDiscrepancy.UNDER if gap < 0 else LoadDiscrepancy.OVER

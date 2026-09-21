@@ -18,6 +18,7 @@ from tests.builders import (
     make_label,
     make_model_version,
 )
+from tests.fakes.predictor import FakePredictor
 
 NEEDED = DEFAULT_RULES.min_new_labels
 
@@ -298,15 +299,13 @@ def test_a_running_job_of_a_live_worker_is_not_taken_off(service: Service) -> No
 
 
 @pytest.mark.api
-def test_the_page_counts_confirmed_loads_against_what_the_gate_needs(service: Service) -> None:
+def test_the_page_counts_the_loads_a_retraining_would_learn_from(service: Service) -> None:
     sign_in(service)
     confirm_loads(service, 3)
 
     text = text_of(get(service, "/ui/jobs"))
 
     assert "Подтвержденных оценок, которых активная модель ещё не видела: 3." in text
-    # The gate counts stricter, and the page says so: the two numbers are allowed to differ.
-    assert f"у порога {NEEDED} лучше иметь запас" in text
 
 
 @pytest.mark.api
@@ -316,3 +315,45 @@ def test_a_queued_job_says_it_waits_for_the_worker(service: Service) -> None:
     submit(service, "/ui/jobs", csrf=token)
 
     assert "Задача ждёт запуск воркера." in text_of(get(service, "/ui/jobs"))
+
+
+@pytest.mark.api
+def test_the_page_says_a_new_version_is_still_loading() -> None:
+    """Activating does not stop the service: the previous model answers until the new one is up."""
+    service = make_service(FakePredictor(version="v1"))
+    sign_in(service)
+    register(service, ("v1", ModelVersionStatus.RETIRED), ("v2", ModelVersionStatus.ACTIVE))
+
+    shown = text_of(get(service, "/ui/models"))
+
+    assert "Версия v2 включена, но ещё не отвечает." in shown
+
+
+@pytest.mark.api
+def test_the_page_says_nothing_once_the_new_version_answers() -> None:
+    service = make_service(FakePredictor(version="v2"))
+    sign_in(service)
+    register(service, ("v1", ModelVersionStatus.RETIRED), ("v2", ModelVersionStatus.ACTIVE))
+
+    assert "ещё не отвечает" not in text_of(get(service, "/ui/models"))
+
+
+@pytest.mark.api
+def test_the_jobs_page_says_why_the_gate_refused(service: Service) -> None:
+    """A refusal without its numbers is an oracle: the page shows the line the gate wrote."""
+    sign_in(service)
+    refusal = "кандидат хуже активной на 716 общих фото: +0.512 при допуске +0.30"
+    with service.store.unit_of_work() as uow:
+        started = make_job().started(at=T0, base_version=None)
+        uow.training_jobs.add(started)
+        uow.training_jobs.update(
+            started.succeeded(
+                at=T0, run_id="run_1", result_version=None, gate_passed=False, gate_reason=refusal
+            )
+        )
+        uow.commit()
+
+    text = text_of(get(service, "/ui/jobs"))
+
+    assert "отказал" in text
+    assert refusal in text

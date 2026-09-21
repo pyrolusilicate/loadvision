@@ -41,6 +41,14 @@ class Prediction:
             model does not estimate it.
         ood_score: Distance to the nearest training photos in embedding space, or None if the
             model does not compute it.
+        ood_threshold: Distance from which this model calls a scene unusual, or None if the
+            model does not compute it. Every encoder has its own scale of distances, so the
+            score means nothing without the threshold it is measured against, and the two
+            travel together.
+        ood_unusable: Distance at which frames holding nothing - a closed lens, noise, a
+            blown-out frame - land on this model's scale, or None when the model measures no
+            distances. With `ood_threshold` it gives the caller the two ends of the band, so
+            it can place its own line without a number measured by hand.
         review_reasons: Why a person should check the prediction, by the model's own
             measures; empty when none apply.
     """
@@ -48,6 +56,8 @@ class Prediction:
     load_pct: LoadPercent
     uncertainty: float | None = None
     ood_score: float | None = None
+    ood_threshold: float | None = None
+    ood_unusable: float | None = None
     review_reasons: frozenset[ReviewReason] = field(default_factory=frozenset[ReviewReason])
 
 

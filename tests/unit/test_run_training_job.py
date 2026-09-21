@@ -235,3 +235,17 @@ def test_an_activation_conflict_fails_the_job() -> None:
     assert finished is not None
     assert finished.status is TrainingJobStatus.FAILED
     assert finished.error_code is ErrorCode.MODEL_VERSION_STATUS_CONFLICT
+
+
+@pytest.mark.unit
+def test_the_job_keeps_what_the_gate_said_about_it() -> None:
+    """A page that shows only "отказал" cannot be acted on; the numbers travel with the job."""
+    refusal = "кандидат хуже активной на 716 общих фото: +0.512 при допуске +0.30"
+    worker = make_worker(outcome=succeeded(gate_passed=False, reason=refusal))
+    with_labels_and_active_version(worker)
+    queue_job(worker)
+
+    finished = worker.run()()
+
+    assert finished is not None
+    assert finished.gate_reason == refusal

@@ -95,6 +95,7 @@ def _values(job: TrainingJob) -> dict[str, object]:
         "base_version": None if job.base_version is None else job.base_version.value,
         "result_version": None if job.result_version is None else job.result_version.value,
         "gate_passed": job.gate_passed,
+        "gate_reason": job.gate_reason,
         "error_code": None if job.error_code is None else job.error_code.value,
         "created_at": job.created_at,
         "started_at": job.started_at,
@@ -114,5 +115,6 @@ def _job(row: Row[Any]) -> TrainingJob:
         base_version=None if row.base_version is None else ModelVersionId(row.base_version),
         result_version=None if row.result_version is None else ModelVersionId(row.result_version),
         gate_passed=row.gate_passed,
+        gate_reason=row.gate_reason,
         error_code=None if row.error_code is None else ErrorCode(row.error_code),
     )

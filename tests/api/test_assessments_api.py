@@ -359,3 +359,25 @@ def test_schema_is_served(service: Service) -> None:
     response = service.client.get("/api/v1/schema.xsd")
     assert response.status_code == 200
     assert response.content == schema_bytes()
+
+
+@pytest.mark.api
+def test_the_declared_load_comes_back_with_the_deviation(service: Service) -> None:
+    """The norm from the customer's report travels in, is stored and is answered with."""
+    created = post(service.client, request_body(declared=80.0))
+
+    root = document(created)
+    declared = child(root, "Declared")
+    measured = float(child(root, "LoadPct").text or "")
+    assert declared.get("loadPct") == "80.0"
+    # The deviation is the measurement minus the report, whatever the model answered.
+    assert float(declared.get("deviation") or "") == pytest.approx(measured - 80.0, abs=0.05)
+    shipment = service.client.get("/api/v1/shipments/RP-1")
+    assert child(document(shipment), "Current").get("declaredLoadPct") == "80.0"
+
+
+@pytest.mark.api
+def test_an_assessment_without_a_report_says_nothing_about_deviation(service: Service) -> None:
+    created = post(service.client, request_body())
+
+    assert document(created).find(f"{{{NAMESPACE}}}Declared") is None

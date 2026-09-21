@@ -41,14 +41,18 @@ from tests.fakes.clock import FixedClock, SequentialIds
 from tests.fakes.heatmaps import FakeHeatmaps
 from tests.fakes.image_storage import InMemoryImageStorage
 from tests.fakes.in_memory_db import InMemoryStore
+from tests.fakes.predictor import band_line
 
 LIMITS = ImageLimits(
     max_bytes=2_000_000, max_pixels=1_000_000, min_side=256, media_types=frozenset(MediaType)
 )
 MAX_BODY_BYTES = 1_000_000
 MIN_BRIGHTNESS = 20.0
-# Not the 0.5 of `configs/app.yaml`: a page must take the threshold it is given.
-UNREADABLE_OOD = 0.6
+# Not the shares of `configs/app.yaml`: a page must take the lines it is given.
+UNUSUAL_SHARE = 0.05
+UNREADABLE_SHARE = 0.6
+# The distance that reaches it on the scale `FakePredictor` reports.
+UNREADABLE_OOD = band_line(UNREADABLE_SHARE)
 PHOTO = image_files.jpeg()
 PHOTO_SHA256 = prepare_image(PHOTO, LIMITS).sha256
 XML = {"Content-Type": "application/xml; charset=utf-8"}
@@ -115,7 +119,8 @@ def make_service(
             storage=storage,
             limits=LIMITS,
             min_brightness=MIN_BRIGHTNESS,
-            unreadable_ood=UNREADABLE_OOD,
+            unusual_band_share=UNUSUAL_SHARE,
+            unreadable_band_share=UNREADABLE_SHARE,
             clock=clock,
             new_id=SequentialIds(),
         ),
@@ -174,12 +179,15 @@ def make_service(
     )
 
 
-def request_body(shipment_id: str = "RP-1", image: str | None = None) -> bytes:
+def request_body(
+    shipment_id: str = "RP-1", image: str | None = None, declared: float | None = None
+) -> bytes:
     data = base64.b64encode(PHOTO).decode() if image is None else image
+    norm = "" if declared is None else f"<DeclaredLoadPct>{declared}</DeclaredLoadPct>"
     return (
         '<?xml version="1.0" encoding="UTF-8"?>'
         f'<AssessmentRequest xmlns="{NAMESPACE}">'
-        f"<ShipmentId>{shipment_id}</ShipmentId><Image>{data}</Image>"
+        f"<ShipmentId>{shipment_id}</ShipmentId><Image>{data}</Image>{norm}"
         "</AssessmentRequest>"
     ).encode()
 

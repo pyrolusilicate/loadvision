@@ -16,9 +16,14 @@ FIRST = f"/ui/assessments/{UUID(int=1)}"
 
 
 def upload(
-    service: Service, token: str | None, number: str = "RP-1", raw: bytes = PHOTO
+    service: Service,
+    token: str | None,
+    number: str = "RP-1",
+    raw: bytes = PHOTO,
+    declared: str = "",
 ) -> Response:
-    form = {"shipment_id": number} | ({} if token is None else {"csrf": token})
+    form = {"shipment_id": number, "declared_load_pct": declared}
+    form |= {} if token is None else {"csrf": token}
     return service.client.post(
         "/ui/assess",
         data=form,
@@ -159,9 +164,18 @@ def test_a_photo_waits_for_the_model() -> None:
 
     response = upload(service, token)
 
-    spec = ERROR_CATALOG[ErrorCode.MODEL_NOT_READY]
-    assert response.status_code == spec.http_status
-    assert spec.message in text_of(response)
+    # The status is the one the API answers with; the page says it in words an operator can act
+    # on, instead of blaming the photo that was just picked.
+    assert response.status_code == ERROR_CATALOG[ErrorCode.MODEL_NOT_READY].http_status
+    assert "Модель загружается." in text_of(response)
+
+
+@pytest.mark.api
+def test_the_form_says_the_model_is_loading_before_anything_is_sent() -> None:
+    service = make_service()
+    sign_in(service)
+
+    assert "Модель загружается." in text_of(get(service, "/ui/assess"))
 
 
 @pytest.mark.api
@@ -191,3 +205,63 @@ def test_the_form_takes_the_shipment_number_from_the_address(service: Service) -
     form = page(get(service, "/ui/assess?number=RP-1"))
 
     assert form.xpath("//input[@name='shipment_id']/@value") == ["RP-1"]
+
+
+@pytest.mark.api
+def test_a_load_below_the_document_is_called_out(service: Service) -> None:
+    """The fake model answers 85.3 for this photo, so a document saying 30 is far off."""
+    token = sign_in(service)
+
+    upload(service, token, declared="30")
+
+    shown = get(service, FIRST)
+    note = page(shown).xpath("//div[contains(@class,'warn')]/p/strong/text()")
+    assert note == ["Загружено больше, чем по документам"]
+    assert "55.3 п.п." in text_of(shown)
+
+
+@pytest.mark.api
+def test_a_small_difference_is_not_called_a_discrepancy(service: Service) -> None:
+    token = sign_in(service)
+
+    upload(service, token, declared="80")
+
+    card = page(get(service, FIRST))
+    assert card.xpath("//div[contains(@class,'ok')]/p/strong/text()") == ["Совпадает с документами"]
+
+
+@pytest.mark.api
+def test_a_document_number_outside_the_range_is_refused(service: Service) -> None:
+    token = sign_in(service)
+
+    refused = upload(service, token, declared="140")
+
+    assert refused.status_code == 400
+    assert "Загрузка по документам указана неверно." in text_of(refused)
+
+
+@pytest.mark.api
+def test_the_same_photo_in_another_shipment_says_where_the_estimate_came_from(
+    service: Service,
+) -> None:
+    """Two cards with the same number look like two predictions; one of them was free."""
+    token = sign_in(service)
+    upload(service, token, number="RP-1")
+
+    again = upload(service, token, number="RP-2")
+
+    # The note belongs to the answer of the form, so the page is opened the way it redirects.
+    second = get(service, again.headers["location"])
+    assert "уже оценивалось в перевозке RP-1" in text_of(second)
+    assert page(second).xpath("//a[@href='/ui/shipments/RP-1']") != []
+
+
+@pytest.mark.api
+def test_a_photo_nobody_sent_before_says_nothing_about_another_shipment(
+    service: Service,
+) -> None:
+    token = sign_in(service)
+
+    first = upload(service, token)
+
+    assert "уже оценивалось" not in text_of(get(service, first.headers["location"]))

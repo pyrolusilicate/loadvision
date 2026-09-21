@@ -59,6 +59,9 @@ class TrainingJob:
         result_version: Version the run produced, or None if it produced none.
         gate_passed: Whether the candidate may replace the active version; None until the run
             ends.
+        gate_reason: What the gate decided and on what numbers, in one line; None until a run
+            reaches the gate. A refusal without its reason is an oracle, and nobody can act on
+            an oracle.
         error_code: Why the run failed, or None.
     """
 
@@ -72,6 +75,7 @@ class TrainingJob:
     base_version: ModelVersionId | None = None
     result_version: ModelVersionId | None = None
     gate_passed: bool | None = None
+    gate_reason: str | None = None
     error_code: ErrorCode | None = None
 
     def __post_init__(self) -> None:
@@ -139,6 +143,7 @@ class TrainingJob:
         run_id: str,
         result_version: ModelVersionId | None,
         gate_passed: bool,
+        gate_reason: str | None = None,
     ) -> Self:
         """Returns the job that produced a package; a rejected candidate is still a success.
 
@@ -147,6 +152,7 @@ class TrainingJob:
             run_id: Id of the pipeline run.
             result_version: Version registered from the package, if it was registered.
             gate_passed: Whether the candidate may replace the active version.
+            gate_reason: What the gate decided and on what numbers.
 
         Raises:
             ValueError: If the job is not running.
@@ -159,6 +165,7 @@ class TrainingJob:
             run_id=run_id,
             result_version=result_version,
             gate_passed=gate_passed,
+            gate_reason=gate_reason,
         )
 
     def failed(self, *, at: datetime, run_id: str | None, error_code: ErrorCode) -> Self:
