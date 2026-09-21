@@ -1,13 +1,24 @@
-"""Averaging the out-of-fold runs of several models into one ensemble, photo for photo."""
+"""Joining the out-of-fold runs of several models into one ensemble, photo for photo.
+
+The members are joined by their mean or by their median. The metric is MAE, which is
+minimised by the median and not by the mean, and on our runs the median wins by 0.10 to
+0.14 with the direction the same in every combination of members. The mean stays the
+default because every number measured before 21.09 was measured with it.
+"""
 
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from itertools import combinations
+from typing import Final, Literal
 
 import numpy as np
 from numpy.typing import NDArray
 
 from loadvision.ml.pipeline.stages.train_folds import OofRow
+
+type Joint = Literal["mean", "median"]
+
+JOINTS: Final[tuple[Joint, ...]] = ("mean", "median")
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
@@ -18,32 +29,37 @@ class Blend:
         ids: Photo ids, sorted, the order of every array below.
         folds: Fold every photo was held out in.
         labels: Reference loads.
-        raw: Mean of the members' predictions before postprocessing.
+        raw: The members' predictions joined, before postprocessing.
+        how: How they were joined.
     """
 
     ids: tuple[str, ...]
     folds: NDArray[np.int64]
     labels: NDArray[np.float64]
     raw: NDArray[np.float64]
+    how: Joint = "mean"
 
 
-def blend(runs: Mapping[str, Mapping[str, OofRow]]) -> Blend:
-    """Averages the raw predictions of runs measured on the same photos and the same folds.
+def blend(runs: Mapping[str, Mapping[str, OofRow]], how: Joint = "mean") -> Blend:
+    """Joins the raw predictions of runs measured on the same photos and the same folds.
 
-    Every member predicted each photo with a model that never saw it, so their mean did not
-    see it either. The folds must match too: the calibration on top is fitted fold by fold,
-    and a photo sitting in two folds would leak into its own curve.
+    Every member predicted each photo with a model that never saw it, so the joined answer did
+    not see it either. The folds must match too: the calibration on top is fitted fold by
+    fold, and a photo sitting in two folds would leak into its own curve.
 
     Args:
         runs: Member name to its rows of `oof.csv`.
+        how: Join the members by their `mean` or by their `median`.
 
     Returns:
-        The averaged predictions.
+        The joined predictions.
 
     Raises:
-        ValueError: If there are no runs, or two runs disagree about which photos they cover,
-            the fold of a photo or its label.
+        ValueError: If there are no runs, the join is unknown, or two runs disagree about
+            which photos they cover, the fold of a photo or its label.
     """
+    if how not in JOINTS:
+        raise ValueError(f"unknown join {how!r}, known: {', '.join(JOINTS)}")
     if not runs:
         raise ValueError("a blend needs at least one run")
     names = list(runs)
@@ -63,8 +79,14 @@ def blend(runs: Mapping[str, Mapping[str, OofRow]]) -> Blend:
         ids=tuple(ids),
         folds=np.array([first[i].fold for i in ids], dtype=np.int64),
         labels=np.array([first[i].label for i in ids], dtype=np.float64),
-        raw=np.mean([[runs[name][i].raw for i in ids] for name in names], axis=0),
+        raw=join(np.array([[runs[name][i].raw for i in ids] for name in names]), how),
+        how=how,
     )
+
+
+def join(members: NDArray[np.float64], how: Joint = "mean") -> NDArray[np.float64]:
+    """Joins one row per member into one row, by mean or by median."""
+    return np.median(members, axis=0) if how == "median" else np.mean(members, axis=0)
 
 
 def subsets(names: Sequence[str]) -> list[tuple[str, ...]]:

@@ -1,4 +1,5 @@
 from pathlib import Path
+from tempfile import TemporaryDirectory
 from typing import Any
 
 import numpy as np
@@ -7,13 +8,15 @@ import timm
 import timm.models._builder as timm_builder
 import torch
 from numpy.typing import NDArray
+from safetensors.numpy import save_file as save_numpy
 from safetensors.torch import save_file
 
 from loadvision.imaging.crops import FAR_END, WHOLE
 from loadvision.imaging.prepared_image import MediaType, PreparedImage
-from loadvision.ml.inference.predictor import PackagePredictor
+from loadvision.ml.inference.predictor import BinsHead, PackagePredictor
 from loadvision.ml.models import backbones, depth
 from loadvision.ml.models.depth import DEPTH_DIM, GRID_COLS, GRID_ROWS
+from loadvision.ml.packaging.model_package import ModelPackageError
 from loadvision.ml.registry import BackboneSpec
 from tests.model_packages import build_package, member_data
 
@@ -200,3 +203,59 @@ def test_members_of_one_checkpoint_with_different_weights_each_run_their_own(
     # would leave them apart by exactly the step between their heads.
     assert prediction.uncertainty is not None
     assert abs(prediction.uncertainty - FOLD_STEP) > 1e-6
+
+
+@pytest.mark.ml
+def test_the_bins_head_answers_the_mean_of_its_own_distribution() -> None:
+    weights = np.zeros((21, 4), dtype=np.float32)
+    bias = np.full(21, -50.0, dtype=np.float32)
+    bias[10] = 0.0  # вся масса в середине сетки, то есть ровно 50%
+    with TemporaryDirectory() as folder:
+        path = Path(folder) / "head.safetensors"
+        save_numpy({"layer.weight": weights, "layer.bias": bias}, str(path))
+        head = BinsHead.load(path)
+
+    assert head.apply(np.zeros(4)) == pytest.approx(50.0, abs=0.01)
+
+
+@pytest.mark.ml
+def test_the_bins_head_never_leaves_the_possible_range() -> None:
+    rng = np.random.default_rng(0)
+    weights = rng.normal(scale=20.0, size=(21, 4)).astype(np.float32)
+    with TemporaryDirectory() as folder:
+        path = Path(folder) / "head.safetensors"
+        save_numpy(
+            {"layer.weight": weights, "layer.bias": np.zeros(21, dtype=np.float32)}, str(path)
+        )
+        head = BinsHead.load(path)
+
+    answers = [head.apply(rng.normal(size=4) * 10) for _ in range(50)]
+
+    assert all(0.0 <= value <= 100.0 for value in answers)
+
+
+@pytest.mark.ml
+def test_a_head_file_without_the_layer_is_refused() -> None:
+    with TemporaryDirectory() as folder:
+        path = Path(folder) / "head.safetensors"
+        save_numpy({"something.else": np.zeros(3, dtype=np.float32)}, str(path))
+
+        with pytest.raises(ModelPackageError, match=r"layer\.weight"):
+            BinsHead.load(path)
+
+
+@pytest.mark.ml
+def test_the_bins_head_refuses_a_vector_of_the_wrong_length() -> None:
+    with TemporaryDirectory() as folder:
+        path = Path(folder) / "head.safetensors"
+        save_numpy(
+            {
+                "layer.weight": np.zeros((21, 4), dtype=np.float32),
+                "layer.bias": np.zeros(21, dtype=np.float32),
+            },
+            str(path),
+        )
+        head = BinsHead.load(path)
+
+    with pytest.raises(ModelPackageError, match="expects 4 features"):
+        head.apply(np.zeros(9))

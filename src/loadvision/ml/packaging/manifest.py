@@ -84,6 +84,13 @@ class Preprocessing(_Schema):
     params: dict[str, StrictInt | StrictFloat] = Field(default_factory=dict)
 
 
+class HeadKind(StrEnum):
+    """How the head file of a member is read."""
+
+    LINEAR = "linear"
+    BINS = "bins"
+
+
 class Member(_Schema):
     """One model of the ensemble.
 
@@ -97,6 +104,10 @@ class Member(_Schema):
         preprocessing: Input preparation for this backbone.
         inputs: What the encoder is shown, by key of the input registry of `imaging/crops.py`.
             The head reads the vectors in this order, so it must match the training.
+        head_kind: How to read the head file. `linear` is the ridge head every package before
+            21.09 carries, in the `.npz` form; `bins` is a distribution over the grid the
+            expert marked on, saved as safetensors. The default keeps older packages loading
+            unchanged.
     """
 
     backbone: RegistryKey
@@ -106,6 +117,7 @@ class Member(_Schema):
     weight: float = Field(ge=0, le=1)
     preprocessing: Preprocessing
     inputs: tuple[RegistryKey, ...] = Field(default=(WHOLE,), min_length=1)
+    head_kind: HeadKind = HeadKind.LINEAR
 
     @model_validator(mode="after")
     def _require_weights_for_neural_runtimes(self) -> Self:

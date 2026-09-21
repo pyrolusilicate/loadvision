@@ -5,7 +5,7 @@ import csv
 import json
 import logging
 from collections.abc import Sequence
-from dataclasses import asdict
+from dataclasses import asdict, replace
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Final
@@ -100,6 +100,19 @@ def add_commands(groups: "argparse._SubParsersAction[argparse.ArgumentParser]") 
         help="do not keep the weights of the fold models (about 350 MB each for a ViT-B)",
     )
     parser.add_argument(
+        "--seed",
+        type=int,
+        help="override the config's seed; with --full it is how several models of one recipe "
+        "are trained on all the photos and then averaged",
+    )
+    parser.add_argument(
+        "--pseudo",
+        type=Path,
+        help="submission.csv whose loads are added to the training half of every fold, so the "
+        "307 test photos teach as well; they never enter the half a fold is scored on, and "
+        "their loads are a model's answers, not labels",
+    )
+    parser.add_argument(
         "--calibrate-from",
         type=Path,
         help="oof.csv of an out-of-fold run with the same settings; with --full its calibration "
@@ -119,6 +132,8 @@ def finetune(args: argparse.Namespace) -> int:
         FileNotFoundError: If the dataset or the folds file is missing.
     """
     settings = _settings(args.config)
+    if args.seed is not None:
+        settings = replace(settings, seed=args.seed)
     if args.full and args.fold is not None:
         raise CommandError("--full trains on every photo; --fold makes no sense with it")
     data = dataset_of(args.data, args.folds)
@@ -131,6 +146,7 @@ def finetune(args: argparse.Namespace) -> int:
             "folds": str(args.folds),
             "fold": args.fold,
             "full": args.full,
+            "pseudo": None if args.pseudo is None else str(args.pseudo),
             "weights_kept": not args.no_weights,
             "calibrate_from": None if args.calibrate_from is None else str(args.calibrate_from),
             "device": args.device,
@@ -168,6 +184,7 @@ def finetune(args: argparse.Namespace) -> int:
         device=args.device,
         only=args.fold,
         on_fold=save,
+        extra=None if args.pseudo is None else _pseudo(args.pseudo, test),
     )
     done = ~np.isnan(raw)
     predicted = calibrated(data, raw) if done.all() else None
@@ -197,10 +214,22 @@ def finetune(args: argparse.Namespace) -> int:
 def _full(
     args: argparse.Namespace, settings: FinetuneSettings, data: Dataset, run_dir: Path
 ) -> int:
-    """Trains on every labelled photo, saves the model and writes the platform's answer file."""
-    model = fit(data.samples, data.labels, settings, device=args.device)
-    encoder, head = save_model(model, run_dir)
+    """Trains on every labelled photo, saves the model and writes the platform's answer file.
+
+    With `--pseudo` the test photos join the training set as well, carrying the loads an
+    earlier model gave them. Here there is nothing held out to protect: the model is meant to
+    answer these very photos, and teaching on its own earlier answers is what the option is
+    for. The answers it writes are still its own, computed after training.
+    """
     test = load_split(args.data, "test")
+    samples = list(data.samples)
+    labels = data.labels
+    if args.pseudo is not None:
+        more, more_labels = _pseudo(args.pseudo, test)
+        samples += more
+        labels = np.concatenate([labels, more_labels])
+    model = fit(samples, labels, settings, device=args.device)
+    encoder, head = save_model(model, run_dir)
     raw = predict(
         model, test, device=args.device, batch_size=settings.batch_size, workers=settings.workers
     )
@@ -222,6 +251,37 @@ def _full(
     _logger.info("model: %s, %s", encoder.name, head.name)
     _logger.info("%s", run_dir)
     return 0
+
+
+def _pseudo(path: Path, test: Sequence[Sample]) -> tuple[list[Sample], NDArray[np.float64]]:
+    """Reads loads for the test photos from a submission, to teach with and never to score on.
+
+    Args:
+        path: A submission.csv of image_id and load_pct.
+        test: The test photos themselves.
+
+    Returns:
+        The photos and their loads, in the file's order.
+
+    Raises:
+        CommandError: If the file is missing, malformed, or does not cover exactly the test
+            photos: a partial file would quietly train on a different set than it looks like.
+    """
+    if not path.is_file():
+        raise CommandError(f"{path} is missing")
+    try:
+        with path.open(newline="", encoding="utf-8") as file:
+            loads = {row["image_id"]: float(row["load_pct"]) for row in csv.DictReader(file)}
+    except (KeyError, ValueError) as error:
+        raise CommandError(f"{path} is not a submission of image_id and load_pct") from error
+    by_id = {sample.image_id: sample for sample in test}
+    if set(loads) != set(by_id):
+        raise CommandError(f"{path} does not cover exactly the {len(by_id)} test photos")
+    ordered = sorted(loads)
+    _logger.info("pseudo: %d test photos join the training half of every fold", len(ordered))
+    return [by_id[image_id] for image_id in ordered], np.array(
+        [loads[image_id] for image_id in ordered], dtype=np.float64
+    )
 
 
 def _write_test_folds(

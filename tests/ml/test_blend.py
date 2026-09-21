@@ -45,3 +45,40 @@ def test_every_combination_is_listed_once() -> None:
         ("b", "c"),
         ("a", "b", "c"),
     ]
+
+
+@pytest.mark.unit
+def test_the_median_join_ignores_a_single_wild_member() -> None:
+    runs = {
+        "sane_a": rows([40.0, 60.0]),
+        "sane_b": rows([42.0, 62.0]),
+        "wild": rows([100.0, 0.0]),
+    }
+
+    averaged = blend(runs, "mean")
+    middled = blend(runs, "median")
+
+    assert averaged.raw.tolist() == pytest.approx([60.666667, 40.666667], abs=1e-4)
+    assert middled.raw.tolist() == pytest.approx([42.0, 60.0])
+    assert middled.how == "median"
+    assert averaged.how == "mean"
+
+
+@pytest.mark.unit
+def test_two_members_have_the_same_mean_and_median() -> None:
+    runs = {"one": rows([40.0, 10.0]), "two": rows([50.0, 20.0])}
+
+    assert blend(runs, "median").raw.tolist() == pytest.approx(blend(runs, "mean").raw.tolist())
+
+
+@pytest.mark.unit
+def test_the_default_join_is_still_the_mean_every_earlier_number_was_measured_with() -> None:
+    runs = {"a": rows([40.0]), "b": rows([44.0]), "c": rows([90.0])}
+
+    assert blend(runs).raw.tolist() == pytest.approx([58.0])
+
+
+@pytest.mark.unit
+def test_an_unknown_join_is_refused() -> None:
+    with pytest.raises(ValueError, match="unknown join"):
+        blend({"one": rows([40.0])}, "trimmed")  # type: ignore[arg-type]

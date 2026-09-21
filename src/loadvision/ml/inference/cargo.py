@@ -40,11 +40,21 @@ _QUESTION: Final = (
 )
 _ANSWER_TOKENS: Final = 12
 
-# A cell of the depth grid counts as cargo when it is this much nearer than the emptiest part
-# of the frame, which is the far wall or the roof.
-_NEAR_MARGIN: Final = 0.12
-# The lowest rows are the floor right under the camera; they are near in every photo.
-_FLOOR_ROWS: Final = 2
+# The face of a stack is a wall: its depth barely changes from row to row, while the floor
+# and the roof run away from the camera. A row belongs to that face when the step to the next
+# row is under this share of the whole depth range of the frame.
+_FLAT_STEP: Final = 0.06
+# ... and when it is at least this much nearer than the far wall, so the wall itself is out.
+_NEAR_MARGIN: Final = 0.15
+# The walls run along the sides of the frame; only its middle is looked at.
+_SIDE_SHARE: Final = 0.25
+# The grid the stack is looked for in. Coarse on purpose: measured on photos, a finer grid
+# finds long flat runs in the floor and the roof and calls them cargo, while this one keeps
+# an empty body at zero.
+STACK_ROWS: Final = 16
+STACK_COLS: Final = 12
+# Two rows of sixteen is an eighth of the frame; anything shorter is noise, not a stack.
+_MIN_FACE_ROWS: Final = 2
 
 
 @dataclass(frozen=True, slots=True)
@@ -63,9 +73,10 @@ class CargoSeen:
 def stack_share(depth_grid: NDArray[np.float32], rows: int, cols: int) -> float:
     """Estimates how high the cargo is stacked, from the depth grid of the photo.
 
-    The grid holds relative depth, larger meaning nearer. The emptiest cells - the far wall
-    and the roof - set the baseline; a cell noticeably nearer than that holds something. The
-    answer is how far up those cells reach, as a share of the frame's height.
+    The grid holds relative depth, larger meaning nearer. A stack stands like a wall in front
+    of the camera: across its face the depth hardly changes from row to row, while the floor
+    and the roof recede steadily. So the cargo is the tallest run of rows that is flat and
+    nearer than the far wall, and its height is the share of the frame it takes.
 
     Args:
         depth_grid: Flat grid of relative depth, values 0 to 1.
@@ -73,21 +84,32 @@ def stack_share(depth_grid: NDArray[np.float32], rows: int, cols: int) -> float:
         cols: Columns of it.
 
     Returns:
-        Share of the body's height the cargo takes, never above `MAX_STACK_SHARE`.
+        Share of the body's height the cargo takes, 0 when nothing stands out, never above
+        `MAX_STACK_SHARE`.
     """
     grid = np.asarray(depth_grid, dtype=np.float64).reshape(rows, cols)
-    middle = grid[:, cols // 4 : cols - cols // 4]  # the walls run along the sides
-    floor = middle[rows - _FLOOR_ROWS :].mean()
-    far = float(np.percentile(middle, 10))
-    if floor <= far:
+    side = max(1, round(cols * _SIDE_SHARE))
+    profile = np.median(grid[:, side : cols - side], axis=1)
+    spread = float(profile.max() - profile.min())
+    if spread <= 0:
         return 0.0
-    # A row counts when its middle is nearer than the far wall by a clear margin.
-    nearer = middle.mean(axis=1) > far + _NEAR_MARGIN * (floor - far)
-    usable = nearer[: rows - _FLOOR_ROWS]
-    if not usable.any():
+    far = float(profile.min())
+    flat = np.abs(np.diff(profile)) < _FLAT_STEP * spread
+    near = profile[:-1] > far + _NEAR_MARGIN * spread
+    face = flat & near
+    tallest = _longest_run(face)
+    if tallest < _MIN_FACE_ROWS:
         return 0.0
-    highest = int(np.argmax(usable))  # rows run from the top, so the first one is the tallest
-    return min(MAX_STACK_SHARE, (rows - highest) / rows)
+    return min(MAX_STACK_SHARE, tallest / rows)
+
+
+def _longest_run(flags: NDArray[np.bool_]) -> int:
+    """Length of the longest stretch of True in a row of flags."""
+    longest = current = 0
+    for flag in flags.tolist():
+        current = current + 1 if flag else 0
+        longest = max(longest, current)
+    return longest
 
 
 class CargoSight:
