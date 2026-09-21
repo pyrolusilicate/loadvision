@@ -10,7 +10,7 @@ from numpy.typing import NDArray
 
 from loadvision.imaging.prepared_image import PreparedImage
 from loadvision.imaging.views import IDENTITY, get
-from loadvision.ml.inference.predictor import RidgeHead
+from loadvision.ml.inference.predictor import BinsHead, Head, load_head
 from loadvision.ml.models.backbones import Backbone, load_backbone
 from loadvision.ml.packaging.manifest import Runtime
 from loadvision.ml.packaging.model_package import ModelPackage, ModelPackageError
@@ -56,17 +56,17 @@ class Explainer:
         device: Torch device the encoder is on.
     """
 
-    def __init__(self, backbone: Backbone, head: RidgeHead, device: str) -> None:
+    def __init__(self, backbone: Backbone, head: Head, device: str) -> None:
         self._backbone = backbone
         self._device = device
         self._module = cast(Any, backbone.module)
         self._prefix = int(getattr(self._module, "num_prefix_tokens", 0))
         self._rows = backbone.spec.height // backbone.spec.patch
         self._cols = backbone.spec.width // backbone.spec.patch
-        self._mean = torch.tensor(head.mean, dtype=torch.float32, device=device)
-        self._scale = torch.tensor(head.scale, dtype=torch.float32, device=device)
-        self._weights = torch.tensor(head.weights, dtype=torch.float32, device=device)
-        self._intercept = head.intercept
+        # The head may read more than the photo vector: a member with depth reads the depth
+        # grid glued after it. Only the photo half is kept, because the map answers "which
+        # pixels moved the answer", and the depth half does not move with the pixels.
+        self._answer_from = _photo_answer(head, backbone.dim, device)
 
     @classmethod
     def from_package(cls, package: ModelPackage, device: str = "cpu") -> Self:
@@ -87,7 +87,7 @@ class Explainer:
             raise ModelPackageError("the package has no torch member to explain")
         weights = None if member.weights is None else package.path(member.weights)
         backbone = load_backbone(member.backbone, device, weights)
-        return cls(backbone, RidgeHead.load(package.path(member.head)), device)
+        return cls(backbone, load_head(member.head_kind, package.path(member.head)), device)
 
     def explain(self, image: PreparedImage, *, contribution: bool = True) -> Explanation:
         """Computes the maps of one photo.
@@ -145,8 +145,7 @@ class Explainer:
         return render(image, self.explain(image, contribution=kind == "contribution"), kind)
 
     def _answer(self, pixels: torch.Tensor) -> torch.Tensor:
-        pooled = self._backbone.pool(self._backbone.tokens(pixels))
-        return (pooled - self._mean) / self._scale @ self._weights + self._intercept
+        return self._answer_from(self._backbone.pool(self._backbone.tokens(pixels)))
 
     @staticmethod
     def _keep(
@@ -182,3 +181,38 @@ def _normalized(grid: NDArray[Any], *, signed: bool) -> NDArray[np.float32]:
         return np.zeros_like(grid, dtype=np.float32)
     low = -1.0 if signed else 0.0
     return np.clip(grid / scale, low, 1.0).astype(np.float32)
+
+
+def _photo_answer(head: Head, width: int, device: str) -> Callable[[torch.Tensor], torch.Tensor]:
+    """Builds the part of a head that turns the photo vector into an answer.
+
+    Whatever the head reads besides the photo - today only the depth grid - is dropped: it is
+    constant while the pixels change, so it shifts the answer without shaping the map.
+
+    Args:
+        head: Head of the member being explained.
+        width: Length of the vector the encoder pools to.
+        device: Torch device.
+
+    Returns:
+        A function from the pooled vector to one answer per photo.
+    """
+    if isinstance(head, BinsHead):
+        weights = torch.tensor(head.weights[:, :width], dtype=torch.float32, device=device)
+        bias = torch.tensor(head.bias, dtype=torch.float32, device=device)
+        centres = torch.tensor(head.centres, dtype=torch.float32, device=device)
+
+        def bins(pooled: torch.Tensor) -> torch.Tensor:
+            return torch.softmax(pooled @ weights.T + bias, dim=1) @ centres
+
+        return bins
+
+    mean = torch.tensor(head.mean[:width], dtype=torch.float32, device=device)
+    scale = torch.tensor(head.scale[:width], dtype=torch.float32, device=device)
+    weights = torch.tensor(head.weights[:width], dtype=torch.float32, device=device)
+    intercept = head.intercept
+
+    def ridge(pooled: torch.Tensor) -> torch.Tensor:
+        return (pooled - mean) / scale @ weights + intercept
+
+    return ridge

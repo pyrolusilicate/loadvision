@@ -57,6 +57,18 @@ class Backbone:
         )
         return forward_features(batch)
 
+    def patches(self, tokens: torch.Tensor) -> torch.Tensor:
+        """Drops the class and register tokens, leaving one token per patch.
+
+        Args:
+            tokens: Output of `tokens`.
+
+        Returns:
+            Float tensor of shape (photos, patches, `dim`).
+        """
+        prefix = int(getattr(self.module, "num_prefix_tokens", 0))
+        return tokens[:, prefix:, :]
+
     def pool(self, tokens: torch.Tensor) -> torch.Tensor:
         """Turns encoder tokens into one vector per photo, the way this entry asks for.
 

@@ -1,5 +1,6 @@
 """Builds the model package of an encoder fine-tuned by `finetune`, on all photos or by fold."""
 
+import json
 import shutil
 from collections.abc import Mapping, Sequence
 from datetime import datetime
@@ -22,7 +23,13 @@ from loadvision.ml.models.depth import (
     GRID_COLS,
     GRID_ROWS,
 )
-from loadvision.ml.packaging.manifest import Manifest, Member, Preprocessing, Runtime
+from loadvision.ml.packaging.manifest import (
+    HeadKind,
+    Manifest,
+    Member,
+    Preprocessing,
+    Runtime,
+)
 from loadvision.ml.packaging.model_package import (
     PACKAGE_OOF,
     ModelPackage,
@@ -39,7 +46,13 @@ from loadvision.ml.pipeline.stages.build_package import (
 )
 from loadvision.ml.pipeline.stages.train_folds import Chain, OofRow
 from loadvision.ml.training.embedding_cache import read_image
-from loadvision.ml.training.finetune import ENCODER_FILE, FOLDS_DIR, HEAD_FILE
+from loadvision.ml.training.finetune import (
+    ENCODER_FILE,
+    FOLDS_DIR,
+    HEAD_FILE,
+    HEAD_KIND_FILE,
+    HEAD_STATE_FILE,
+)
 from loadvision.ml.training.postprocess_fit import fit_chain
 
 _BATCH: Final = 16
@@ -90,18 +103,42 @@ def _write_member(
     weights = out_dir / "weights" / f"{backbone.spec.timm_name}.finetuned.m{index}.safetensors"
     weights.parent.mkdir(parents=True, exist_ok=True)
     shutil.copyfile(source / ENCODER_FILE, weights)
-    head = out_dir / f"m{index}" / HEAD_FILE
+    kind, source_head = _head_of(source)
+    head = out_dir / f"m{index}" / source_head.name
     head.parent.mkdir(parents=True, exist_ok=True)
-    shutil.copyfile(source / HEAD_FILE, head)
+    shutil.copyfile(source_head, head)
     return Member(
         backbone=encoder,
         runtime=Runtime.TORCH,
         head=str(head.relative_to(out_dir)),
+        head_kind=kind,
         weights=str(weights.relative_to(out_dir)),
         weight=weight,
         preprocessing=Preprocessing(name=backbone.preprocessing, params=dict(backbone.params)),
         inputs=(WHOLE, FAR_END) if far_view else (WHOLE,),
     )
+
+
+def _head_of(source: Path) -> tuple[HeadKind, Path]:
+    """Finds the head a run saved and says how the service must read it.
+
+    A linear head travels in the ridge form every package before 21.09 carries. Any other head
+    has no linear form, so its own weights go instead and the manifest names the kind.
+
+    Raises:
+        ValueError: If the run carries no head the service can read.
+    """
+    ridge = source / HEAD_FILE
+    if ridge.is_file():
+        return HeadKind.LINEAR, ridge
+    note = source / HEAD_KIND_FILE
+    state = source / HEAD_STATE_FILE
+    if not (note.is_file() and state.is_file()):
+        raise ValueError(f"{source} carries neither {HEAD_FILE} nor {HEAD_STATE_FILE}")
+    kind = json.loads(note.read_text(encoding="utf-8"))["head"]
+    if kind not in {item.value for item in HeadKind}:
+        raise ValueError(f"{source}: the service cannot run a {kind!r} head yet")
+    return HeadKind(kind), state
 
 
 def build_finetuned_package(

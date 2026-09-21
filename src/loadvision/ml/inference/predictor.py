@@ -17,7 +17,7 @@ from loadvision.imaging.prepared_image import MediaType, PreparedImage
 from loadvision.imaging.preprocessing import preprocess
 from loadvision.ml.inference.ood import OodReference
 from loadvision.ml.packaging.baseline_package import BASELINE_BACKBONE
-from loadvision.ml.packaging.manifest import Member, Runtime
+from loadvision.ml.packaging.manifest import HeadKind, Member, Runtime
 from loadvision.ml.packaging.model_package import ModelPackage, ModelPackageError
 from loadvision.ml.postprocess import ASPECT, Applier, load_curves, make_chain
 
@@ -113,9 +113,80 @@ class RidgeHead:
 
 
 @dataclass(frozen=True, slots=True)
+class BinsHead:
+    """Head that answers with a distribution over the grid the expert marked on.
+
+    The member predicts a weight for every bin, softmax turns the weights into shares, and the
+    answer is the mean of the grid under them. It cannot be written as a ridge head, so it
+    travels in its own file and the manifest says so with `head_kind`.
+
+    Attributes:
+        weights: One row of feature weights per bin.
+        bias: One number per bin.
+        centres: Load percent at the centre of every bin.
+    """
+
+    weights: NDArray[np.float64]
+    bias: NDArray[np.float64]
+    centres: NDArray[np.float64]
+
+    @classmethod
+    def load(cls, path: Path) -> Self:
+        """Reads the head from the safetensors file the training wrote.
+
+        Args:
+            path: Head file inside a model package.
+
+        Returns:
+            The head.
+
+        Raises:
+            ModelPackageError: If the file cannot be read or its shapes disagree.
+        """
+        from safetensors.numpy import load_file
+
+        try:
+            stored = load_file(str(path))
+        except (OSError, ValueError) as error:
+            raise ModelPackageError(f"{path.name}: {error}") from error
+        missing = sorted({"layer.weight", "layer.bias"} - set(stored))
+        if missing:
+            raise ModelPackageError(f"{path.name}: missing {', '.join(missing)}")
+        weights = np.asarray(stored["layer.weight"], dtype=np.float64)
+        bias = np.asarray(stored["layer.bias"], dtype=np.float64)
+        if weights.ndim != 2 or bias.shape != (weights.shape[0],):
+            raise ModelPackageError(f"{path.name}: weights and bias must agree on the bin count")
+        centres = np.linspace(_MIN_LOAD_PCT, _MAX_LOAD_PCT, weights.shape[0])
+        return cls(weights=weights, bias=bias, centres=centres)
+
+    def apply(self, features: NDArray[np.floating[Any]]) -> float:
+        """Returns the load percent this head predicts for one feature vector.
+
+        Raises:
+            ModelPackageError: If the number of features does not match the head.
+        """
+        flat = np.asarray(features, dtype=np.float64).ravel()
+        if flat.shape[0] != self.weights.shape[1]:
+            raise ModelPackageError(
+                f"head expects {self.weights.shape[1]} features, got {flat.size}"
+            )
+        scores = self.weights @ flat + self.bias
+        shares = np.exp(scores - scores.max())
+        return _clip(float(shares @ self.centres / shares.sum()))
+
+
+type Head = RidgeHead | BinsHead
+
+
+def load_head(kind: HeadKind, path: Path) -> Head:
+    """Reads the head of a member the way its `head_kind` asks for."""
+    return BinsHead.load(path) if kind is HeadKind.BINS else RidgeHead.load(path)
+
+
+@dataclass(frozen=True, slots=True)
 class _LoadedMember:
     member: Member
-    head: RidgeHead
+    head: Head
     # None for the numpy runtime, where the preprocessing already returns the features.
     encoder: object | None = None
 
@@ -154,7 +225,7 @@ class PackagePredictor:
         self._members = tuple(
             _LoadedMember(
                 member=member,
-                head=RidgeHead.load(package.path(member.head)),
+                head=load_head(member.head_kind, package.path(member.head)),
                 encoder=self._load_encoder(member),
             )
             for member in package.manifest.members

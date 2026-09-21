@@ -13,6 +13,7 @@ from loadvision.cli.dataset import train_samples
 from loadvision.cli.errors import CommandError
 from loadvision.cli.options import add_data_option
 from loadvision.ml.data.splits import (
+    DEFAULT_N_FOLDS,
     DEFAULT_SEED,
     balance_report,
     build_folds,
@@ -64,6 +65,14 @@ def add_commands(groups: "argparse._SubParsersAction[argparse.ArgumentParser]") 
     folds.add_argument(
         "--seed", type=int, default=DEFAULT_SEED, help="split seed (default: %(default)s)"
     )
+    folds.add_argument(
+        "--n-folds",
+        type=int,
+        default=DEFAULT_N_FOLDS,
+        help="number of folds; more folds leave more photos to train each model on, at the "
+        "cost of training that many models (default: %(default)s). Write them to another "
+        "--out: the canonical file is what every earlier metric was measured on",
+    )
     add_data_option(folds)
     folds.set_defaults(run=make_folds)
 
@@ -84,7 +93,11 @@ def make_folds(args: argparse.Namespace) -> int:
         samples = train_samples(args.data)
         try:
             folds = build_folds(
-                samples, now=datetime.now(UTC).replace(microsecond=0), dedup=DEDUP, seed=args.seed
+                samples,
+                now=datetime.now(UTC).replace(microsecond=0),
+                dedup=DEDUP,
+                n_folds=args.n_folds,
+                seed=args.seed,
             )
         except ValueError as error:
             raise CommandError(f"cannot build balanced folds: {error}") from error

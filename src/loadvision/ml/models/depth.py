@@ -71,16 +71,20 @@ class DepthEncoder:
         model = AutoModelForDepthEstimation.from_pretrained(str(source)).to(device).eval()
         return cls(model, device)
 
-    def grids(self, images: Sequence[PreparedImage]) -> NDArray[np.float32]:
+    def grids(
+        self, images: Sequence[PreparedImage], rows: int = GRID_ROWS, cols: int = GRID_COLS
+    ) -> NDArray[np.float32]:
         """Returns one grid per photo, in the order given.
 
         Args:
             images: Decoded photos.
+            rows: Rows to pool the depth map into; the model's own grid by default.
+            cols: Columns of that grid.
 
         Returns:
-            Array of shape (photos, `DEPTH_DIM`), values 0 to 1, larger means nearer.
+            Array of shape (photos, rows * cols), values 0 to 1, larger means nearer.
         """
-        rows: list[NDArray[np.float32]] = []
+        pooled: list[NDArray[np.float32]] = []
         with torch.inference_mode():
             for start in range(0, len(images), _BATCH):
                 batch = np.stack(
@@ -95,14 +99,16 @@ class DepthEncoder:
                 # Pooling into a grid that does not divide the input evenly runs on the CPU:
                 # MPS has no kernel for it.
                 grid = torch.nn.functional.adaptive_avg_pool2d(
-                    depth.float().cpu().unsqueeze(1), (GRID_ROWS, GRID_COLS)
+                    depth.float().cpu().unsqueeze(1), (rows, cols)
                 ).flatten(1)
-                rows.append((grid / grid.amax(dim=1, keepdim=True).clamp_min(1e-6)).numpy())
-        return np.concatenate(rows).astype(np.float32)
+                pooled.append((grid / grid.amax(dim=1, keepdim=True).clamp_min(1e-6)).numpy())
+        return np.concatenate(pooled).astype(np.float32)
 
-    def grid(self, image: PreparedImage) -> NDArray[np.float32]:
+    def grid(
+        self, image: PreparedImage, rows: int = GRID_ROWS, cols: int = GRID_COLS
+    ) -> NDArray[np.float32]:
         """Returns the grid of one photo, the way the service asks for it."""
-        return self.grids([image])[0]
+        return self.grids([image], rows, cols)[0]
 
 
 def depth_grids(samples: Sequence[Sample], device: str) -> NDArray[np.float32]:

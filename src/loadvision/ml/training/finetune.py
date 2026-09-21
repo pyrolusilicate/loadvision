@@ -1,5 +1,6 @@
 """Fine-tuning an encoder end to end on the load percent, measured out of fold."""
 
+import json
 import logging
 import math
 import random
@@ -20,7 +21,14 @@ from loadvision.imaging.prepared_image import PreparedImage
 from loadvision.imaging.preprocessing import preprocess
 from loadvision.ml.data.manifest import Sample
 from loadvision.ml.models.backbones import Backbone, load_backbone
-from loadvision.ml.models.depth import DEPTH_DIM, depth_grids, mirror_grids
+from loadvision.ml.models.depth import (
+    DEPTH_DIM,
+    GRID_COLS,
+    GRID_ROWS,
+    depth_grids,
+    mirror_grids,
+)
+from loadvision.ml.models.heads import HEADS, LOSSES, Head, Plain, make_head
 from loadvision.ml.training.embedding_cache import read_image
 
 logger = logging.getLogger(__name__)
@@ -35,6 +43,10 @@ _DEPTH: Final = "depth"
 FOLDS_DIR: Final = "folds"
 ENCODER_FILE: Final = "encoder.safetensors"
 HEAD_FILE: Final = "head.npz"
+# The head's own weights, saved for every head there is: the ridge form above can only
+# hold a linear one, and a rented machine loses its disk when it stops.
+HEAD_STATE_FILE: Final = "head.safetensors"
+HEAD_KIND_FILE: Final = "head.json"
 
 type Loader = Callable[[str, str], Backbone]
 
@@ -60,6 +72,15 @@ class FinetuneSettings:
         weight_decay: AdamW decay of the encoder weights; the head has none.
         warmup_epochs: Epochs of linear warmup before the cosine decay.
         flip: Mirror training photos at random; the share of the floor does not change.
+        jitter: Strength of the photometric noise on training photos, 0 for none. Brightness,
+            contrast and grain change how a body is lit and which camera took it, and none of
+            them changes how much of the floor is taken - which is why the label survives
+            them and a crop would not.
+        erase: Chance of blanking one rectangle of a training photo, 0 for none. Cargo near
+            the doors hides the far end on real photos, so the model is asked to answer with
+            a piece of the frame missing.
+        head: Which head sits over the encoder, a key in `ml.models.heads.HEADS`.
+        loss: Which loss scores the answers, `l1` or `huber`; the bins head carries its own.
         seed: Seed of the first fold; fold N uses `seed + N`.
         workers: Processes decoding photos for the loader; 0 decodes in the main process.
         far_view: Also feed the encoder a zoomed crop of the far end of the body and give the
@@ -79,6 +100,10 @@ class FinetuneSettings:
     weight_decay: float = 0.05
     warmup_epochs: float = 1.0
     flip: bool = True
+    jitter: float = 0.0
+    erase: float = 0.0
+    head: str = "linear"
+    loss: str = "l1"
     seed: int = 0
     workers: int = 4
     far_view: bool = False
@@ -99,6 +124,16 @@ class FinetuneSettings:
             raise ValueError("layer_decay must be in (0, 1]")
         if self.weight_decay < 0 or self.warmup_epochs < 0 or self.workers < 0:
             raise ValueError("weight_decay, warmup_epochs and workers must not be negative")
+        if not 0 <= self.jitter <= 1:
+            raise ValueError(f"jitter must be a share from 0 to 1, got {self.jitter}")
+        if not 0 <= self.erase <= 1:
+            raise ValueError(f"erase must be a chance from 0 to 1, got {self.erase}")
+        if self.head not in HEADS:
+            raise ValueError(f"unknown head {self.head!r}, known: {', '.join(sorted(HEADS))}")
+        if self.loss not in LOSSES:
+            raise ValueError(f"unknown loss {self.loss!r}, known: {', '.join(LOSSES)}")
+        if self.head == "occupancy" and self.far_view:
+            raise ValueError("the occupancy head reads the patches of the whole frame only")
 
     @classmethod
     def from_mapping(cls, raw: Mapping[str, Any]) -> Self:
@@ -133,26 +168,67 @@ class LoadRegressor(torch.nn.Module):
     """
 
     def __init__(
-        self, backbone: Backbone, start: float, *, far_view: bool = False, depth: bool = False
+        self,
+        backbone: Backbone,
+        start: float,
+        *,
+        far_view: bool = False,
+        depth: bool = False,
+        head: str = "linear",
+        loss: str = "l1",
     ) -> None:
         super().__init__()
         self._backbone = backbone
         self.encoder = backbone.module
         self.far_view = far_view
         self.depth = depth
-        width = backbone.dim * (2 if far_view else 1) + (DEPTH_DIM if depth else 0)
-        self.head = torch.nn.Linear(width, 1)
-        torch.nn.init.zeros_(self.head.weight)
-        torch.nn.init.constant_(self.head.bias, start)
+        wants_tokens = HEADS[head].wants_tokens
+        # A head that reads patches gets the depth of its own patch, one number next to the
+        # token, instead of the whole grid glued to a vector that covers the frame.
+        width = (
+            backbone.dim + (1 if depth else 0)
+            if wants_tokens
+            else backbone.dim * (2 if far_view else 1) + (DEPTH_DIM if depth else 0)
+        )
+        self.kind = head
+        self.scoring = loss
+        self.head: Head = make_head(head, width, start, loss=loss)
 
-    def forward(self, inputs: Mapping[str, torch.Tensor]) -> torch.Tensor:
-        """Returns one share of 1 per photo."""
+    def features(self, inputs: Mapping[str, torch.Tensor]) -> torch.Tensor:
+        """Returns what the head reads: one vector per photo, or one token per patch."""
+        if self.head.wants_tokens:
+            tokens = self._backbone.patches(self._backbone.tokens(inputs[_FULL]))
+            if not self.depth:
+                return tokens
+            return torch.cat([tokens, self._patch_depth(inputs[_DEPTH], tokens)], dim=2)
         parts = [self._backbone.encode(inputs[_FULL])]
         if self.far_view:
             parts.append(self._backbone.encode(inputs[_FAR]))
         if self.depth:
             parts.append(inputs[_DEPTH].to(parts[0].dtype))
-        return self.head(torch.cat(parts, dim=1)).squeeze(1)
+        return torch.cat(parts, dim=1)
+
+    def _patch_depth(self, grid: torch.Tensor, tokens: torch.Tensor) -> torch.Tensor:
+        """Stretches the coarse depth grid onto the patch grid, one number per token.
+
+        The depth map is 16 by 12 and the patches are finer, so the map is resampled to their
+        shape. Each patch then carries how far away it is, right next to what it looks like.
+        """
+        spec = self._backbone.spec
+        rows, cols = spec.height // spec.patch, spec.width // spec.patch
+        coarse = grid.reshape(grid.shape[0], 1, GRID_ROWS, GRID_COLS).to(tokens.dtype)
+        fine = torch.nn.functional.interpolate(
+            coarse, size=(rows, cols), mode="bilinear", align_corners=False
+        )
+        return fine.reshape(grid.shape[0], rows * cols, 1)
+
+    def forward(self, inputs: Mapping[str, torch.Tensor]) -> torch.Tensor:
+        """Returns one share of 1 per photo."""
+        return self.head(self.features(inputs))
+
+    def loss(self, inputs: Mapping[str, torch.Tensor], targets: torch.Tensor) -> torch.Tensor:
+        """Scores this model's answers against the labels, the way its head asks for."""
+        return self.head.loss(self.features(inputs), targets)
 
 
 type FoldDone = Callable[[int, LoadRegressor, NDArray[np.float64]], None]
@@ -168,6 +244,8 @@ class _Photos(torch.utils.data.Dataset[tuple[dict[str, torch.Tensor], torch.Tens
         backbone: Backbone,
         *,
         flip: bool,
+        jitter: float = 0.0,
+        erase: float = 0.0,
         far_view: bool = False,
         depth: NDArray[np.float32] | None = None,
     ) -> None:
@@ -176,6 +254,8 @@ class _Photos(torch.utils.data.Dataset[tuple[dict[str, torch.Tensor], torch.Tens
         self._preprocessing = backbone.preprocessing
         self._params = dict(backbone.params)
         self._flip = flip
+        self._jitter = jitter
+        self._erase = erase
         self._far_view = far_view
         self._depth = depth
 
@@ -195,10 +275,38 @@ class _Photos(torch.utils.data.Dataset[tuple[dict[str, torch.Tensor], torch.Tens
                 key: mirror_grids(value) if key == _DEPTH else torch.flip(value, dims=(2,))
                 for key, value in inputs.items()
             }
+        if self._jitter or self._erase:
+            inputs = {
+                key: value if key == _DEPTH else self._roughen(value)
+                for key, value in inputs.items()
+            }
         if _DEPTH in inputs:
             inputs[_DEPTH] = inputs[_DEPTH][0]
         label = torch.tensor(self._labels[index] / _PERCENT, dtype=torch.float32)
         return inputs, label
+
+    def _roughen(self, view: torch.Tensor) -> torch.Tensor:
+        """Changes the light and the grain of one prepared photo, never its geometry.
+
+        The photo arrives already normalised, where a change of brightness is adding a number
+        and a change of contrast is multiplying by one. Both leave the share of the floor
+        alone, so the label stays true - which a crop or a rotation could not promise.
+        """
+        if self._jitter:
+            spread = self._jitter
+            brightness = float(torch.empty(()).uniform_(-spread, spread))
+            contrast = 1.0 + float(torch.empty(()).uniform_(-spread, spread))
+            view = view * contrast + brightness
+            view = view + torch.randn_like(view) * (spread / 2)
+        if self._erase and bool(torch.rand(()) < self._erase):
+            height, width = view.shape[1], view.shape[2]
+            box_h = int(height * float(torch.empty(()).uniform_(0.1, 0.3)))
+            box_w = int(width * float(torch.empty(()).uniform_(0.1, 0.3)))
+            top = int(torch.randint(0, max(1, height - box_h), ()))
+            left = int(torch.randint(0, max(1, width - box_w), ()))
+            view = view.clone()
+            view[:, top : top + box_h, left : left + box_w] = 0.0
+        return view
 
     def _prepare(self, image: PreparedImage) -> torch.Tensor:
         return torch.from_numpy(preprocess(self._preprocessing, image, self._params)).float()
@@ -240,6 +348,8 @@ def fit(
         start=float(np.mean(labels)) / _PERCENT,
         far_view=settings.far_view,
         depth=settings.depth,
+        head=settings.head,
+        loss=settings.loss,
     ).to(device)
 
     photos = _Photos(
@@ -247,6 +357,8 @@ def fit(
         labels,
         backbone,
         flip=settings.flip,
+        jitter=settings.jitter,
+        erase=settings.erase,
         far_view=settings.far_view,
         depth=depth_grids(samples, device) if settings.depth else None,
     )
@@ -266,17 +378,14 @@ def fit(
         total, count = 0.0, 0
         for inputs, targets in loader:
             with _autocast(device):
-                answers = model(_to(inputs, device))
-            loss = torch.nn.functional.l1_loss(answers.float(), targets.to(device))
+                loss = model.loss(_to(inputs, device), targets.to(device))
             optimizer.zero_grad(set_to_none=True)
             loss.backward()
             optimizer.step()
             schedule.step()
             total += float(loss.item()) * len(targets)
             count += len(targets)
-        logger.info(
-            "epoch %d/%d  train MAE %.2f", epoch + 1, settings.epochs, _PERCENT * total / count
-        )
+        logger.info("epoch %d/%d  train loss %.4f", epoch + 1, settings.epochs, total / count)
     model.eval()
     return model
 
@@ -320,19 +429,19 @@ def predict(
 
 
 def save_model(model: LoadRegressor, folder: Path) -> tuple[Path, Path]:
-    """Writes a fine-tuned model in the two files a model package carries for a member.
+    """Writes everything a fine-tuned model is made of, whatever head it carries.
 
-    The encoder goes out as a timm state dict, the form `load_backbone` reads from a package
-    instead of downloading the pretrained checkpoint. The head goes out as the ridge head the
-    service already reads: no standardization, and the weights scaled from a share of 1 to
-    percent, so `RidgeHead.apply` answers exactly what this model does.
+    Three files always go out: the encoder as a timm state dict, the head's own weights, and a
+    note of which head it is. A linear head goes out a fourth time, in the ridge form the
+    service already reads, so the package writer needs no special case for it. Nothing is left
+    behind on the machine that trained it: a rented box loses its disk when it stops.
 
     Args:
         model: Fine-tuned model.
         folder: Where to write; created if missing.
 
     Returns:
-        Paths of the encoder file and the head file.
+        Paths of the encoder file and of the head file a package would carry.
     """
     folder.mkdir(parents=True, exist_ok=True)
     encoder = folder / ENCODER_FILE
@@ -341,6 +450,28 @@ def save_model(model: LoadRegressor, folder: Path) -> tuple[Path, Path]:
         for key, value in model.encoder.state_dict().items()
     }
     save_file(state, str(encoder))
+    save_file(
+        {
+            key: value.detach().float().cpu().contiguous()
+            for key, value in model.head.state_dict().items()
+        },
+        str(folder / HEAD_STATE_FILE),
+    )
+    (folder / HEAD_KIND_FILE).write_text(
+        json.dumps(
+            {
+                "head": model.kind,
+                "loss": model.scoring,
+                "far_view": model.far_view,
+                "depth": model.depth,
+            },
+            indent=2,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    if not isinstance(model.head, Plain):
+        return encoder, folder / HEAD_STATE_FILE
     weights = model.head.weight.detach().float().cpu().numpy().ravel().astype(np.float64)
     bias = float(model.head.bias.detach().float().cpu().item())
     head = folder / HEAD_FILE
@@ -364,6 +495,7 @@ def out_of_fold(
     only: int | None = None,
     load: Loader | None = None,
     on_fold: FoldDone | None = None,
+    extra: tuple[Sequence[Sample], NDArray[np.float64]] | None = None,
 ) -> NDArray[np.float64]:
     """Fine-tunes one model per fold and predicts the fold it never saw.
 
@@ -383,6 +515,10 @@ def out_of_fold(
             model is still in memory: the caller saves it and predicts the test split with it,
             so a run never has to be repeated to get either, and a stopped machine keeps the
             folds it finished.
+        extra: Photos and loads added to the training half of every fold, and never to the
+            held-out half. Meant for the test photos with the loads an earlier model gave
+            them: they carry no true label, so they may only ever teach, never score. The
+            measurement stays honest because no held-out photo is among them.
 
     Returns:
         One prediction per photo; NaN for photos of folds that were not run.
@@ -402,10 +538,21 @@ def out_of_fold(
         validation = numbers == fold
         training = [sample for sample, held in zip(samples, validation, strict=True) if not held]
         held_out = [sample for sample, held in zip(samples, validation, strict=True) if held]
+        fold_labels = labels[~validation]
+        if extra is not None:
+            more, more_labels = extra
+            held_ids = {sample.image_id for sample in held_out}
+            leaked = [sample.image_id for sample in more if sample.image_id in held_ids]
+            if leaked:
+                raise ValueError(
+                    f"extra photos must not be held out in fold {fold}: {', '.join(leaked[:3])}"
+                )
+            training = [*training, *more]
+            fold_labels = np.concatenate([fold_labels, np.asarray(more_labels, dtype=np.float64)])
         logger.info("fold %d: training on %d photos", fold, len(training))
         model = fit(
             training,
-            labels[~validation],
+            fold_labels,
             replace(settings, seed=settings.seed + fold),
             device=device,
             load=load,
