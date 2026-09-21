@@ -43,9 +43,6 @@ VIEW_NAMES: Final = MappingProxyType(
         ExplanationKind.CONTRIBUTION.value: "Вклад в ответ",
     }
 )
-# From this load the contribution map says little: the model is at its ceiling and paints the
-# cargo as pulling the answer down. Measured by A on the v2 package.
-CONTRIBUTION_CEILING: Final = 95.0
 # From this far apart the pages call the measurement and the document different. The API stays
 # out of it and answers the plain difference; the verdict is a reading of that number, and this
 # is where it is read. The size is our own error: the model misses by 5.8 points on average and
@@ -94,7 +91,6 @@ templates.env.globals["ui"] = UI_PREFIX
 templates.env.globals["review_notes"] = REVIEW_NOTES
 templates.env.globals["view_names"] = VIEW_NAMES
 templates.env.globals["view_notes"] = VIEW_NOTES
-templates.env.globals["contribution_ceiling"] = CONTRIBUTION_CEILING
 templates.env.globals["declared_notes"] = DECLARED_NOTES
 templates.env.globals["declared_tolerance"] = DECLARED_TOLERANCE
 templates.env.globals["stylesheet"] = _stylesheet
