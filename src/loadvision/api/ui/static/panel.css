@@ -1,21 +1,28 @@
-/* Operator pages in the colours of pochta.ru: its blue for the header and actions, a pale
-   blue ground, dark ink. */
+/* Operator pages in the dark colours of the deck: a near-black ground, white ink, light blue for
+   links and actions. The accent is lighter than the ground, so ink on top of it is dark, not
+   white, and the header takes the colour of the cards instead of the accent - a light blue bar
+   across the top is not what the deck shows.
+   Only the ground, the cards, the lines, the ink, the muted grey and the accent come from the
+   deck; the rest are derived from them - the lighter accent under the pointer, the quiet fill,
+   and the three pairs for "ok", "check this" and "bad", which the deck has no colours for. */
 :root {
-  --ground: #f2f6fe;
-  --surface: #ffffff;
-  --line: #dfe1f4;
-  --text: #252630;
-  --muted: #62657a;
-  --accent: #0335c6;
-  --accent-strong: #0a14a6;
-  --accent-soft: #f0f4ff;
-  --accent-text: #ffffff;
-  --ok: #2e6b3f;
-  --ok-ground: #e6f1e8;
-  --warn: #7a5a12;
-  --warn-ground: #f7efd9;
-  --bad: #9a2f2f;
-  --bad-ground: #f7e4e4;
+  color-scheme: dark;
+  --ground: #0F1519;
+  --surface: #172026;
+  --raised: #253239;
+  --line: #253239;
+  --text: #FFFFFF;
+  --muted: #94A2AB;
+  --accent: #6CB4D3;
+  --accent-strong: #8FC9E3;
+  --accent-soft: #253239;
+  --accent-text: #0F1519;
+  --ok: #6FD39B;
+  --ok-ground: #142C20;
+  --warn: #E3C36B;
+  --warn-ground: #2C2616;
+  --bad: #F09090;
+  --bad-ground: #33191B;
   --radius: 10px;
   --gap: 16px;
   font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
@@ -38,27 +45,27 @@ img { max-width: 100%; display: block; }
 .caption { color: var(--muted); font-size: 13px; }
 .num, .load { font-variant-numeric: tabular-nums; }
 
-/* Header: the blue bar of pochta.ru with the sections, the model and who is signed in. */
+/* Header: the sections, the model and who is signed in. It stands on the colour of the cards,
+   a shade above the ground, with a line under it so the two do not run together. */
 header {
   display: flex; flex-wrap: wrap; align-items: center; gap: 8px 24px;
-  padding: 10px 16px; background: var(--accent); color: var(--accent-text);
+  padding: 10px 16px; background: var(--surface); color: var(--text);
+  border-bottom: 1px solid var(--line);
 }
-.logo {
-  font-weight: 700; color: var(--accent-text); text-decoration: none;
-  padding: 3px 12px; border: 1.5px solid currentColor; border-radius: 999px;
-}
+/* The mascot instead of a wordmark; flex, so the link has no baseline gap under it. */
+.logo { display: flex; }
 nav { display: flex; flex-wrap: wrap; gap: 4px; }
 nav .section {
-  padding: 6px 12px; border-radius: 999px; color: var(--accent-text); opacity: 0.8;
+  padding: 6px 12px; border-radius: 8px; color: var(--text); opacity: 0.7;
   text-decoration: none;
 }
-nav .section:hover { opacity: 1; background: rgb(255 255 255 / 0.12); }
-nav .section.on { opacity: 1; background: var(--surface); color: var(--accent); font-weight: 600; }
+nav .section:hover { opacity: 1; background: var(--raised); }
+nav .section.on { opacity: 1; background: var(--accent); color: var(--accent-text); font-weight: 600; }
 .who { margin-left: auto; display: flex; align-items: center; gap: 12px; }
 .who form { margin: 0; }
-header .muted { color: var(--accent-text); opacity: 0.85; }
-header button.ghost { color: var(--accent-text); border-color: rgb(255 255 255 / 0.7); }
-header button.ghost:hover { background: rgb(255 255 255 / 0.12); }
+header .muted { color: var(--muted); }
+header button.ghost { color: var(--text); border-color: rgb(255 255 255 / 0.35); }
+header button.ghost:hover { background: var(--raised); }
 header .badge { border-color: transparent; }
 
 /* Controls. */
@@ -140,7 +147,7 @@ input[type="file"] { font: inherit; padding: 10px; border: 1px dashed var(--line
 .menu-list {
   position: absolute; right: 0; top: calc(100% + 6px); z-index: 10; min-width: 210px;
   display: grid; padding: 6px; background: var(--surface); border: 1px solid var(--line);
-  border-radius: 12px; box-shadow: 0 10px 28px rgb(10 20 166 / 0.14);
+  border-radius: 12px; box-shadow: 0 10px 28px rgb(0 0 0 / 0.55);
 }
 .menu-list a { padding: 8px 12px; border-radius: 8px; color: var(--text); text-decoration: none; }
 .menu-list a:hover { background: var(--accent-soft); }
