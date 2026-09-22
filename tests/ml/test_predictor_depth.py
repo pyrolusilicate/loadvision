@@ -244,6 +244,69 @@ def test_a_head_file_without_the_layer_is_refused() -> None:
             BinsHead.load(path)
 
 
+def bins_head(folder: str, centres: NDArray[np.float32] | None, bins: int = 21) -> Path:
+    """Writes a head of `bins` bins, with the grid it was fitted on when one is given."""
+    path = Path(folder) / "head.safetensors"
+    stored: dict[str, NDArray[Any]] = {
+        "layer.weight": np.zeros((bins, 4), dtype=np.float32),
+        "layer.bias": np.zeros(bins, dtype=np.float32),
+    }
+    if centres is not None:
+        stored["centres"] = centres
+    save_numpy(stored, str(path))
+    return path
+
+
+@pytest.mark.ml
+def test_the_grid_the_training_wrote_is_read_as_shares() -> None:
+    """Training keeps the centres as shares of a full body; the service answers in percent."""
+    with TemporaryDirectory() as folder:
+        path = bins_head(folder, np.linspace(0.0, 1.0, 21, dtype=np.float32))
+
+        head = BinsHead.load(path)
+
+    assert head.centres[0] == 0.0
+    assert head.centres[-1] == 100.0
+
+
+@pytest.mark.ml
+def test_a_head_fitted_on_uneven_bins_is_refused() -> None:
+    """Such a head loads and answers all the same, only wrong, so it must not load at all."""
+    packed = np.linspace(0.0, 1.0, 21, dtype=np.float32) ** 2
+    with TemporaryDirectory() as folder:
+        path = bins_head(folder, packed)
+
+        with pytest.raises(ModelPackageError, match="equal steps"):
+            BinsHead.load(path)
+
+
+@pytest.mark.ml
+def test_a_head_whose_bins_stop_short_of_a_full_body_is_refused() -> None:
+    with TemporaryDirectory() as folder:
+        path = bins_head(folder, np.linspace(0.0, 0.8, 21, dtype=np.float32))
+
+        with pytest.raises(ModelPackageError, match="equal steps"):
+            BinsHead.load(path)
+
+
+@pytest.mark.ml
+def test_a_head_carrying_the_wrong_number_of_centres_is_refused() -> None:
+    with TemporaryDirectory() as folder:
+        path = bins_head(folder, np.linspace(0.0, 1.0, 20, dtype=np.float32))
+
+        with pytest.raises(ModelPackageError, match="20 bin centres for 21 bins"):
+            BinsHead.load(path)
+
+
+@pytest.mark.ml
+def test_a_head_without_a_grid_of_its_own_is_read_as_before() -> None:
+    """Every head built before 21.09 carries no centres, and those packages still load."""
+    with TemporaryDirectory() as folder:
+        head = BinsHead.load(bins_head(folder, None))
+
+    assert head.centres.size == 21
+
+
 @pytest.mark.ml
 def test_the_bins_head_refuses_a_vector_of_the_wrong_length() -> None:
     with TemporaryDirectory() as folder:

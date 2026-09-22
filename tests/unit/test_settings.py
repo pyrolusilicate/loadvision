@@ -47,6 +47,10 @@ def test_config_path_comes_from_the_environment(
         ("max_megapixels: 50", "max_megapixels: 0", "max_megapixels"),
         ("allowed_formats: [jpeg, png, webp]", "allowed_formats: [jpeg, heic]", "allowed_formats"),
         ("allowed_formats: [jpeg, png, webp]", "allowed_formats: []", "allowed_formats"),
+        # A line may stand inside the cloud of training photos, but not deeper than the whole
+        # band is wide: there it would send every photo to a person.
+        ("unusual_band_share: 0.06", "unusual_band_share: -1.5", "unusual_band_share"),
+        ("unusual_band_share: 0.06", "unusual_band_share: 0.7", "unusual_band_share"),
     ],
 )
 def test_wrong_setting_is_rejected(tmp_path: Path, old: str, new: str, field: str) -> None:

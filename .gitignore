@@ -20,6 +20,10 @@ htmlcov/
 /storage/
 /mlruns/
 /mlflow.db
+# Model packages arrive as tarballs of a gigabyte and up. They belong in storage/handoff/;
+# one of them once reached a commit and every push after it sent two gigabytes.
+*.tar
+*.tar.gz
 
 # Secrets
 .env

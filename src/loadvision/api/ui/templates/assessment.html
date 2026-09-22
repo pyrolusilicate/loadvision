@@ -28,7 +28,6 @@
     {% endif %}
     <figcaption class="muted">
       {% if map %}{{ view_notes[map] }}
-      {%- if map == 'contribution' and a.load_pct.value >= contribution_ceiling %} На полном кузове она говорит мало: модель упирается в потолок. Смотрите «Внимание».{% endif %}
       {% else %}{{ details.image.width }}×{{ details.image.height }} · {{ details.image.media_type.value }}{% endif %}
     </figcaption>
   </figure>

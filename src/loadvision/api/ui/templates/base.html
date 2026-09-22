@@ -3,14 +3,16 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>{% block title %}Loadvision{% endblock %} · Loadvision</title>
+  <title>{% block title %}Loadvision{% endblock %}</title>
   <link rel="stylesheet" href="{{ stylesheet() }}">
 </head>
 <body>
 {% if session %}
 {% set here = request.url.path %}
 <header>
-  <a href="{{ ui }}/assess" class="logo">Loadvision</a>
+  <a href="{{ ui }}/assess" class="logo">
+    <img src="{{ ui }}/static/postcat.png" alt="Loadvision" width="53" height="36">
+  </a>
   <nav>
     <a href="{{ ui }}/assess" class="section {% if here == ui ~ '/assess' %}on{% endif %}">Оценить фото</a>
     <a href="{{ ui }}/" class="section {% if here == ui ~ '/' or here.startswith(ui ~ '/assessments') %}on{% endif %}">Очередь</a>

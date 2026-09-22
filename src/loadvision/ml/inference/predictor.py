@@ -2,8 +2,10 @@
 
 import json
 import logging
+import platform
 from collections.abc import Sequence
 from dataclasses import dataclass
+from importlib import metadata
 from pathlib import Path
 from typing import Any, Final, Self
 
@@ -38,6 +40,12 @@ _PROBE_WIDTH: Final = 6
 
 _MIN_LOAD_PCT = 0.0
 _MAX_LOAD_PCT = 100.0
+
+# What a head of bins calls the grid it was fitted on, when it carries one at all.
+_CENTRES_KEY: Final = "centres"
+# How far the stored grid may stand from ours: the bins of a real head are whole percent points
+# apart, and this leaves room only for the noise of keeping them as float32.
+_CENTRES_TOLERANCE: Final = 1e-3
 
 
 def _clip(value: float) -> float:
@@ -162,6 +170,8 @@ class BinsHead:
         if weights.ndim != 2 or bias.shape != (weights.shape[0],):
             raise ModelPackageError(f"{path.name}: weights and bias must agree on the bin count")
         centres = np.linspace(_MIN_LOAD_PCT, _MAX_LOAD_PCT, weights.shape[0])
+        if _CENTRES_KEY in stored:
+            _check_centres(path, np.asarray(stored[_CENTRES_KEY], dtype=np.float64), centres)
         return cls(weights=weights, bias=bias, centres=centres)
 
     def apply(self, features: NDArray[np.floating[Any]]) -> float:
@@ -178,6 +188,39 @@ class BinsHead:
         scores = self.weights @ flat + self.bias
         shares = np.exp(scores - scores.max())
         return _clip(float(shares @ self.centres / shares.sum()))
+
+
+def _check_centres(path: Path, stored: NDArray[np.float64], grid: NDArray[np.float64]) -> None:
+    """Fails when a head was fitted on a grid of bins other than the one this service assumes.
+
+    The centres are not read from the file, they are computed: an even grid from 0 to 100 over
+    as many bins as the weights carry. A head fitted on any other grid - bins packed closer
+    near the empty end, or a grid that stops short of a full body - would load and answer all
+    the same, only wrong, and nothing would say so. So when the file carries its own centres,
+    they have to agree with ours.
+
+    Training writes them as shares of a full body and this service speaks in percent, so a grid
+    that ends at 1 is read as shares and scaled by a hundred.
+
+    Args:
+        path: Head file, named in the message.
+        stored: Centres as the file carries them.
+        grid: Centres this service computed.
+
+    Raises:
+        ModelPackageError: If the grids disagree by more than the noise of float32 storage.
+    """
+    if stored.shape != grid.shape:
+        raise ModelPackageError(
+            f"{path.name}: the head carries {stored.size} bin centres for {grid.size} bins"
+        )
+    percent = stored * _MAX_LOAD_PCT if float(stored.max()) <= 1.0 else stored
+    if not bool(np.allclose(percent, grid, atol=_CENTRES_TOLERANCE)):
+        raise ModelPackageError(
+            f"{path.name}: the head was fitted on bins from {percent.min():.2f} to "
+            f"{percent.max():.2f}, and this service reads them as {grid.min():.2f} to "
+            f"{grid.max():.2f} in equal steps"
+        )
 
 
 type Head = RidgeHead | BinsHead
@@ -403,6 +446,57 @@ class PackagePredictor:
             computed[key] = (loaded.head.apply(np.concatenate(parts)), vectors[0])
         return computed
 
+    @property
+    def band(self) -> tuple[float, float] | None:
+        """Returns the two ends of this package's own scale of distances.
+
+        Returns:
+            The far edge of the training photos and the distance at which frames holding
+            nothing land, or None when the package measures no distances.
+        """
+        config = self._package.manifest.ood
+        if config is None or self._unusable is None:
+            return None
+        return config.threshold, self._unusable
+
+    def ood_score(self, image: PreparedImage) -> float | None:
+        """Returns how far a photo stands from the training ones, and nothing else.
+
+        The package answers with five members, a depth map, five heads and a calibration curve,
+        and none of that reaches this number: the score compares one embedding of one member
+        with the training ones. Asking for a whole prediction to read it off costs three times
+        the work, and a tool that walks a folder of photos pays that on every one of them.
+
+        Args:
+            image: Photo to place on the scale.
+
+        Returns:
+            Distance to the training photos, or None when the package measures none.
+        """
+        config = self._package.manifest.ood
+        if config is None or self._ood is None:
+            return None
+        embedding = self._embedding(self._members[config.member], image)
+        return None if embedding is None else self._ood.score(embedding, config.k)
+
+    def _embedding(self, loaded: _LoadedMember, image: PreparedImage) -> NDArray[np.float64] | None:
+        """Returns the vector the distance is measured from, None for a member with no encoder.
+
+        It is the first input of the member, the photo as a whole - the very vector
+        `_torch_group` hands to the score; the other inputs and the depth grid only feed the
+        head. The averaging over views is not repeated here: `Backbone.embed` is the one place
+        the way from a photo to a vector lives, and a second copy of it would drift.
+        """
+        import torch
+
+        backbone = _backbone(loaded)
+        if backbone is None:
+            return None
+        shown = crops.get(loaded.member.inputs[0])(image)
+        with torch.inference_mode():
+            embedded = backbone.embed([shown], self._device)
+        return np.asarray(embedded.float().cpu().numpy()[0], dtype=np.float64)
+
     def _predict_one(self, image: PreparedImage) -> Prediction:
         by_key = dict(enumerate(self._members))
         computed = self._features(by_key, image)
@@ -434,9 +528,9 @@ class PackagePredictor:
     def _scale(self, cache: Path | None) -> float | None:
         """Returns the measured scale of this package, from the cache when it is still valid.
 
-        The measurement is the same every time: the same frames through the same weights. What
-        makes a stored number stale is a different package or a different set of frames, and
-        both are named in the file.
+        The measurement repeats exactly only where it was made: the same frames through the
+        same weights on the same build. A different package, a different set of frames or a
+        different build makes a stored number stale, and all three are named in the file.
 
         Args:
             cache: File to read and write, or None to measure without keeping the result.
@@ -445,15 +539,16 @@ class PackagePredictor:
             The distance at which empty frames land, or None when the package measures none.
         """
         frames = frames_fingerprint()
+        build = _build_id(self._device)
         stored = _read_scale(cache) if cache is not None else None
-        if stored is not None and stored.get("frames") == frames:
+        if stored is not None and stored.get("frames") == frames and stored.get("build") == build:
             measured = stored.get("unusable")
             if isinstance(measured, int | float):
                 _logger.info("scale of %s read from %s", self._package.manifest.version, cache)
                 return float(measured)
         measured = self._measure_unusable()
         if cache is not None and measured is not None:
-            _write_scale(cache, self._package.manifest.version, frames, measured)
+            _write_scale(cache, self._package.manifest.version, frames, build, measured)
         return measured
 
     def _measure_unusable(self) -> float | None:
@@ -469,10 +564,10 @@ class PackagePredictor:
         """
         if self._ood is None:
             return None
-        # The distance only, not a whole prediction: the head, the ensemble average and the
-        # postprocessing say nothing about where a frame sits, and this runs at load time.
-        by_key = dict(enumerate(self._members))
-        scores = [self._ood_score(self._features(by_key, frame)) for frame in unusable_frames()]
+        # The distance only, not a whole prediction: the other members, the depth map, the
+        # heads and the postprocessing say nothing about where a frame sits, and this runs at
+        # load time, before the service answers anything.
+        scores = [self.ood_score(frame) for frame in unusable_frames()]
         measured = [score for score in scores if score is not None]
         if not measured:
             return None
@@ -508,9 +603,31 @@ def _read_scale(path: Path) -> dict[str, Any] | None:
     return stored if isinstance(stored, dict) else None
 
 
-def _write_scale(path: Path, version: str, frames: str, unusable: float) -> None:
+def _build_id(device: str) -> str:
+    """Names what a measurement was made with, so another build does not reuse it.
+
+    The two CPU builds we run agree to a rounding error - the macOS wheel and the linux one in
+    the container land 1.2e-7 apart on the same frames - but a card runs other kernels, and a
+    measurement made on the processor says nothing about the same package on the card. The
+    version of torch is read from the installed distribution and not from the module: a service
+    image of numpy-only packages carries no torch at all and must still load.
+
+    Args:
+        device: Torch device the predictor runs on.
+
+    Returns:
+        One line naming the device, the installed torch and the platform.
+    """
+    try:
+        torch_version = metadata.version("torch")
+    except metadata.PackageNotFoundError:
+        torch_version = "none"
+    return f"{device} torch-{torch_version} {platform.system()}-{platform.machine()}"
+
+
+def _write_scale(path: Path, version: str, frames: str, build: str, unusable: float) -> None:
     """Keeps a measurement beside the packages; losing it costs only the next measurement."""
-    record = {"version": version, "frames": frames, "unusable": unusable}
+    record = {"version": version, "frames": frames, "build": build, "unusable": unusable}
     try:
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(json.dumps(record, indent=2) + "\n", encoding="utf-8")
