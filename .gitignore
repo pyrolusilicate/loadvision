@@ -14,8 +14,10 @@ dist/
 htmlcov/
 .import_linter_cache/
 
-# Data, runs and artifacts are never committed
-/data/
+# Data, runs and artifacts are never committed. The one exception is data/probe: it is ours,
+# not the organizers', and without it the line of the admissibility check cannot be refitted.
+/data/*
+!/data/probe/
 /runs/
 /storage/
 /mlruns/
