@@ -30,8 +30,9 @@ SIGHT_MODEL: Final = "HuggingFaceTB/SmolVLM-500M-Instruct"
 _CHOICES: Final[dict[str, CargoKind]] = {
     "empty": CargoKind.EMPTY,
     "mail sacks": CargoKind.SACKS,
-    "cardboard parcels": CargoKind.PARCELS,
-    "pallets or roll cages": CargoKind.PALLETS,
+    "mesh roll cages": CargoKind.ROLL_CAGES,
+    "plastic boxes": CargoKind.PLASTIC_BOXES,
+    "pallets of goods": CargoKind.PALLETS,
     "several kinds at once": CargoKind.MIXED,
 }
 _QUESTION: Final = (

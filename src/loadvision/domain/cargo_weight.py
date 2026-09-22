@@ -25,14 +25,16 @@ MAX_STACK_SHARE: Final = 0.9
 class CargoKind(StrEnum):
     """What is in the body, as far as a photo tells them apart.
 
-    The kinds are the ones a photo can separate, and each carries its own density: sacks of
-    mail are heavy for their volume, parcels are light, a pallet of goods is somewhere else
-    again. MIXED is the honest answer when the photo shows several at once.
+    The kinds are the ones our own photos actually show, counted by hand over 128 of them: a
+    mesh roll cage on wheels is the unit of a postal run, a solid plastic box is the heavier
+    one beside it, and pallets of shrink-wrapped goods are rarer and denser still. MIXED is
+    the honest answer when the photo shows several at once, and it is the commonest of all.
     """
 
     EMPTY = "empty"
+    ROLL_CAGES = "roll_cages"
+    PLASTIC_BOXES = "plastic_boxes"
     SACKS = "sacks"
-    PARCELS = "parcels"
     PALLETS = "pallets"
     MIXED = "mixed"
 
@@ -122,19 +124,35 @@ class WeightEstimate:
         )
 
 
-# Kilograms per cubic metre by kind of cargo. These are starting values, wide on purpose, to
-# be replaced by the client's own numbers: one weighbridge record per photo is enough to fit
-# them, see `fit_density`. They are not measurements of this dataset - it carries no weights.
+# Kilograms per cubic metre by kind of cargo. These are assumptions, wide on purpose, not
+# measurements: the dataset carries no weights at all. Two public numbers bound them. Freight
+# under 160 kg/m3 counts as light and over 480 as very dense, and postal cargo sits at the
+# light end. A nestable postal roll cage weighs about 100 kg empty and holds roughly a cubic
+# metre, so its own steel already sets the floor for a cage that carries parcels.
+#
+# One weighbridge record per photo is enough to replace the lot with the client's own numbers.
 DENSITIES: Final[Mapping[CargoKind, "CargoDensity"]] = {
+    CargoKind.ROLL_CAGES: CargoDensity(low=150.0, typical=220.0, high=320.0),
+    CargoKind.PLASTIC_BOXES: CargoDensity(low=200.0, typical=290.0, high=420.0),
     CargoKind.SACKS: CargoDensity(low=150.0, typical=250.0, high=380.0),
-    CargoKind.PARCELS: CargoDensity(low=70.0, typical=130.0, high=220.0),
-    CargoKind.PALLETS: CargoDensity(low=150.0, typical=260.0, high=420.0),
-    CargoKind.MIXED: CargoDensity(low=80.0, typical=180.0, high=350.0),
+    CargoKind.PALLETS: CargoDensity(low=200.0, typical=310.0, high=480.0),
+    CargoKind.MIXED: CargoDensity(low=120.0, typical=230.0, high=400.0),
 }
 
-# A common closed body of a delivery truck, in metres. Replace it per shipment where the size
-# is known; the estimate scales with it directly.
-DEFAULT_BODY: Final = BodySize(length=4.0, width=2.0, height=2.0)
+# The bodies an operator picks from, inner size in metres. A photo cannot give the size of the
+# body - there is nothing in the frame of a known size to measure against - so it is chosen,
+# not computed, and a body outside the list is typed in by hand.
+# The three the task names: "the test set holds lorries rated 5, 10 and 20 tonnes among
+# others". The sizes are the usual inner ones for each class, the twenty tonner being a
+# semi-trailer.
+BODIES: Final[Mapping[str, "BodySize"]] = {
+    "t5": BodySize(length=6.2, width=2.45, height=2.4),
+    "t10": BodySize(length=8.0, width=2.45, height=2.6),
+    "t20": BodySize(length=13.6, width=2.45, height=2.7),
+}
+
+# The smallest of the three, so a shipment nobody described is not overstated.
+DEFAULT_BODY: Final = BODIES["t5"]
 
 # Parcels and sacks of a postal run, kilograms per cubic metre. Mail is light for its volume,
 # and the spread is wide on purpose: that is why the answer is an interval.
