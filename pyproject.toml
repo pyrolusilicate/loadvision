@@ -46,6 +46,8 @@ known-first-party = ["loadvision", "tests"]
 
 [tool.ruff.lint.per-file-ignores]
 "tests/**" = ["D"]
+# Скрипты для презентации печатают в терминал: это их интерфейс, а не забытый отладочный вывод.
+"scripts/**" = ["T20"]
 
 [tool.ruff.format]
 docstring-code-format = true
