@@ -40,6 +40,16 @@ loadtest clients="4" requests="24":
 worker:
     GIT_COMMIT=$(git rev-parse HEAD) docker compose up -d --build worker
 
+# Service in Docker on a machine with an NVIDIA card: the same images, built with the CUDA build
+# of torch. The host needs nvidia-container-toolkit; see compose.gpu.yaml.
+up-gpu:
+    docker compose -f compose.yaml -f compose.gpu.yaml up -d --build api
+
+# The retraining worker in Docker on a machine with an NVIDIA card
+worker-gpu:
+    GIT_COMMIT=$(git rev-parse HEAD) \
+        docker compose -f compose.yaml -f compose.gpu.yaml up -d --build worker
+
 # GPU server: torch for CUDA 12.6 instead of the CPU build. Every gpu- recipe passes these groups,
 # because a plain `uv run` would bring the CPU build back; see docs/deploy-vm.md.
 gpu := "--no-group cpu --group cuda"

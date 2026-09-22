@@ -18,15 +18,25 @@ review:
   # and pure noise land. Nothing here is a distance, so nothing has to be re-measured by hand
   # when the model changes - the band moves with it.
   #
-  # The shares were checked against two packages, whose scales differ threefold:
+  # The shares were checked against three packages, whose scales differ threefold:
   #
   #             band          real photos   blurred      empty frames
   #   v2        0.23 - 0.59   up to 0.24    0.47         0.59 - 0.91
   #   v4        0.10 - 0.86   up to 0.09    0.17 - 0.33  0.86 - 0.91
+  #   v5        0.12 - 0.42   up to 0.15    0.08 - 0.16  1.00 - 1.19
   #
-  # From here the frame goes to a person: past every real photo we measured, and low enough to
-  # catch a badly blurred one on both packages.
-  unusual_band_share: 0.05
+  # From here the frame goes to a person. Not picked by hand: `scripts/ood_line.py` reads the
+  # 307 held-out photos of the contest, which no model has seen, and a folder of photos the
+  # service must not answer on, and returns the line. On v4 it returns 0.06 - no real photo of
+  # the 307 goes to a person, every one of the 11 foreign frames is caught, and the gap between
+  # the two groups is 0.44 of the band wide.
+  #
+  # The line belongs to the package, not to the service, and does not carry over. On v5 this
+  # same 0.06 lets a body of potato sacks through, and the line that catches it there, -0.05,
+  # would send 57 of the 307 photos - 18.6% - to a person on v4. So the tool is run again for
+  # every package before its number is trusted; v5 is not served because on it the two groups
+  # overlap and no line separates them at all.
+  unusual_band_share: 0.06
   # From here the pages show no prediction at all. Above the blurred photos, which are bad but
   # still show a body worth judging, and below the empty frames on both packages.
   unreadable_band_share: 0.6

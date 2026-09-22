@@ -85,13 +85,18 @@ class ReviewSettings(_Section):
         unusual_band_share: Where the line "send this to a person" stands between the far
             edge of a model's training photos and the distance at which empty frames land on
             the same model. A share of that band, not a distance: the model measures both ends
-            itself when it loads, so this number keeps its meaning on any model.
+            itself when it loads, so this number keeps its meaning on any model. A share below
+            zero is a line drawn inside the cloud of training photos, nearer than its own far
+            edge, and that is allowed: on the packages measured so far the real photos sit deep
+            inside the cloud and the edge itself is already past most of what is worth a check.
         unreadable_band_share: Where the line "show no prediction at all" stands in the same
             band. Above it nothing of a truck body is in the frame.
     """
 
     min_brightness: float = Field(ge=0, le=255)
-    unusual_band_share: float = Field(gt=0, lt=1)
+    # Below -1 the line stands deeper inside the cloud of training photos than the whole band is
+    # wide, which sends every photo to a person: a mistake, not a setting.
+    unusual_band_share: float = Field(gt=-1, lt=1)
     unreadable_band_share: float = Field(gt=0, lt=1)
 
     @model_validator(mode="after")

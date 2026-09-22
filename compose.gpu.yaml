@@ -1,0 +1,42 @@
+# Docker on a machine with an NVIDIA card: the images carry the CUDA build of torch and the
+# containers are given the card. The host needs the driver and nvidia-container-toolkit; without
+# them the container starts and falls back to the processor, because `model.device` is `auto`.
+#   just up-gpu    or    docker compose -f compose.yaml -f compose.gpu.yaml up -d --build api
+#
+# The image is about 5 GB against 1.5 GB of the CPU one: the CUDA build of torch brings the
+# NVIDIA libraries with it. The tag says which build is inside, so the two never overwrite each
+# other on one machine.
+#
+# The card is asked for through `deploy.resources.reservations` and not through `gpus: all`: the
+# short form needs Compose 2.30 and newer, and the machine of the organizers installs Compose
+# from the packages of Ubuntu 22.04.
+services:
+  migrate:
+    image: loadvision-api:cuda
+    build:
+      args:
+        TORCH_BUILD: cuda
+
+  api:
+    image: loadvision-api:cuda
+    build:
+      args:
+        TORCH_BUILD: cuda
+    deploy: &card
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+    healthcheck:
+      # The first start measures the scale of the package on the card, which the image has never
+      # done before, so the model answers later than it does on the processor.
+      start_period: 180s
+
+  worker:
+    image: loadvision-worker:cuda
+    build:
+      args:
+        TORCH_BUILD: cuda
+    deploy: *card

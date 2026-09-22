@@ -12,7 +12,8 @@ Python 3.10, пользователь `yc-user`, публичный IPv4. Дис
   по-прежнему получают группу `cpu`, так устроены группы в `pyproject.toml`.
 - **Python.** Код требует 3.12, на машине 3.10. Ставить ничего не нужно: uv сам скачает 3.12.
 - **Где что работает.** Сервис и воркер запускаются без Docker, так torch видит GPU без NVIDIA
-  Container Toolkit. Postgres работает в Docker из нашего `compose.yaml`.
+  Container Toolkit. Postgres работает в Docker из нашего `compose.yaml`. Если нужно всё в
+  контейнерах - есть второй путь, ниже.
 - **Устройство выбирается само.** В `configs/app.yaml` у `model.device` и `training.device`
   стоит `auto`: модель считается на GPU, когда torch его видит, иначе на CPU. Сервис пишет
   выбор в лог строкой `the model runs on cuda`.
@@ -72,6 +73,33 @@ tmux attach -t api                             # логи; выйти, не ос
 ```
 
 `tmux` держит процессы после отключения SSH. Остановить: `tmux kill-session -t api`.
+
+## В Docker, если сервис должен работать сам по себе
+
+Способ выше запускает сервис прямо на машине. Если нужно показать, что всё поднимается одной
+командой и переживает перезагрузку, есть второй путь: те же образы, собранные с CUDA-сборкой
+torch.
+
+```bash
+# один раз: доступ к карте из контейнеров
+sudo apt-get install -y nvidia-container-toolkit
+sudo nvidia-ctk runtime configure --runtime=docker && sudo systemctl restart docker
+docker run --rm --gpus all mirror.gcr.io/library/ubuntu:22.04 nvidia-smi   # карта видна
+
+just up-gpu          # Postgres, миграции и сервис; образ около 5 ГБ, сборка долгая
+just worker-gpu      # воркер дообучения на карте
+```
+
+Что тут важно:
+
+- Образ параметризован: `TORCH_BUILD=cpu` по умолчанию, `compose.gpu.yaml` ставит `cuda`. Тег
+  образа тоже разный (`loadvision-api` против `loadvision-api:cuda`), так что CPU-образ на
+  ноутбуке и GPU-образ на ВМ не затирают друг друга.
+- **Без `nvidia-container-toolkit` контейнер не упадёт, а тихо посчитает на процессоре**:
+  `model.device` стоит `auto`. Проверять по логу сервиса - там должна быть строка
+  `the model runs on cuda`, а не `on cpu`.
+- Первый старт дольше обычного: шкала пакета на карте ещё не мерена, и замер идёт заново.
+  Проверка здоровья ждёт три минуты вместо одной.
 
 ## Доступ снаружи
 
