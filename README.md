@@ -60,10 +60,25 @@ uv run python scripts/ood_line.py --help                     # подобрат�
 
 ## Сервис
 
+Веса поставляемой модели не лежат в репозитории: пакет весит два гигабайта. Он опубликован на
+Hugging Face под Apache-2.0 и ставится тремя командами.
+
 ```bash
-uv run loadvision model build-baseline    # модель, с которой сервис отвечает
-just up                                   # Postgres, миграции и API на http://localhost:8000
+cp .env.example .env                       # пароль базы: в POSTGRES_PASSWORD и в DATABASE_URL
+just up                                    # Postgres, миграции и API на http://localhost:8000
+
+uv run --with huggingface_hub hf download Roman3427/loadvision-truck-load-v4 --local-dir storage/handoff/v4
+uv run --env-file .env loadvision model register storage/handoff/v4
+uv run --env-file .env loadvision model activate v4
+
+uv run --env-file .env loadvision operators add <логин>   # вход на страницы
 ```
+
+Проверка: `curl -s localhost:8000/health` отвечает `modelVersion="v4"`. Без этих трёх команд
+сервис поднимется на `baseline-v0` - это решение организаторов с MAE 19.1, а не наше.
+
+Пакет можно и не скачивать: `uv run loadvision model build-baseline` соберёт baseline, и
+сервис заработает на нём. Так удобно смотреть API, но числа будут чужие.
 
 ## Скорость под нагрузкой
 
