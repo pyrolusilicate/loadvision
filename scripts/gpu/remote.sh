@@ -23,7 +23,7 @@ REFERENCE=${REFERENCE:-runs/finetune/run_20260918_210429_19744c/oof.csv}
 SSH=(ssh -i "$KEY" -p "$PORT" -o ConnectTimeout=20)
 SHELL_SSH="ssh -i $KEY -p $PORT"
 
-step=${1:?usage: remote.sh upload|setup|quick|start|start2|start3|status|fetch|fetch-weights}
+step=${1:?usage: remote.sh upload|setup|quick|start|start2|start3|bench|status|fetch|fetch-weights}
 mkdir -p runs/gpu
 log="runs/gpu/$(date +%Y%m%d_%H%M%S)_${step}.txt"
 run() { "$@" 2>&1 | tee -a "$log"; }
@@ -75,6 +75,33 @@ case "$step" in
       nvidia-smi --query-gpu=utilization.gpu,memory.used,memory.total --format=csv,noheader
       tmux has-session -t gpu 2>/dev/null && echo "план работает" || echo "план завершён - можно fetch и /vm_stop"
     '
+    ;;
+  bench)
+    # Latency of shipped packages on the real card the service will run on. Speed does not
+    # depend on what the weights hold, but it does depend on the card, so this has to run here.
+    # Give it v2, v3 and v4 in one go: three packages fit the three terms of
+    # `answer = fixed + depth + members * encoder`, and every other ensemble is then arithmetic.
+    shift
+    [ "$#" -gt 0 ] || { echo "usage: remote.sh bench <package.tar> [more.tar ...]"; exit 2; }
+    run "${SSH[@]}" "$HOST" 'mkdir -p loadvision/benchpkg'
+    for pkg in "$@"; do
+      name=$(basename "$pkg" .tar)
+      run rsync -az -e "$SHELL_SSH" "$pkg" "$HOST:loadvision/benchpkg/$name.tar"
+      run "${SSH[@]}" "$HOST" "test -s loadvision/benchpkg/$name.tar"
+      run "${SSH[@]}" "$HOST" "
+        cd loadvision && export PATH=\$HOME/.local/bin:\$PATH UV_NO_SYNC=1
+        rm -rf benchpkg/$name && mkdir -p benchpkg/$name
+        tar xf benchpkg/$name.tar -C benchpkg/$name && rm benchpkg/$name.tar
+        nvidia-smi --query-gpu=name --format=csv,noheader
+        for mode in fp32 bf16; do
+          echo \"=== $name, cuda \$mode ===\"
+          flag=\"\"; [ \"\$mode\" = bf16 ] && flag=--bf16
+          uv run python -m loadvision.cli.commands.bench benchpkg/$name/package \
+            --device cuda \$flag --photos 60 --warmup 10 --clients 1,4,8
+        done
+      "
+    done
+    run rsync -az -e "$SHELL_SSH" "$HOST:loadvision/runs/bench/" runs/bench/
     ;;
   fetch)
     # Everything but the weights: a ViT-L run keeps about 6 GB of fold models. They stay on

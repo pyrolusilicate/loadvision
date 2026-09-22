@@ -463,7 +463,7 @@ def test_the_weight_form_posts_to_the_route_that_stores_it(service: Service) -> 
     card = page(get(service, ASSESSMENT))
 
     form = card.xpath("//form[@class='weigh']")
-    assert [element.get("method") for element in form] == ["post", "get"]
+    assert [element.get("method") for element in form] == ["post"]
     sends_to = [element.get("action") for element in form]
-    assert sends_to == [f"/ui/assessments/{ASSESSMENT_ID}/weight", None]
+    assert sends_to == [f"/ui/assessments/{ASSESSMENT_ID}/weight"]
     assert card.xpath("//form[@class='weigh']//input[@name='csrf']")
