@@ -24,6 +24,7 @@ from loadvision.ml.pipeline.stage import RunContext, new_run_id
 from loadvision.ml.pipeline.stages import build_pipeline
 from loadvision.ml.pipeline.stages.build_package import PACKAGE_DIR
 from loadvision.ml.training.gate import DEFAULT_RULES, GateReport, GateRules, decide
+from loadvision.ml.training.refit import can_refit, refit_heads
 
 logger = logging.getLogger(__name__)
 
@@ -40,9 +41,14 @@ class PipelineTrainingRunner:
     with, rather than a second implementation that drifts.
 
     One run does four things. It builds a dataset that is the base one plus the confirmed
-    labels; it gives the new photos a fold without moving a single stored row; it runs the
-    pipeline, which ends in a model package; and it compares that package with the active one
-    on the photos both were measured on.
+    labels; it gives the new photos a fold without moving a single stored row; it builds a
+    candidate package; and it compares that package with the active one on the photos both were
+    measured on.
+
+    How the candidate is built depends on whether there is an active version. With one, its own
+    encoders are reused frozen and only their heads are fitted again, so the gate weighs like
+    against like and its verdict is about the new labels. Without one, the experiment config
+    builds the first package from scratch.
 
     Args:
         config: Experiment config with `members` and, optionally, `postprocess`.
@@ -111,16 +117,11 @@ class PipelineTrainingRunner:
         except (OSError, ValueError) as error:
             return _failed(run_id, ErrorCode.INTERNAL_ERROR, f"{type(error).__name__}: {error}")
 
-        summary = self._pipeline(run_id, dataset)
-        failed = summary.failed_stage
-        if failed is not None:
-            return _failed(
-                run_id,
-                failed.error_code or ErrorCode.INTERNAL_ERROR,
-                f"stage {failed.name}: {failed.error_detail or failed.status.value}",
-            )
-
         package_path = self._runs_dir / run_id / PACKAGE_DIR
+        built = self._candidate(run_id, dataset, package_path)
+        if isinstance(built, TrainingOutcome):
+            return built
+
         try:
             gate = self._gate(package_path, report)
         except ModelPackageError as error:
@@ -134,6 +135,76 @@ class PipelineTrainingRunner:
             gate_passed=gate.passed,
             gate_report={**gate.as_json(), **report.as_counts()},
         )
+
+    def _candidate(self, run_id: str, dataset: Path, package_path: Path) -> TrainingOutcome | None:
+        """Builds the candidate package, or returns the outcome of a run that failed.
+
+        With an active version the candidate is built in its family: the same encoders, frozen,
+        with their heads fitted again on the dataset that now carries the confirmed labels.
+        Anything else makes the gate compare two architectures and say nothing about the new
+        labels - which is what the experiment config used to do, and why every candidate was
+        refused for a reason that had nothing to do with retraining.
+
+        Without an active version there is nothing to refit and nothing to compare against, so
+        the experiment config builds the first package from scratch.
+
+        Args:
+            run_id: Id of this run, also the version of the candidate.
+            dataset: Dataset root of this run.
+            package_path: Where the candidate package must end up.
+
+        Returns:
+            None when the package is in place, or the failed outcome to report.
+        """
+        try:
+            active = self._refittable()
+        except ModelPackageError as error:
+            return _failed(run_id, error.code, error.detail or "model package is invalid")
+
+        if active is None:
+            summary = self._pipeline(run_id, dataset)
+            failed = summary.failed_stage
+            if failed is None:
+                return None
+            return _failed(
+                run_id,
+                failed.error_code or ErrorCode.INTERNAL_ERROR,
+                f"stage {failed.name}: {failed.error_detail or failed.status.value}",
+            )
+        try:
+            refit_heads(
+                active=active,
+                dataset=dataset,
+                folds_file=self._folds_file,
+                cache_dir=self._cache_dir,
+                out_dir=package_path,
+                version=run_id,
+                device=self._device,
+            )
+        except ModelPackageError as error:
+            return _failed(run_id, error.code, error.detail or "model package is invalid")
+        except (OSError, ValueError) as error:
+            return _failed(run_id, ErrorCode.INTERNAL_ERROR, f"{type(error).__name__}: {error}")
+        return None
+
+    def _refittable(self) -> ModelPackage | None:
+        """Returns the active package when its heads can be fitted again on its own encoders.
+
+        Raises:
+            ModelPackageError: If the active package cannot be read at all.
+        """
+        if self._active_package is None:
+            return None
+        active = ModelPackage.load(self._active_package)
+        if can_refit(active, read_folds(self._folds_file).n_folds):
+            return active
+        logger.info(
+            "%s carries %d members and cannot have its heads refitted; building the candidate "
+            "from the experiment config instead",
+            active.version.value,
+            len(active.manifest.members),
+        )
+        return None
 
     def _dataset(self, request: TrainingRequest) -> tuple[Path, ImportReport]:
         """Builds the dataset of this label set, reusing it when the labels repeat."""
