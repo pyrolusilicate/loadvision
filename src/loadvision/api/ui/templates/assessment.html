@@ -31,8 +31,12 @@
       {% else %}{{ details.image.width }}×{{ details.image.height }} · {{ details.image.media_type.value }}{% endif %}
     </figcaption>
     {% if not unreadable %}
+<<<<<<< HEAD
     <form class="weigh" method="post" action="{{ ui }}/assessments/{{ a.id }}/weight">
       <input type="hidden" name="csrf" value="{{ session.csrf }}">
+=======
+    <form class="weigh" method="get">
+>>>>>>> origin/main
       <h2>Вес груза</h2>
       <div class="fields">
         <label>Кузов
