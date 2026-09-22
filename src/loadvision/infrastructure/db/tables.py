@@ -29,6 +29,7 @@ from sqlalchemy import (
 from sqlalchemy.dialects.postgresql import ARRAY, JSONB
 
 from loadvision.domain.assessment import SHA256_HEX_PATTERN, ReviewReason
+from loadvision.domain.cargo_weight import CargoKind
 from loadvision.domain.confirmed_label import LabelSource
 from loadvision.domain.model_version import MODEL_VERSION_PATTERN, ModelVersionStatus
 from loadvision.domain.operator import OPERATOR_LOGIN_PATTERN
@@ -186,6 +187,30 @@ confirmed_labels: Final = Table(
     CheckConstraint("(load_pct IS NULL) = unusable", name="load_pct_unless_unusable"),
     CheckConstraint(_one_of("source", LabelSource), name="source_known"),
     CheckConstraint("updated_at >= created_at", name="updated_after_created"),
+)
+
+weighings: Final = Table(
+    "weighings",
+    metadata,
+    # One weighing per assessment: weighing it again replaces the old numbers.
+    Column("assessment_id", Uuid, ForeignKey(assessments.c.id), primary_key=True),
+    Column("body", Text, nullable=False),
+    Column("length_m", Double, nullable=False),
+    Column("width_m", Double, nullable=False),
+    Column("height_m", Double, nullable=False),
+    Column("cargo_kind", Text, nullable=False),
+    # The answer as the operator saw it. Kept beside the inputs on purpose: the table of
+    # densities may change, and a stored weight must not change under it by itself.
+    Column("kilograms", Double, nullable=False),
+    Column("low_kg", Double, nullable=False),
+    Column("high_kg", Double, nullable=False),
+    Column("cubic_metres", Double, nullable=False),
+    Column("author", Text),
+    _aware("created_at"),
+    CheckConstraint(_one_of("cargo_kind", CargoKind), name="cargo_kind_known"),
+    CheckConstraint("length_m > 0 AND width_m > 0 AND height_m > 0", name="sides_positive"),
+    CheckConstraint("low_kg <= kilograms AND kilograms <= high_kg", name="weight_within_bounds"),
+    CheckConstraint("cubic_metres >= 0", name="cubic_metres_non_negative"),
 )
 
 training_jobs: Final = Table(

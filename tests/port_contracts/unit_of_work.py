@@ -1,5 +1,6 @@
 """Behavior every UnitOfWork implementation must have: the in-memory fake and Postgres."""
 
+from dataclasses import replace
 from datetime import timedelta
 from uuid import UUID
 
@@ -13,6 +14,7 @@ from loadvision.application.ports import (
     UnitOfWorkFactory,
 )
 from loadvision.domain.assessment import Assessment, LoadPercent, ReviewReason, Signals
+from loadvision.domain.cargo_weight import CargoKind
 from loadvision.domain.confirmed_label import LabelSource
 from loadvision.domain.model_version import ModelVersionId, ModelVersionStatus
 from loadvision.domain.shipment import ShipmentId
@@ -28,6 +30,7 @@ from tests.builders import (
     make_operator,
     make_session,
     make_shipment,
+    make_weighing,
 )
 
 PHOTO_A = b"photo-a"
@@ -471,6 +474,33 @@ class UnitOfWorkContract:
     ) -> None:
         with uow_factory() as uow, pytest.raises(ValueError, match="not registered"):
             uow.model_versions.update(make_model_version("v404"))
+
+    def test_weighing_is_saved_and_read_back(self, uow_factory: UnitOfWorkFactory) -> None:
+        assessment = make_assessment()
+        weighing = make_weighing(assessment.id)
+        with uow_factory() as uow:
+            store_assessment(uow, assessment)
+            uow.weighings.save(weighing)
+            uow.commit()
+        with uow_factory() as uow:
+            assert uow.weighings.get(assessment.id) == weighing
+            assert uow.weighings.get(UUID(int=999)) is None
+
+    def test_weighing_the_same_assessment_again_replaces_it(
+        self, uow_factory: UnitOfWorkFactory
+    ) -> None:
+        assessment = make_assessment()
+        first = make_weighing(assessment.id)
+        second = replace(first, kind=CargoKind.PALLETS, author="other")
+        with uow_factory() as uow:
+            store_assessment(uow, assessment)
+            uow.weighings.save(first)
+            uow.commit()
+        with uow_factory() as uow:
+            uow.weighings.save(second)
+            uow.commit()
+        with uow_factory() as uow:
+            assert uow.weighings.get(assessment.id) == second
 
     def test_label_is_saved_and_read_back(self, uow_factory: UnitOfWorkFactory) -> None:
         label = make_label(PHOTO_A, 70.0)
