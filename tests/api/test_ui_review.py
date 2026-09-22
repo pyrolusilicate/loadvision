@@ -452,3 +452,18 @@ def test_weighing_again_replaces_the_stored_numbers(service: Service) -> None:
     card = text_of(get(service, ASSESSMENT))
     assert "13.60×2.45×2.70 м" in card
     assert "6.20×2.45×2.40 м" not in card
+
+
+@pytest.mark.api
+def test_the_weight_form_posts_to_the_route_that_stores_it(service: Service) -> None:
+    """The tests reach the route directly, so only this one notices a form that never sends."""
+    assess_with_signals(service, ood_score=0.1)
+    sign_in(service)
+
+    card = page(get(service, ASSESSMENT))
+
+    form = card.xpath("//form[@class='weigh']")
+    assert [element.get("method") for element in form] == ["post", "get"]
+    sends_to = [element.get("action") for element in form]
+    assert sends_to == [f"/ui/assessments/{ASSESSMENT_ID}/weight", None]
+    assert card.xpath("//form[@class='weigh']//input[@name='csrf']")
