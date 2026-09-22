@@ -10,12 +10,11 @@ It needs two folders. `--real` holds photos the service must answer on - the hel
 of the contest are the honest choice, because no model has seen them. `--foreign` holds photos
 it must refuse or ask about: another kind of body, a tractor with no trailer, a road, a wall.
 
-The rule is written down and has one knob. The line stands just above the most unusual real
-photo, so that at most `--budget` of them go to a person; the margin above that point is there
-because the next real photo we have never seen may stand a little further. The tool then says
-how many of the foreign photos the line catches. When it catches few, the answer is not a
-different line: the package cannot tell strangers apart at all, and that is what the last
-number reports.
+The rule is written down and has one knob. Catching the foreign frames comes first: the line
+goes just under the nearest of them. The knob is `--budget`, the share of real photos that may
+go to a person for it; where the line would cost more than that, it retreats and the report
+says how many foreign frames then slip under it. Where none slip under, the package separates
+them, even if the two groups overlap by a hundredth and no perfect gap exists.
 """
 
 import argparse
@@ -86,6 +85,16 @@ def shares(folder: Path, predictor: PackagePredictor, band: tuple[float, float])
 def line_for(measured: Measured, budget: float) -> float:
     """Returns the line this package should use, rounded to a hundredth of the band.
 
+    The service exists to notice a photo that is not ours, so catching the foreign frames comes
+    first and the cost is the constraint, not the other way round. The line is put just under
+    the nearest foreign frame; where that would send more than `budget` of the real photos to a
+    person, it retreats to the highest share the budget allows and the report says how many
+    foreign frames slipped under it.
+
+    An earlier rule ignored the foreign folder and only kept clear of the real photos, with a
+    margin on top. It read well and let a stock photo of somebody else's loaded body through by
+    a hundredth of the band: the margin had walked the line straight past it.
+
     Args:
         measured: Shares of both folders.
         budget: Largest share of real photos that may go to a person, from 0 to 1.
@@ -93,10 +102,19 @@ def line_for(measured: Measured, budget: float) -> float:
     Returns:
         The share at which the line stands.
     """
-    # The photo that decides is the one just inside the budget, not the very last one: a single
-    # odd photo out of three hundred must not drag the line past everything else.
-    edge = float(np.quantile(measured.real, 1.0 - budget))
-    return float(np.ceil((edge + _MARGIN) / _STEP) * _STEP)
+    # The photo that decides the cost is the one just inside the budget, not the very last one:
+    # a single odd photo out of three hundred must not drag the line past everything else.
+    affordable = float(np.quantile(measured.real, 1.0 - budget))
+    if measured.foreign.size == 0:
+        return _rounded(affordable + _MARGIN)
+    # Just under the nearest foreign frame, by one step of the scale the shares are read to.
+    wanted = _rounded(float(measured.foreign.min())) - _STEP
+    return max(wanted, _rounded(affordable))
+
+
+def _rounded(share: float) -> float:
+    """Rounds a share up to the hundredth of the band the report speaks in."""
+    return float(np.ceil(share / _STEP) * _STEP)
 
 
 def report(measured: Measured, line: float, budget: float) -> None:
@@ -122,16 +140,21 @@ def report(measured: Measured, line: float, budget: float) -> None:
     _logger.info("  настоящих фото на проверку: %d из %d", int((real >= line).sum()), real.size)
     _logger.info("  чужих кадров поймано:       %d из %d", caught, foreign.size)
 
-    # The one number that says whether a line exists at all for this package.
+    # The gap is context, not the verdict: a line that catches every foreign frame at a price
+    # the budget allows is a working line even where the two groups overlap by a hundredth.
     apart = float(foreign.min() - real.max())
     _logger.info("\nзазор между самым необычным настоящим и самым «своим» чужим: %+.3f", apart)
-    if apart <= 0:
+    if caught < foreign.size:
         _logger.warning(
-            "  ОТРИЦАТЕЛЬНЫЙ: чужие кадры перемешаны с настоящими, ни одна черта их не разделит."
+            "  %d чужих кадров прошли под чертой: допуск %.0f%% не позволяет опустить её ниже.",
+            foreign.size - caught,
+            100 * budget,
         )
-        _logger.warning("  Этот пакет не годится как детектор чужих данных, дело не в черте.")
-    elif caught < foreign.size:
-        _logger.info("  положительный, но часть чужих кадров ближе черты - смотри список выше")
+        _logger.warning("  Либо поднимайте допуск, либо этот пакет не различает их - смотри зазор.")
+    elif apart <= 0:
+        _logger.info(
+            "  отрицательный: идеально их не разделить, но черта ловит всех чужих, и цена выше"
+        )
     else:
         _logger.info("  положительный: черту можно ставить где угодно внутри зазора")
 
