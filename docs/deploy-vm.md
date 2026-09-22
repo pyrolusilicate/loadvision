@@ -113,7 +113,7 @@ uv run loadvision predict submission --package storage/models/v2 --device cuda -
 uv run loadvision predict submission --package storage/models/v2 --device cpu --out runs/bench-cpu.csv
 ```
 
-Команда печатает строку `307 photos in … s, … ms per photo`: это прогноз всех тестовых фото
+Команда печатает строку `307 photos in ... s, ... ms per photo`: это прогноз всех тестовых фото
 пачками по 8 (`--batch-size`), вместе с чтением файлов, поделённый на число фото. На GPU в это
 время входит и первый прогрев CUDA. Нужна папка `data/` с датасетом.
 
