@@ -185,3 +185,13 @@ td code { white-space: nowrap; }
   .pair { grid-template-columns: 1fr; }
   .who { margin-left: 0; }
 }
+
+/* The weight block under the photo: what a photo cannot tell, the operator picks. */
+.weigh { display: grid; gap: 10px; padding: 14px; background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); }
+.weigh h2 { margin: 0; font-size: 15px; }
+.weigh .fields { display: flex; flex-wrap: wrap; gap: 8px 12px; }
+.weigh label { display: grid; gap: 4px; font-size: 13px; flex: 1 1 130px; }
+.weigh select, .weigh input { font: inherit; padding: 6px 8px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--ground); color: var(--text); width: 100%; }
+.weigh button { justify-self: start; }
+.weigh dl { grid-template-columns: max-content 1fr; }
+.weigh input:disabled { opacity: 0.5; cursor: not-allowed; }

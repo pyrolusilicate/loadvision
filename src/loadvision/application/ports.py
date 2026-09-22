@@ -17,6 +17,7 @@ from loadvision.domain.operator import Operator, OperatorSession
 from loadvision.domain.shipment import Shipment, ShipmentId
 from loadvision.domain.timestamps import ensure_aware
 from loadvision.domain.training_job import TrainingJob, TrainingMode
+from loadvision.domain.weighing import Weighing
 from loadvision.errors import ErrorCode
 from loadvision.imaging.prepared_image import MediaType, PreparedImage
 
@@ -445,6 +446,21 @@ class ImageStorage(Protocol):
         ...
 
 
+class WeighingRepository(Protocol):
+    """Weighings within the current unit of work; an assessment has at most one."""
+
+    def get(self, assessment_id: UUID) -> Weighing | None:
+        """Returns the weighing of the assessment, or None if it has none."""
+        ...
+
+    def save(self, weighing: Weighing) -> None:
+        """Stores the weighing, replacing an earlier one of the same assessment.
+
+        The assessment must already be stored in `AssessmentRepository`.
+        """
+        ...
+
+
 class UnitOfWork(Protocol):
     """One database transaction for one use case.
 
@@ -466,6 +482,9 @@ class UnitOfWork(Protocol):
 
     @property
     def labels(self) -> LabelRepository: ...
+
+    @property
+    def weighings(self) -> WeighingRepository: ...
 
     @property
     def training_jobs(self) -> TrainingJobRepository: ...

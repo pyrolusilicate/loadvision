@@ -263,20 +263,45 @@ def _depth(
 ) -> NDArray[np.float64] | None:
     """Returns the depth grid of every photo, or None for a package that uses no depth.
 
-    Kept on disk beside the embeddings and keyed by the hash of a photo, for the same reason:
-    a retraining then pays only for the photos that are new since the last one. The depth
-    network of `ml/models/depth.py` keeps its own cache, but only inside one process, so every
-    run of the worker would otherwise start by embedding the whole dataset again.
+    The checkpoint comes from the package, not from the hub: a package carries its own copy of
+    the depth network precisely so that nothing has to be downloaded, and the worker on the
+    machine of the organizers has no way out to the hub at all.
+
+    The grids are kept on disk beside the embeddings and keyed by the hash of a photo, for the
+    same reason: a retraining then pays only for the photos that are new since the last one.
+    The cache of `ml/models/depth.py` lives inside one process, so every run of the worker would
+    otherwise start by measuring the whole dataset again.
+
+    Raises:
+        ModelPackageError: If the package asks for a grid of another shape than the one the
+            depth network pools into; the heads would be fitted on features of one width and
+            the service would feed them another.
     """
-    if active.manifest.depth is None:
+    config = active.manifest.depth
+    if config is None:
         return None
+    if (config.rows, config.cols) != (GRID_ROWS, GRID_COLS):
+        raise ModelPackageError(
+            f"{active.root}: the package asks for a depth grid of {config.rows}x{config.cols} "
+            f"and this build pools into {GRID_ROWS}x{GRID_COLS}"
+        )
+    source = active.root / config.model
     path = cache_dir / EMBEDDINGS_DIR / DEPTH_CACHE
-    fingerprint = f"{DEPTH_MODEL}:{GRID_ROWS}x{GRID_COLS}"
+    # The checkpoint itself identifies the cache: two packages may ship different depth weights,
+    # and their grids must not be mixed under one name.
+    weights = f"{config.model}/model.safetensors"
+    fingerprint = f"{active.manifest.files.get(weights, DEPTH_MODEL)}:{GRID_ROWS}x{GRID_COLS}"
     cached = _read_grids(path, fingerprint)
     missing = [sample for sample in samples if sample.sha256 not in cached]
     if missing:
-        logger.info("depth grids for %d of %d photos on %s", len(missing), len(samples), device)
-        computed = depth_grids(missing, device)
+        logger.info(
+            "depth grids for %d of %d photos on %s, from %s",
+            len(missing),
+            len(samples),
+            device,
+            source,
+        )
+        computed = depth_grids(missing, device, source)
         cached.update({sample.sha256: grid for sample, grid in zip(missing, computed, strict=True)})
         _write_grids(path, cached, fingerprint)
     return np.stack([cached[sample.sha256] for sample in samples]).astype(np.float64)
@@ -319,7 +344,10 @@ def _copy_package(source: Path, target: Path) -> Path:
     if target.exists():
         raise FileExistsError(f"{target} already exists")
     target.parent.mkdir(parents=True, exist_ok=True)
-    shutil.copytree(source, target, ignore=shutil.ignore_patterns(WEIGHTS_DIR))
+    # Hidden names are left behind on purpose: a package path may not begin with a dot, and an
+    # upload to a model hub drops its own `.cache` into the folder it is sending. Copying that
+    # along would put paths into the manifest that the manifest itself refuses.
+    shutil.copytree(source, target, ignore=shutil.ignore_patterns(WEIGHTS_DIR, ".*"))
     weights = source / WEIGHTS_DIR
     if weights.is_dir():
         (target / WEIGHTS_DIR).mkdir()

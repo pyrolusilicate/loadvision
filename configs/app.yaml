@@ -27,16 +27,19 @@ review:
   #
   # From here the frame goes to a person. Not picked by hand: `scripts/ood_line.py` reads the
   # 307 held-out photos of the contest, which no model has seen, and a folder of photos the
-  # service must not answer on, and returns the line. On v4 it returns 0.06 - no real photo of
-  # the 307 goes to a person, every one of the 11 foreign frames is caught, and the gap between
-  # the two groups is 0.44 of the band wide.
+  # service must not answer on, and returns the line. On v4 it returns 0.04: all 20 foreign
+  # frames are caught and 2 of the 307 real photos, 0.7%, go to a person for it.
+  #
+  # It returned 0.06 while its rule only kept clear of the real photos. A stock photo of
+  # somebody else's loaded body sits at 0.050 and walked straight through. Catching the foreign
+  # frames is the point of the line, so that is what it is fitted to now.
   #
   # The line belongs to the package, not to the service, and does not carry over. On v5 this
   # same 0.06 lets a body of potato sacks through, and the line that catches it there, -0.05,
   # would send 57 of the 307 photos - 18.6% - to a person on v4. So the tool is run again for
   # every package before its number is trusted; v5 is not served because on it the two groups
   # overlap and no line separates them at all.
-  unusual_band_share: 0.06
+  unusual_band_share: 0.04
   # From here the pages show no prediction at all. Above the blurred photos, which are bad but
   # still show a body worth judging, and below the empty frames on both packages.
   unreadable_band_share: 0.6

@@ -8,11 +8,19 @@ import numpy as np
 
 from loadvision.application.ports import ImageRecord
 from loadvision.domain.assessment import Assessment, LoadPercent
+from loadvision.domain.cargo_weight import (
+    BODIES,
+    DEFAULT_BODY,
+    CargoKind,
+    density_of,
+    estimate_weight,
+)
 from loadvision.domain.confirmed_label import ConfirmedLabel, LabelSource
 from loadvision.domain.model_version import ModelVersion, ModelVersionId, ModelVersionStatus
 from loadvision.domain.operator import SESSION_LIFETIME, Operator, OperatorSession
 from loadvision.domain.shipment import Shipment, ShipmentId
 from loadvision.domain.training_job import TrainingJob, TrainingMode
+from loadvision.domain.weighing import Weighing
 from loadvision.imaging.prepared_image import MediaType, PreparedImage
 
 T0 = datetime(2026, 9, 16, 12, 0, tzinfo=UTC)
@@ -85,6 +93,26 @@ def make_session(
         csrf="csrf-token",
         created_at=at,
         expires_at=at + SESSION_LIFETIME,
+    )
+
+
+def make_weighing(
+    assessment_id: UUID,
+    *,
+    kind: CargoKind = CargoKind.ROLL_CAGES,
+    body: str = "t5",
+    author: str | None = "operator-17",
+    at: datetime = T0,
+) -> Weighing:
+    size = BODIES.get(body, DEFAULT_BODY)
+    return Weighing.of(
+        assessment_id=assessment_id,
+        body=body,
+        size=size,
+        kind=kind,
+        estimate=estimate_weight(60.0, body=size, density=density_of(kind)),
+        author=author,
+        at=at,
     )
 
 

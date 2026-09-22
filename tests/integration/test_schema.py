@@ -24,6 +24,8 @@ type Row = dict[str, Any]
 
 SHA_A = "a" * 64
 SHA_B = "b" * 64
+# The assessment the seeded connection carries, for the one table that hangs off one.
+WEIGHED = UUID(int=7)
 NAN = float("nan")
 INF = float("inf")
 
@@ -103,12 +105,31 @@ def job_row(**overrides: Any) -> Row:
     return {"id": UUID(int=2), "mode": "fast", "status": "queued", "created_at": T0} | overrides
 
 
+def weighing_row(**overrides: Any) -> Row:
+    row: Row = {
+        "assessment_id": WEIGHED,
+        "body": "t5",
+        "length_m": 6.2,
+        "width_m": 2.45,
+        "height_m": 2.4,
+        "cargo_kind": "roll_cages",
+        "kilograms": 2000.0,
+        "low_kg": 1500.0,
+        "high_kg": 3000.0,
+        "cubic_metres": 10.0,
+        "author": "operator-1",
+        "created_at": T0,
+    }
+    return row | overrides
+
+
 ROW_BUILDERS: dict[str, Callable[..., Row]] = {
     "images": image_row,
     "shipments": shipment_row,
     "model_versions": model_row,
     "assessments": assessment_row,
     "confirmed_labels": label_row,
+    "weighings": weighing_row,
     "training_jobs": job_row,
     "operators": operator_row,
     "operator_sessions": session_row,
@@ -163,11 +184,17 @@ def schema_snapshot(connection: Connection) -> dict[str, list[tuple[Any, ...]]]:
 
 @pytest.fixture
 def seeded(connection: Connection) -> Connection:
-    """Connection with one photo, one shipment, one candidate version and one operator."""
+    """Connection with photos, a shipment, a version, an operator and one assessment."""
     insert(connection, "images", image_row(sha256=SHA_A))
     insert(connection, "shipments", shipment_row(id="RP-1"))
     insert(connection, "model_versions", model_row(version="baseline-v0"))
     insert(connection, "operators", operator_row(login="operator-1"))
+    # A weighing hangs off an assessment, and this is the only table that needs one. It goes on
+    # a shipment of its own, so a row built for `assessments` itself still fits beside it: one
+    # assessment per shipment and photo. The second photo stays unused on purpose - other tests
+    # need a photo the database has never heard of.
+    insert(connection, "shipments", shipment_row(id="RP-3"))
+    insert(connection, "assessments", assessment_row(id=WEIGHED, shipment_id="RP-3"))
     return connection
 
 

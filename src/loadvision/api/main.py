@@ -39,6 +39,7 @@ from loadvision.application.training_jobs import (
     ReleaseTrainingJob,
     StartTraining,
 )
+from loadvision.application.weigh_cargo import WeighCargo
 from loadvision.domain.model_version import ModelVersionId
 from loadvision.domain.timestamps import utc_now
 from loadvision.infrastructure.db.activity import worker_connected
@@ -162,6 +163,7 @@ def build_service_app(settings: Settings, engine: Engine) -> FastAPI:
         review_queue=ReviewQueue(uow_factory=uow_factory),
         get_assessment=services.get_assessment,
         submit_label=services.submit_label,
+        weigh_cargo=WeighCargo(uow_factory=uow_factory, clock=utc_now),
         mark_readable=MarkReadable(uow_factory=uow_factory),
         get_shipment=services.get_shipment,
         list_models=services.list_models,

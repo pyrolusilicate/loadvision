@@ -30,6 +30,41 @@
       {% if map %}{{ view_notes[map] }}
       {% else %}{{ details.image.width }}×{{ details.image.height }} · {{ details.image.media_type.value }}{% endif %}
     </figcaption>
+    {% if not unreadable %}
+    <form class="weigh" method="get">
+      <h2>Вес груза</h2>
+      <div class="fields">
+        <label>Кузов
+          <select name="body">
+            {% for key, name in body_names.items() %}
+            <option value="{{ key }}"{% if key == weight.body %} selected{% endif %}>{{ name }}</option>
+            {% endfor %}
+          </select>
+        </label>
+        <label>Груз
+          <select name="cargo">
+            {% for key, name in kind_names.items() %}
+            <option value="{{ key.value }}"{% if key == weight.kind %} selected{% endif %}>{{ name }}</option>
+            {% endfor %}
+          </select>
+        </label>
+      </div>
+      {% set own = weight.body == custom_body %}
+      <div class="fields">
+        <label>Длина, м <input type="text" name="length" inputmode="decimal" value="{{ '%.2f'|format(weight.size.length) }}"{% if not own %} disabled{% endif %}></label>
+        <label>Ширина, м <input type="text" name="width" inputmode="decimal" value="{{ '%.2f'|format(weight.size.width) }}"{% if not own %} disabled{% endif %}></label>
+        <label>Высота, м <input type="text" name="height" inputmode="decimal" value="{{ '%.2f'|format(weight.size.height) }}"{% if not own %} disabled{% endif %}></label>
+      </div>
+      <button type="submit">{% if weight.estimate %}Пересчитать{% else %}Рассчитать{% endif %}</button>
+      {% if weight.estimate %}
+      <dl>
+        <dt>Объём груза</dt><dd>{{ weight.estimate.cubic_metres }} м³</dd>
+        <dt>Плотность</dt><dd class="num">{{ weight.density.low|round|int }}–{{ weight.density.high|round|int }} кг/м³</dd>
+      </dl>
+      <p class="caption">Оценка по типовой плотности. Считается от загрузки на фото и выбранных габаритов.</p>
+      {% endif %}
+    </form>
+    {% endif %}
   </figure>
   <section class="card">
     <p><a href="{{ ui }}/shipments/{{ a.shipment_id.value|urlencode }}">Перевозка {{ a.shipment_id.value }}</a></p>
@@ -64,14 +99,11 @@
         <dt>Расхождение</dt>
         <dd>{{ (a.load_pct.value - a.declared_load_pct.value)|load }} п.п.</dd>
       </dl>
-      {% if verdict.value == 'matches' %}
-      <p class="muted">Разница меньше {{ declared_tolerance|load }} п.п. — это внутри собственной ошибки модели, поэтому расхождением её не считаем.</p>
-      {% endif %}
     </div>
     {% endif %}
-    {% if a.review_reasons and not details.label %}
+    {% if a.review_reasons %}
     <div class="note warn">
-      <p><strong>Прогноз может быть неверным.</strong></p>
+      <p><strong>{% if details.label %}Модель сомневалась в этом фото.{% else %}Прогноз может быть неверным.{% endif %}</strong></p>
       <p>{% for reason in a.review_reasons|sort %}{{ review_notes[reason] }} {% endfor %}</p>
       <dl>{{ measurements(a.signals) }}</dl>
     </div>
@@ -79,6 +111,12 @@
     <dl>
       <dt>Модель</dt><dd>{{ a.model_version.value }}</dd>
       <dt>Время оценки</dt><dd>{{ a.created_at|time }}</dd>
+      {% if weight.estimate %}
+      <dt>Вес груза</dt>
+      <dd class="num">{{ weight.estimate.low|round|int }}–{{ weight.estimate.high|round|int }} кг</dd>
+      <dt>Кузов</dt>
+      <dd class="num">{{ '%.2f'|format(weight.size.length) }}×{{ '%.2f'|format(weight.size.width) }}×{{ '%.2f'|format(weight.size.height) }} м</dd>
+      {% endif %}
     </dl>
 
     <h2>Подтверждённая загрузка</h2>

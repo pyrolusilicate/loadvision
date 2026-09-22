@@ -9,6 +9,7 @@ import pytest
 from numpy.typing import NDArray
 
 from loadvision.ml.data.manifest import load_split
+from loadvision.ml.models.depth import GRID_COLS, GRID_ROWS
 from loadvision.ml.packaging.model_package import ModelPackage, ModelPackageError
 from loadvision.ml.training import refit
 from loadvision.ml.training.refit import refit_heads
@@ -204,3 +205,72 @@ def test_a_filesystem_that_refuses_a_link_still_gets_the_weights(
     for index in range(FOLDS):
         weights = f"weights/m{index}.safetensors"
         assert (root / weights).read_bytes() == (active.root / weights).read_bytes()
+
+
+def with_depth(root: Path, rows: int = GRID_ROWS, cols: int = GRID_COLS) -> ModelPackage:
+    """A package that carries a depth checkpoint of its own, as the served one does."""
+    return build_package(
+        root,
+        {f"m{index}/head.npz": b"head" for index in range(FOLDS)}
+        | {f"weights/m{index}.safetensors": f"weights {index}".encode() for index in range(FOLDS)}
+        | {"depth/model.safetensors": b"depth weights"},
+        members=[
+            member_data(
+                backbone="dinov2_vitb14",
+                runtime="torch",
+                head=f"m{index}/head.npz",
+                weights=f"weights/m{index}.safetensors",
+                weight=1.0 / FOLDS,
+            )
+            for index in range(FOLDS)
+        ],
+        depth={"model": "depth", "rows": rows, "cols": cols},
+    )
+
+
+@pytest.mark.ml
+def test_the_depth_checkpoint_comes_from_the_package(
+    prepared: tuple[ModelPackage, Path, Path], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The worker of the GPU machine has no way out to the hub, and needs none: it is in there."""
+    _package, data, folds = prepared
+    active = with_depth(Path("with-depth"))
+    asked: list[object] = []
+
+    def grids(samples: Sequence[Any], _device: str, source: object = None) -> Any:
+        asked.append(source)
+        return np.zeros((len(samples), GRID_ROWS * GRID_COLS), dtype=np.float32)
+
+    monkeypatch.setattr(refit, "depth_grids", grids)
+    monkeypatch.setattr(refit, "_features", plain_features())
+    monkeypatch.setattr(refit, "_out_of_fold", lambda computed, labels, numbers, n: labels.copy())
+
+    refit_heads(
+        active=active,
+        dataset=data,
+        folds_file=folds,
+        cache_dir=Path("cache"),
+        out_dir=Path("candidate"),
+        version="candidate",
+    )
+
+    assert asked == [active.root / "depth"]
+
+
+@pytest.mark.ml
+def test_a_depth_grid_of_another_shape_is_refused(
+    prepared: tuple[ModelPackage, Path, Path],
+) -> None:
+    """Heads fitted on one width and fed another would fail late, in the service."""
+    _package, data, folds = prepared
+    active = with_depth(Path("odd-depth"), rows=GRID_ROWS + 1)
+
+    with pytest.raises(ModelPackageError, match="depth grid"):
+        refit_heads(
+            active=active,
+            dataset=data,
+            folds_file=folds,
+            cache_dir=Path("cache"),
+            out_dir=Path("candidate"),
+            version="candidate",
+        )

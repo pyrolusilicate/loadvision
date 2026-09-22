@@ -4,6 +4,7 @@ import pytest
 
 from loadvision.api.ui.templates import REVIEW_NOTES
 from loadvision.domain.assessment import ReviewReason, Signals
+from loadvision.domain.cargo_weight import DENSITIES, CargoKind
 from loadvision.domain.confirmed_label import LabelSource
 from loadvision.errors import ERROR_CATALOG, ErrorCode
 from tests.api.service import (
@@ -325,3 +326,129 @@ def test_the_header_names_the_model_that_answers() -> None:
 
     assert page(get(loaded, "/ui/")).xpath("//span[contains(@class, 'badge')]/text()") == ["fake-7"]
     assert "модель загружается" in text_of(get(loading, "/ui/"))
+
+
+@pytest.mark.api
+def test_a_confirmed_photo_still_says_the_model_doubted_it(service: Service) -> None:
+    """The operator's number replaces the prediction; that the model doubted it stays on record."""
+    assess_with_signals(service, ood_score=0.9)
+    token = sign_in(service)
+
+    submit(service, f"{ASSESSMENT}/label", csrf=token, action="confirm", load_pct="60")
+
+    card = text_of(get(service, ASSESSMENT))
+    assert "Модель сомневалась в этом фото" in card
+    assert REVIEW_NOTES[ReviewReason.UNUSUAL_SCENE] in card
+
+
+@pytest.mark.api
+def test_the_weight_block_answers_the_body_and_the_cargo_it_was_given(service: Service) -> None:
+    """A photo gives the load; the body and the density are the operator's, so both are shown."""
+    assess_with_signals(service, ood_score=0.1)
+    token = sign_in(service)
+
+    submit(service, f"{ASSESSMENT}/weight", csrf=token, body="t20", cargo="pallets")
+
+    card = text_of(get(service, ASSESSMENT))
+    assert "Объём груза" in card
+    assert "13.60×2.45×2.70 м" in card
+
+
+@pytest.mark.api
+def test_a_body_typed_by_hand_is_used_instead_of_the_list(service: Service) -> None:
+    assess_with_signals(service, ood_score=0.1)
+    token = sign_in(service)
+
+    submit(
+        service,
+        f"{ASSESSMENT}/weight",
+        csrf=token,
+        body="custom",
+        cargo="sacks",
+        length="5",
+        width="2",
+        height="2,5",
+    )
+
+    assert "5.00×2.00×2.50 м" in text_of(get(service, ASSESSMENT))
+
+
+@pytest.mark.api
+def test_a_body_typed_wrong_falls_back_instead_of_failing_the_page(service: Service) -> None:
+    """A page is not an API: a query typed by hand draws the block, it does not break it."""
+    assess_with_signals(service, ood_score=0.1)
+    token = sign_in(service)
+
+    submit(
+        service,
+        f"{ASSESSMENT}/weight",
+        csrf=token,
+        body="custom",
+        cargo="sacks",
+        length="999",
+        width="x",
+        height="",
+    )
+
+    # The sizes were unusable, so the smallest body of the list stands in for them.
+    assert "6.20×2.45×2.40 м" in text_of(get(service, ASSESSMENT))
+
+
+@pytest.mark.api
+def test_no_weight_is_shown_until_a_cargo_is_chosen(service: Service) -> None:
+    assess_with_signals(service, ood_score=0.1)
+    sign_in(service)
+
+    # The heading of the block is always there; the answer under it is not.
+    assert "Объём груза" not in text_of(get(service, ASSESSMENT))
+
+
+@pytest.mark.api
+def test_the_block_shows_the_density_it_weighed_with(service: Service) -> None:
+    """The number has to be on the page: a weight nobody can check is worth nothing."""
+    assess_with_signals(service, ood_score=0.1)
+    token = sign_in(service)
+
+    submit(service, f"{ASSESSMENT}/weight", csrf=token, body="t5", cargo="roll_cages")
+
+    card = text_of(get(service, ASSESSMENT))
+    low, high = DENSITIES[CargoKind.ROLL_CAGES].low, DENSITIES[CargoKind.ROLL_CAGES].high
+    assert f"{low:.0f}–{high:.0f} кг/м³" in card
+
+
+@pytest.mark.api
+def test_an_empty_cargo_typed_into_the_address_is_ignored(service: Service) -> None:
+    """How empty the body is, the load percent says; a kind of "nothing" has no weight to give."""
+    assess_with_signals(service, ood_score=0.1)
+    token = sign_in(service)
+
+    submit(service, f"{ASSESSMENT}/weight", csrf=token, body="t5", cargo="empty")
+
+    assert "Объём груза" not in text_of(get(service, ASSESSMENT))
+
+
+@pytest.mark.api
+def test_a_weighing_survives_a_reload(service: Service) -> None:
+    """The number is stored, not recomputed: an operator acts on what he was shown."""
+    assess_with_signals(service, ood_score=0.1)
+    token = sign_in(service)
+
+    submit(service, f"{ASSESSMENT}/weight", csrf=token, body="t10", cargo="roll_cages")
+
+    first = text_of(get(service, ASSESSMENT))
+    second = text_of(get(service, ASSESSMENT))
+    assert "8.00×2.45×2.60 м" in first
+    assert first == second
+
+
+@pytest.mark.api
+def test_weighing_again_replaces_the_stored_numbers(service: Service) -> None:
+    assess_with_signals(service, ood_score=0.1)
+    token = sign_in(service)
+    submit(service, f"{ASSESSMENT}/weight", csrf=token, body="t5", cargo="roll_cages")
+
+    submit(service, f"{ASSESSMENT}/weight", csrf=token, body="t20", cargo="pallets")
+
+    card = text_of(get(service, ASSESSMENT))
+    assert "13.60×2.45×2.70 м" in card
+    assert "6.20×2.45×2.40 м" not in card

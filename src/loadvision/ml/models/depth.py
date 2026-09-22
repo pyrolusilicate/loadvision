@@ -34,8 +34,10 @@ _PARAMS: Final = {
 }
 _BATCH: Final = 16
 
-# ponytail: one process-wide cache, so five folds and the test split pay for each photo once.
-_CACHE: dict[Path, NDArray[np.float32]] = {}
+# One process-wide cache, so five folds and the test split pay for each photo once. The source
+# is part of the key: two packages may carry different depth checkpoints, and one photo then has
+# one grid per checkpoint rather than whichever was computed first.
+_CACHE: dict[tuple[str, Path], NDArray[np.float32]] = {}
 
 
 class DepthEncoder:
@@ -111,27 +113,33 @@ class DepthEncoder:
         return self.grids([image], rows, cols)[0]
 
 
-def depth_grids(samples: Sequence[Sample], device: str) -> NDArray[np.float32]:
+def depth_grids(
+    samples: Sequence[Sample], device: str, source: str | Path = DEPTH_MODEL
+) -> NDArray[np.float32]:
     """Returns the depth grid of every training photo, computing only the ones not seen yet.
 
     Args:
         samples: Photos of the dataset.
         device: Torch device the depth model runs on.
+        source: Hub name, or the folder of a package that carries the checkpoint. A package
+            ships its own copy precisely so that nothing has to be downloaded, and retraining
+            behind a closed network passes that folder instead of reaching the hub.
 
     Returns:
         Array of shape (photos, `DEPTH_DIM`), rows in the order of `samples`.
     """
-    missing = [sample.path for sample in samples if sample.path not in _CACHE]
+    key = str(source)
+    missing = [sample.path for sample in samples if (key, sample.path) not in _CACHE]
     if missing:
-        encoder = DepthEncoder.load(device=device)
+        encoder = DepthEncoder.load(source, device=device)
         for start in range(0, len(missing), _BATCH):
             paths = missing[start : start + _BATCH]
             computed = encoder.grids([read_image(path) for path in paths])
-            _CACHE.update(dict(zip(paths, computed, strict=True)))
+            _CACHE.update({(key, path): grid for path, grid in zip(paths, computed, strict=True)})
         del encoder
         if device.startswith("cuda"):
             torch.cuda.empty_cache()
-    return np.stack([_CACHE[sample.path] for sample in samples])
+    return np.stack([_CACHE[(key, sample.path)] for sample in samples])
 
 
 def mirror_grids(grids: torch.Tensor) -> torch.Tensor:
