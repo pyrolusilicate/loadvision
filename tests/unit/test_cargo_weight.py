@@ -53,8 +53,10 @@ def test_a_bigger_body_holds_more_at_the_same_load() -> None:
 def test_the_defaults_answer_a_plausible_lorry_load() -> None:
     estimate = estimate_weight(100, body=DEFAULT_BODY, density=DEFAULT_DENSITY)
 
-    # A 16 m3 body of parcels: hundreds of kilograms, not tens and not tens of tonnes.
-    assert 500 < estimate.kilograms < 3000
+    # The default body is a five tonner, so a full one has to land near what it is rated to
+    # carry. Tens of kilograms or tens of tonnes would mean the arithmetic or a density is out
+    # by an order of magnitude, and nothing else here would catch that.
+    assert 2000 < estimate.kilograms < 6000
     assert estimate.low < estimate.kilograms < estimate.high
 
 

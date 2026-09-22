@@ -18,6 +18,7 @@ from loadvision.api.ui.assess_routes import (
     REUSED_RESULT,
     TAKEN_FROM_PARAM,
 )
+from loadvision.api.ui.cargo_form import chosen_from, stored_block
 from loadvision.api.ui.pages import page
 from loadvision.api.ui.pagination import TILES_PER_PAGE, pager
 from loadvision.api.ui.services import ui_services_of
@@ -25,6 +26,7 @@ from loadvision.api.ui.session import SignedIn, checked_form
 from loadvision.api.ui.templates import UI_PREFIX
 from loadvision.application.ports import AssessmentOrder, ExplanationKind, ReviewStatus
 from loadvision.application.submit_label import SubmitLabelRequest
+from loadvision.application.weigh_cargo import WeighCargoRequest
 from loadvision.domain.assessment import SHA256_HEX_PATTERN, LoadPercent
 from loadvision.domain.confirmed_label import LabelSource
 from loadvision.domain.model_version import ModelVersionId
@@ -107,6 +109,9 @@ async def assessment(
 ) -> Response:
     """Shows one assessment: the photo, the prediction and the form for the verdict.
 
+    The weight block under the photo shows what was weighed and stored for this assessment, if
+    anything; weighing itself is a POST of its own.
+
     `result` comes from the photo form and says whether the photo was just assessed, had been
     assessed for this shipment by the model that answers now, or was assessed again in place
     of the estimate of the model named by `previous`. `same_as` names the shipment whose
@@ -134,6 +139,7 @@ async def assessment(
         again=result == AGAIN_RESULT,
         previous=_version_or_blank(previous),
         same_as=_shipment_or_blank(same_as),
+        weight=stored_block(details.weighing),
     )
 
 
@@ -156,6 +162,36 @@ def _version_or_blank(value: str) -> str:
         return ModelVersionId(value).value
     except ValueError:
         return ""
+
+
+@router.post("/assessments/{assessment_id}/weight")
+async def weigh(request: Request, session: SignedIn, assessment_id: str) -> Response:
+    """Weighs the cargo of this assessment and keeps the numbers beside it.
+
+    A weighing is stored rather than computed on every page, because the table of densities is
+    ours to change and a number an operator acted on must not change under him afterwards.
+    """
+    target = uuid_from_path(assessment_id, ErrorCode.ASSESSMENT_NOT_FOUND)
+    form = await checked_form(request, session)
+    asked = chosen_from(
+        str(form.get("body", "")),
+        str(form.get("cargo", "")),
+        str(form.get("length", "")),
+        str(form.get("width", "")),
+        str(form.get("height", "")),
+    )
+    if asked.kind is not None:
+        await run_in_threadpool(
+            ui_services_of(request).weigh_cargo,
+            WeighCargoRequest(
+                assessment_id=target,
+                body=asked.body,
+                size=asked.size,
+                kind=asked.kind,
+                author=session.login,
+            ),
+        )
+    return RedirectResponse(f"{UI_PREFIX}/assessments/{target}", status_code=303)
 
 
 @router.post("/assessments/{assessment_id}/readable")
@@ -191,6 +227,9 @@ async def label(request: Request, session: SignedIn, assessment_id: str) -> Resp
                 details=details,
                 typed=form.get("load_pct", ""),
                 error="Загрузка — число от 0 до 100, например 72.5.",
+                # The page draws the weight block whatever brought it up, so it needs one here
+                # as well; without it a refused number turns a 400 into a 500.
+                weight=stored_block(details.weighing),
             )
     await run_in_threadpool(
         services.submit_label,

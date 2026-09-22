@@ -16,6 +16,7 @@ from loadvision.domain.model_version import ModelVersion, ModelVersionId, ModelV
 from loadvision.domain.operator import Operator, OperatorSession
 from loadvision.domain.shipment import Shipment, ShipmentId
 from loadvision.domain.training_job import TrainingJob, TrainingJobStatus
+from loadvision.domain.weighing import Weighing
 
 
 class _Table[K, V]:
@@ -192,6 +193,17 @@ class InMemoryLabelRepository:
         return sorted(usable, key=lambda row: row.image_sha256)
 
 
+class InMemoryWeighingRepository:
+    def __init__(self, table: _Table[UUID, Weighing]) -> None:
+        self._table = table
+
+    def get(self, assessment_id: UUID) -> Weighing | None:
+        return self._table.get(assessment_id)
+
+    def save(self, weighing: Weighing) -> None:
+        self._table.put(weighing.assessment_id, weighing)
+
+
 class InMemoryTrainingJobRepository:
     def __init__(self, table: _Table[UUID, TrainingJob]) -> None:
         self._table = table
@@ -320,6 +332,7 @@ class _Tables:
         self.images = _Table(store.images)
         self.model_versions = _Table(store.model_versions)
         self.labels = _Table(store.labels)
+        self.weighings = _Table(store.weighings)
         self.training_jobs = _Table(store.training_jobs)
         self.operators = _Table(store.operators)
         self.operator_sessions = _Table(store.operator_sessions)
@@ -330,6 +343,7 @@ class _Tables:
         self.images.commit()
         self.model_versions.commit()
         self.labels.commit()
+        self.weighings.commit()
         self.training_jobs.commit()
         self.operators.commit()
         self.operator_sessions.commit()
@@ -366,6 +380,10 @@ class InMemoryUnitOfWork:
     @property
     def labels(self) -> InMemoryLabelRepository:
         return InMemoryLabelRepository(self._open().labels)
+
+    @property
+    def weighings(self) -> InMemoryWeighingRepository:
+        return InMemoryWeighingRepository(self._open().weighings)
 
     @property
     def training_jobs(self) -> InMemoryTrainingJobRepository:
@@ -409,6 +427,7 @@ class InMemoryStore:
         self.images: dict[str, ImageRecord] = {}
         self.model_versions: dict[ModelVersionId, ModelVersion] = {}
         self.labels: dict[str, ConfirmedLabel] = {}
+        self.weighings: dict[UUID, Weighing] = {}
         self.training_jobs: dict[UUID, TrainingJob] = {}
         self.operators: dict[str, Operator] = {}
         # None marks a session that was ended.

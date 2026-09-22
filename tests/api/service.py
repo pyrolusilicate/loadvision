@@ -31,6 +31,7 @@ from loadvision.application.training_jobs import (
     ReleaseTrainingJob,
     StartTraining,
 )
+from loadvision.application.weigh_cargo import WeighCargo
 from loadvision.errors import ERROR_CATALOG, ErrorCode
 from loadvision.imaging.prepared_image import MediaType
 from loadvision.imaging.validator import ImageLimits, prepare_image
@@ -149,6 +150,7 @@ def make_service(
         review_queue=ReviewQueue(uow_factory=store.unit_of_work),
         get_assessment=services.get_assessment,
         submit_label=services.submit_label,
+        weigh_cargo=WeighCargo(uow_factory=store.unit_of_work, clock=clock),
         mark_readable=MarkReadable(uow_factory=store.unit_of_work),
         get_shipment=services.get_shipment,
         list_models=services.list_models,

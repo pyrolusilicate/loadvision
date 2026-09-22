@@ -20,6 +20,7 @@ from loadvision.application.training_jobs import (
     ReleaseTrainingJob,
     StartTraining,
 )
+from loadvision.application.weigh_cargo import WeighCargo
 from loadvision.domain.model_version import ModelVersionId
 from loadvision.ml.inference.active_model import ActiveModel
 
@@ -39,6 +40,7 @@ class UiServices:
         review_queue: Assessments waiting for a confirmed load.
         get_assessment: One assessment with its photo and label.
         submit_label: Stores the verdict of an operator.
+        weigh_cargo: Weighs the cargo of an assessment and keeps the numbers beside it.
         mark_readable: Cancels the verdict of the model about an unreadable photo.
         get_shipment: A shipment with its history.
         list_models: Registered model versions.
@@ -63,6 +65,7 @@ class UiServices:
     review_queue: ReviewQueue
     get_assessment: GetAssessment
     submit_label: SubmitLabel
+    weigh_cargo: WeighCargo
     mark_readable: MarkReadable
     get_shipment: GetShipment
     list_models: ListModelVersions

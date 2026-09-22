@@ -8,6 +8,7 @@ from typing import Final
 
 from starlette.templating import Jinja2Templates
 
+from loadvision.api.ui.cargo_form import BODY_NAMES, CUSTOM_BODY, KIND_NAMES
 from loadvision.api.xml.schemas import LOAD_PCT_PLACES, format_decimal
 from loadvision.application.ports import ExplanationKind
 from loadvision.domain.assessment import LoadDiscrepancy, ReviewReason
@@ -92,6 +93,9 @@ templates.env.globals["review_notes"] = REVIEW_NOTES
 templates.env.globals["view_names"] = VIEW_NAMES
 templates.env.globals["view_notes"] = VIEW_NOTES
 templates.env.globals["declared_notes"] = DECLARED_NOTES
+templates.env.globals["body_names"] = BODY_NAMES
+templates.env.globals["kind_names"] = KIND_NAMES
+templates.env.globals["custom_body"] = CUSTOM_BODY
 templates.env.globals["declared_tolerance"] = DECLARED_TOLERANCE
 templates.env.globals["stylesheet"] = _stylesheet
 templates.env.filters["load"] = _load
