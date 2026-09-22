@@ -39,6 +39,8 @@ from tests.ml.test_stages import (
     toy_loader,
 )
 from tests.ml.test_stages import members as toy_members
+from tests.model_packages import build_package as write_package
+from tests.model_packages import member_data
 
 NOW = datetime(2026, 9, 18, 9, 0, tzinfo=UTC)
 CONFIG = {"members": [{"encoder": "toy_a"}, {"encoder": "toy_b"}], "version": "v2"}
@@ -303,3 +305,43 @@ def test_two_runs_get_their_own_folders(workspace) -> None:
 
     assert first.run_id != second.run_id
     assert first.package_path != second.package_path
+
+
+@pytest.mark.ml
+def test_a_package_shaped_like_the_served_one_has_its_heads_refitted(
+    workspace, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The candidate must come from the family that is served, or the gate compares nothing."""
+    _data_dir, folds_file, root = workspace
+    folds = read_folds(folds_file).n_folds
+    active = write_package(
+        root / "active",
+        {f"m{index}/head.npz": b"head" for index in range(folds)}
+        | {f"w{index}.safetensors": f"weights {index}".encode() for index in range(folds)},
+        members=[
+            member_data(
+                backbone="dinov2_vitb14",
+                runtime="torch",
+                head=f"m{index}/head.npz",
+                weights=f"w{index}.safetensors",
+                weight=1.0 / folds,
+            )
+            for index in range(folds)
+        ],
+    )
+    called: list[str] = []
+    monkeypatch.setattr(
+        runner_module, "refit_heads", lambda **kwargs: called.append(kwargs["version"])
+    )
+    monkeypatch.setattr(
+        runner_module.PipelineTrainingRunner,
+        "_pipeline",
+        lambda *args, **kwargs: pytest.fail("the pipeline must not run for a refittable package"),
+    )
+    storage = InMemoryImageStorage()
+
+    make_runner(workspace, storage, active_package=active.root).run(
+        TrainingRequest(mode=TrainingMode.FAST, labels=labels(storage, 2))
+    )
+
+    assert called
