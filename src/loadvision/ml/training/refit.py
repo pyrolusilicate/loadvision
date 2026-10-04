@@ -56,7 +56,7 @@ logger = logging.getLogger(__name__)
 PACKAGE_OOF: Final = "metrics/oof.csv"
 # Ridge penalty of the refitted heads. The heads of a fine-tuned package were trained with the
 # encoder rather than fitted on cached vectors, so there is no value to inherit; this is the
-# middle of the range that `docs/ml/research-brief.md` measured for a vector of this width.
+# middle of the range that proved best for a vector of this width.
 DEFAULT_ALPHA: Final = 300.0
 HEAD_KIND: Final = "ridge"
 # Depth grids live beside the embeddings, under this name.

@@ -12,7 +12,7 @@ from loadvision.ml.training.postprocess_fit import fit_chain
 type Chain = Sequence[tuple[str, Mapping[str, float]]]
 
 # Две популяции фото различаются пропорциями кадра: у 0.70-0.80 доля меток «ровно 100» втрое
-# выше. Границы замерены 17.09 и записаны в docs/ml/user-cases.md.
+# выше. Границы замерены и записаны в docs/ml/experiments.md.
 _BY_ASPECT: Final[Mapping[str, float]] = {"bins": 16.0, "low": 0.7, "high": 0.8}
 
 # Chains worth comparing; the winner goes into an experiment config as the postprocess chain.
