@@ -17,7 +17,6 @@ _PERCENT: Final = 100.0
 
 # Cargo rarely reaches the ceiling: the share of the body's height a stack usually takes.
 DEFAULT_STACK_SHARE: Final = 0.6
-MAX_STACK_SHARE = 0.90
 
 
 class CargoKind(StrEnum):
