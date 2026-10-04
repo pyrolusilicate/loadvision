@@ -107,7 +107,9 @@ def build_service_app(settings: Settings, engine: Engine) -> FastAPI:
         LoadServedModel(
             uow_factory=uow_factory,
             clock=utc_now,
-            load_package=functools.partial(load_package, settings.storage.models_dir, device),
+            load_package=functools.partial(
+                load_package, settings.storage.models_dir, device, settings.model.bf16
+            ),
             initial_version=ModelVersionId(settings.model.version),
         ),
         check_seconds=settings.model.check_seconds,
@@ -192,12 +194,15 @@ def build_service_app(settings: Settings, engine: Engine) -> FastAPI:
     return create_app(services, lifespan, ui)
 
 
-def load_package(models_dir: Path, device: str, version: ModelVersionId) -> PackagePredictor:
+def load_package(
+    models_dir: Path, device: str, bf16: bool, version: ModelVersionId
+) -> PackagePredictor:
     """Loads the package of a version from its folder in the models storage.
 
     Args:
         models_dir: Folder with one package folder per version.
         device: Torch device the model runs on.
+        bf16: Whether the encoder runs in bfloat16; it acts only on a card.
         version: Version to load; its tag format keeps the path inside `models_dir`.
 
     Raises:
@@ -206,6 +211,7 @@ def load_package(models_dir: Path, device: str, version: ModelVersionId) -> Pack
     return PackagePredictor(
         ModelPackage.load(models_dir / version.value),
         device,
+        bf16=bf16,
         # Beside the package, not inside it: every file inside is listed in the manifest with
         # its hash, and this one is ours, not the model's.
         scale_cache=models_dir / f"{version.value}{SCALE_SUFFIX}",

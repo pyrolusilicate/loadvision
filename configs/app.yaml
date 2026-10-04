@@ -65,6 +65,9 @@ model:
   # The GPU when torch sees one, otherwise the CPU: one file for a laptop, the images and the
   # GPU server.
   device: auto
+  # Tensor cores of an L4 compute bfloat16 and do not compute float32: 222 ms per photo instead
+  # of 307 on the shipped package. Ignored without a card.
+  bf16: true
 
 training:
   # The experiment the worker retrains with; the winner of the day 3 comparison.

@@ -210,3 +210,25 @@ def test_an_unreadable_cache_is_measured_again(tmp_path: Path) -> None:
     cache.write_text("{ this is not json", encoding="utf-8")
 
     assert predict(tmp_path / "broken", NEVER, cache=cache).ood_unusable is not None
+
+
+@pytest.mark.ml
+def test_bfloat16_is_kept_only_where_it_acts(tmp_path: Path) -> None:
+    """A processor has no tensor cores, so autocast there would only cost time."""
+    import torch
+
+    asked, _ = built(tmp_path / "asked", NEVER)
+    asked._bf16 = True  # what a card would have kept from the settings
+    plain, _ = built(tmp_path / "plain", NEVER)
+
+    assert built(tmp_path / "cpu", NEVER)[0]._bf16 is False
+    assert isinstance(asked._precision(torch), torch.autocast)
+    assert not isinstance(plain._precision(torch), torch.autocast)
+
+
+@pytest.mark.ml
+def test_a_scale_measured_in_another_precision_is_not_reused() -> None:
+    """bfloat16 moves the last digits of a distance, so the band it measured is its own."""
+    assert _build_id("cuda", bf16=True) != _build_id("cuda", bf16=False)
+    assert "bf16" in _build_id("cuda", bf16=True)
+    assert "fp32" in _build_id("cuda", bf16=False)
