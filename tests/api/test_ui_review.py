@@ -360,7 +360,7 @@ def test_the_sizes_stay_typeable_with_a_body_from_the_list(service: Service) -> 
     assess_with_signals(service, ood_score=0.1)
     sign_in(service)
 
-    sizes = page(get(service, ASSESSMENT)).xpath(
+    sizes = page(get(service, f"{ASSESSMENT}?weigh=1")).xpath(
         "//input[@name='length' or @name='width' or @name='height']"
     )
 
@@ -469,12 +469,76 @@ def test_weighing_again_replaces_the_stored_numbers(service: Service) -> None:
 
 
 @pytest.mark.api
+def test_the_weight_block_waits_until_the_operator_asks_for_it(service: Service) -> None:
+    """A card shows what the model answered; weighing is a separate thing the operator starts."""
+    assess_with_signals(service, ood_score=0.1)
+    sign_in(service)
+
+    card = page(get(service, ASSESSMENT))
+
+    assert card.xpath("//form[@class='weigh']") == []
+    opens = card.xpath("//form[@class='weigh-start']")
+    assert [element.get("method") for element in opens] == ["get"]
+    assert opens[0].xpath(".//input[@name='weigh']/@value") == ["1"]
+
+
+@pytest.mark.api
+def test_a_stored_weighing_keeps_the_block_open(service: Service) -> None:
+    """Numbers an operator has already asked for must not hide behind the button again."""
+    assess_with_signals(service, ood_score=0.1)
+    token = sign_in(service)
+    submit(service, f"{ASSESSMENT}/weight", csrf=token, body="t10", cargo="pallets")
+
+    card = page(get(service, ASSESSMENT))
+
+    assert card.xpath("//form[@class='weigh']")
+    assert card.xpath("//form[@class='weigh-start']") == []
+
+
+@pytest.mark.api
+def test_a_weighing_that_stored_nothing_leaves_the_block_open(service: Service) -> None:
+    """Nothing was stored, so only the address can keep the block the operator opened."""
+    assess_with_signals(service, ood_score=0.1)
+    token = sign_in(service)
+
+    sent = submit(service, f"{ASSESSMENT}/weight", csrf=token, body="t10", cargo="")
+
+    assert sent.headers["location"] == f"{ASSESSMENT}?weigh=1"
+
+
+@pytest.mark.api
+def test_the_cargo_list_names_the_density_it_weighs_with(service: Service) -> None:
+    assess_with_signals(service, ood_score=0.1)
+    sign_in(service)
+
+    options = page(get(service, f"{ASSESSMENT}?weigh=1")).xpath(
+        "//select[@name='cargo']/option/text()"
+    )
+
+    pallets = DENSITIES[CargoKind.PALLETS]
+    assert f"Паллеты, {round(pallets.low)}\u2013{round(pallets.high)} кг/м³" in options
+
+
+@pytest.mark.api
+def test_the_photo_carries_its_size_so_the_card_does_not_jump(service: Service) -> None:
+    """Without the size the box is drawn short and grows when the picture arrives."""
+    assess_with_signals(service, ood_score=0.1)
+    sign_in(service)
+
+    shown = page(get(service, ASSESSMENT)).xpath("//div[@class='loading']/img")
+
+    assert len(shown) == 1
+    assert int(shown[0].get("width", "0")) > 0
+    assert int(shown[0].get("height", "0")) > 0
+
+
+@pytest.mark.api
 def test_the_weight_form_posts_to_the_route_that_stores_it(service: Service) -> None:
     """The tests reach the route directly, so only this one notices a form that never sends."""
     assess_with_signals(service, ood_score=0.1)
     sign_in(service)
 
-    card = page(get(service, ASSESSMENT))
+    card = page(get(service, f"{ASSESSMENT}?weigh=1"))
 
     form = card.xpath("//form[@class='weigh']")
     assert [element.get("method") for element in form] == ["post"]
