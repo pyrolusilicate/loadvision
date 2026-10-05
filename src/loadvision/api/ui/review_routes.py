@@ -43,6 +43,8 @@ _PHOTO_CACHE: Final = "private, max-age=86400, immutable"
 _MAP_CACHE: Final = "private, max-age=60"
 _MAP_TYPE: Final = "image/jpeg"
 _UNUSABLE_ACTION: Final = "unusable"
+# What the address says when the operator has opened the weight block under the photo.
+_WEIGH_OPEN: Final = "1"
 _QUEUE: Final = f"{UI_PREFIX}/"
 # Filters and orders of the queue in the words of the page.
 _STATUSES: Final = (
@@ -106,6 +108,7 @@ async def assessment(
     previous: Annotated[str, Query(alias=PREVIOUS_PARAM)] = "",
     same_as: Annotated[str, Query(alias=TAKEN_FROM_PARAM)] = "",
     view: str = "",
+    weigh: str = "",
 ) -> Response:
     """Shows one assessment: the photo, the prediction and the form for the verdict.
 
@@ -140,6 +143,7 @@ async def assessment(
         previous=_version_or_blank(previous),
         same_as=_shipment_or_blank(same_as),
         weight=stored_block(details.weighing),
+        weigh_open=weigh == _WEIGH_OPEN,
     )
 
 
@@ -191,7 +195,10 @@ async def weigh(request: Request, session: SignedIn, assessment_id: str) -> Resp
                 author=session.login,
             ),
         )
-    return RedirectResponse(f"{UI_PREFIX}/assessments/{target}", status_code=303)
+    # Back to the card with the block still open, so the operator sees what he asked for.
+    return RedirectResponse(
+        f"{UI_PREFIX}/assessments/{target}?weigh={_WEIGH_OPEN}", status_code=303
+    )
 
 
 @router.post("/assessments/{assessment_id}/readable")
