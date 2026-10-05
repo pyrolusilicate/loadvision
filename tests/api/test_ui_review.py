@@ -355,6 +355,20 @@ def test_the_weight_block_answers_the_body_and_the_cargo_it_was_given(service: S
 
 
 @pytest.mark.api
+def test_the_sizes_stay_typeable_with_a_body_from_the_list(service: Service) -> None:
+    """A field the browser blocks is never posted, so locked sizes can never be typed at all."""
+    assess_with_signals(service, ood_score=0.1)
+    sign_in(service)
+
+    sizes = page(get(service, ASSESSMENT)).xpath(
+        "//input[@name='length' or @name='width' or @name='height']"
+    )
+
+    assert len(sizes) == 3
+    assert [field for field in sizes if field.get("disabled") is not None] == []
+
+
+@pytest.mark.api
 def test_a_body_typed_by_hand_is_used_instead_of_the_list(service: Service) -> None:
     assess_with_signals(service, ood_score=0.1)
     token = sign_in(service)
