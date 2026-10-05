@@ -42,6 +42,7 @@ from loadvision.application.training_jobs import (
 from loadvision.application.weigh_cargo import WeighCargo
 from loadvision.domain.model_version import ModelVersionId
 from loadvision.domain.timestamps import utc_now
+from loadvision.imaging.validator import prepare_image
 from loadvision.infrastructure.db.activity import worker_connected
 from loadvision.infrastructure.db.session import PostgresUnitOfWork, create_database_engine
 from loadvision.infrastructure.storage.heatmap_store import HeatmapStore
@@ -52,6 +53,7 @@ from loadvision.ml.inference.active_model import ActiveModel
 from loadvision.ml.inference.explainer import load_explainer
 from loadvision.ml.inference.model_follower import ModelFollower
 from loadvision.ml.inference.predictor import PackagePredictor
+from loadvision.ml.inference.stack import ActiveStackMeter, load_stack_meter
 from loadvision.ml.packaging.model_package import ModelPackage
 from loadvision.observability.logging import configure_logging
 from loadvision.settings import Settings, database_url, load_settings
@@ -122,6 +124,17 @@ def build_service_app(settings: Settings, engine: Engine) -> FastAPI:
     )
     explain_photo = ExplainPhoto(storage=storage, limits=settings.images.limits())
 
+    stack_meters = ActiveStackMeter(
+        functools.partial(load_stack_meter, settings.storage.models_dir, device)
+    )
+
+    def measure_stack(sha256: str, version: ModelVersionId) -> float | None:
+        """Returns how high the cargo is stacked, or None when it cannot be read off the photo."""
+        raw = storage.load(sha256)
+        if raw is None:
+            return None
+        return stack_meters.measure(prepare_image(raw, settings.images.limits()), version)
+
     def draw_heatmap(sha256: str, kind: ExplanationKind, version: ModelVersionId) -> bytes:
         """Returns the map of what the model saw, drawing it only when it is not stored yet."""
         # The store answers before the explainer is built, so a map drawn before a restart
@@ -180,6 +193,7 @@ def build_service_app(settings: Settings, engine: Engine) -> FastAPI:
         storage=storage,
         model=model,
         draw_heatmap=draw_heatmap,
+        measure_stack=measure_stack,
     )
 
     @asynccontextmanager

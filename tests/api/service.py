@@ -98,6 +98,7 @@ def make_service(
     photos: ImageStorage | None = None,
     *,
     heatmaps: bool = False,
+    stack: float | None = None,
 ) -> Service:
     """Builds the service on fakes, with the operator pages mounted like in production.
 
@@ -106,6 +107,8 @@ def make_service(
         storage: Where assessments save photos.
         photos: Where the pages read photos from; the same storage when None.
         heatmaps: Whether the pages can draw maps of what the model saw.
+        stack: Share of the body's height the pages read off a photo, or None when the service
+            cannot measure it and a weight falls back to the default share.
     """
     store = InMemoryStore()
     storage = InMemoryImageStorage() if storage is None else storage
@@ -167,6 +170,7 @@ def make_service(
         storage=storage if photos is None else photos,
         model=model,
         draw_heatmap=drawing,
+        measure_stack=None if stack is None else lambda *_: stack,
     )
     client = TestClient(create_app(services, ui=ui), raise_server_exceptions=False)
     return Service(

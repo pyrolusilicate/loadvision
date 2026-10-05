@@ -17,6 +17,9 @@ _PERCENT: Final = 100.0
 
 # Cargo rarely reaches the ceiling: the share of the body's height a stack usually takes.
 DEFAULT_STACK_SHARE: Final = 0.6
+# Nothing on a photo is taken as a stack reaching higher than this: above it the roof and
+# the far wall merge with the cargo, and the measurement stops meaning anything.
+MAX_STACK_SHARE: Final = 0.90
 
 
 class CargoKind(StrEnum):
