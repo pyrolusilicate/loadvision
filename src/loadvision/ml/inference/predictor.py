@@ -4,6 +4,7 @@ import json
 import logging
 import platform
 from collections.abc import Sequence
+from contextlib import AbstractContextManager, nullcontext
 from dataclasses import dataclass
 from importlib import metadata
 from pathlib import Path
@@ -270,10 +271,17 @@ class PackagePredictor:
     """
 
     def __init__(
-        self, package: ModelPackage, device: str = "cpu", scale_cache: Path | None = None
+        self,
+        package: ModelPackage,
+        device: str = "cpu",
+        scale_cache: Path | None = None,
+        bf16: bool = False,
     ) -> None:
         self._package = package
         self._device = device
+        # Only a card has tensor cores for bfloat16, and on anything else autocast would be a
+        # slower way of getting the same number. So the flag is kept only where it acts.
+        self._bf16 = bf16 and device.startswith("cuda")
         self._members = tuple(
             _LoadedMember(
                 member=member,
@@ -381,6 +389,23 @@ class PackagePredictor:
         """
         return [self._predict_one(image) for image in images]
 
+    def _precision(self, torch: Any) -> AbstractContextManager[None]:
+        """Returns the context the encoder runs in, autocast to bfloat16 or nothing at all.
+
+        The same context wraps the answer and the distance, because both read the encoder and a
+        band measured in one precision does not describe the other. Torch comes in as an
+        argument: the module is imported lazily, and a service of numpy-only packages has none.
+
+        Args:
+            torch: The imported torch module of the caller.
+
+        Returns:
+            The context manager to run the encoder in.
+        """
+        if not self._bf16:
+            return nullcontext()
+        return torch.autocast(device_type="cuda", dtype=torch.bfloat16)
+
     def _member_value(self, loaded: _LoadedMember, image: PreparedImage) -> float:
         return self._features({id(loaded): loaded}, image)[id(loaded)][0]
 
@@ -420,7 +445,7 @@ class PackagePredictor:
         # One run of the encoder per input and view for the whole group; its members differ
         # only in how they pool the tokens, and that is cheap next to the encoder itself.
         totals: dict[tuple[int, str], NDArray[np.float64]] = {}
-        with torch.inference_mode():
+        with torch.inference_mode(), self._precision(torch):
             for name in wanted:
                 shown = crops.get(name)(image)
                 for view in first.views:
@@ -493,7 +518,7 @@ class PackagePredictor:
         if backbone is None:
             return None
         shown = crops.get(loaded.member.inputs[0])(image)
-        with torch.inference_mode():
+        with torch.inference_mode(), self._precision(torch):
             embedded = backbone.embed([shown], self._device)
         return np.asarray(embedded.float().cpu().numpy()[0], dtype=np.float64)
 
@@ -539,7 +564,7 @@ class PackagePredictor:
             The distance at which empty frames land, or None when the package measures none.
         """
         frames = frames_fingerprint()
-        build = _build_id(self._device)
+        build = _build_id(self._device, self._bf16)
         stored = _read_scale(cache) if cache is not None else None
         if stored is not None and stored.get("frames") == frames and stored.get("build") == build:
             measured = stored.get("unusable")
@@ -603,7 +628,7 @@ def _read_scale(path: Path) -> dict[str, Any] | None:
     return stored if isinstance(stored, dict) else None
 
 
-def _build_id(device: str) -> str:
+def _build_id(device: str, bf16: bool = False) -> str:
     """Names what a measurement was made with, so another build does not reuse it.
 
     The two CPU builds we run agree to a rounding error - the macOS wheel and the linux one in
@@ -614,15 +639,18 @@ def _build_id(device: str) -> str:
 
     Args:
         device: Torch device the predictor runs on.
+        bf16: Whether the encoder runs in bfloat16; it changes the last digits of the distance,
+            so a scale measured in one precision does not describe the other.
 
     Returns:
-        One line naming the device, the installed torch and the platform.
+        One line naming the device, the precision, the installed torch and the platform.
     """
     try:
         torch_version = metadata.version("torch")
     except metadata.PackageNotFoundError:
         torch_version = "none"
-    return f"{device} torch-{torch_version} {platform.system()}-{platform.machine()}"
+    precision = "bf16" if bf16 else "fp32"
+    return f"{device} {precision} torch-{torch_version} {platform.system()}-{platform.machine()}"
 
 
 def _write_scale(path: Path, version: str, frames: str, build: str, unusable: float) -> None:
