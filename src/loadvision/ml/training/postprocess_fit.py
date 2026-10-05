@@ -37,7 +37,8 @@ from loadvision.ml.postprocess import (
 type Learned = tuple[dict[str, float], Curves | None]
 type Fitter = Callable[[Loads, Loads, Facts, Mapping[str, float]], Learned]
 
-# Proportions that separate the two populations of the dataset; see docs/ml/user-cases.md.
+# Proportions that separate the two populations of the dataset; measured in
+# docs/ml/experiments.md.
 DEFAULT_ASPECT_RANGE: Final = (0.70, 0.80)
 _MIN_GROUP: Final = 30
 

@@ -50,12 +50,12 @@
           </select>
         </label>
       </div>
-      {% set own = weight.body == custom_body %}
       <div class="fields">
-        <label>Длина, м <input type="text" name="length" inputmode="decimal" value="{{ '%.2f'|format(weight.size.length) }}"{% if not own %} disabled{% endif %}></label>
-        <label>Ширина, м <input type="text" name="width" inputmode="decimal" value="{{ '%.2f'|format(weight.size.width) }}"{% if not own %} disabled{% endif %}></label>
-        <label>Высота, м <input type="text" name="height" inputmode="decimal" value="{{ '%.2f'|format(weight.size.height) }}"{% if not own %} disabled{% endif %}></label>
+        <label>Длина, м <input type="text" name="length" inputmode="decimal" value="{{ '%.2f'|format(weight.size.length) }}"></label>
+        <label>Ширина, м <input type="text" name="width" inputmode="decimal" value="{{ '%.2f'|format(weight.size.width) }}"></label>
+        <label>Высота, м <input type="text" name="height" inputmode="decimal" value="{{ '%.2f'|format(weight.size.height) }}"></label>
       </div>
+      <p class="caption">Свои размеры учитываются с кузовом «{{ body_names[custom_body] }}». С кузовом из списка берутся его габариты.</p>
       <button type="submit">{% if weight.estimate %}Пересчитать{% else %}Рассчитать{% endif %}</button>
       {% if weight.estimate %}
       <dl>

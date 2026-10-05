@@ -8,9 +8,6 @@ is visible instead of hidden.
 A slice is defined only by what is known before a prediction: the reference label, the size of
 the photo, its proportions, its brightness, the size of its scene. Defining one by the error
 would make measuring it circular.
-
-The catalogue in `docs/ml/user-cases.md` is the prose version of this file; they change
-together.
 """
 
 from collections.abc import Callable, Mapping, Sequence

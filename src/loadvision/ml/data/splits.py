@@ -22,7 +22,7 @@ DEFAULT_SEED: Final = 0
 # evenly spread across folds when it is a bin of its own.
 DEFAULT_BIN_EDGES: Final = (10, 20, 30, 40, 50, 60, 70, 80, 90, 100)
 
-# Invariants 4 and 5 of docs/plan/folds-json.md, checked on a primary split.
+# Invariants 4 and 5 of docs/folds.md, checked on a primary split.
 MAX_FOLD_SIZE_GAP: Final = 0.05
 MAX_BIN_SHARE_GAP: Final = 0.05
 
@@ -188,7 +188,7 @@ def build_folds(
 def extend_folds(folds: Folds, samples: Sequence[Sample]) -> Folds:
     """Gives a fold to photos the file does not know yet, leaving every stored row alone.
 
-    This is rule 3 of `docs/plan/folds-json.md`, and it is what makes retraining comparable:
+    This is rule 3 of `docs/folds.md`, and it is what makes retraining comparable:
     a candidate and the active model must be scored on the same split, so a new label may be
     added but an old one may never move. The assignment is deterministic and uses no seed, so
     two machines importing the same labels get the same file.

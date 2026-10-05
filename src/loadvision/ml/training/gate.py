@@ -10,7 +10,7 @@ from loadvision.ml.evaluation.metrics import paired_difference
 from loadvision.ml.packaging.model_package import PACKAGE_OOF, ModelPackage, ModelPackageError
 
 # Two versions are compared on the rows they share. A row keeps its fold forever (rule 2 of
-# docs/plan/folds-json.md), so both were predicted by a model that never saw them, and the
+# docs/folds.md), so both were predicted by a model that never saw them, and the
 # difference says something about the models rather than about the split.
 _COLUMNS: Final = ("image_id", "fold", "label", "predicted")
 

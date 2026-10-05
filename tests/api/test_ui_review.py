@@ -467,3 +467,9 @@ def test_the_weight_form_posts_to_the_route_that_stores_it(service: Service) -> 
     sends_to = [element.get("action") for element in form]
     assert sends_to == [f"/ui/assessments/{ASSESSMENT_ID}/weight"]
     assert card.xpath("//form[@class='weigh']//input[@name='csrf']")
+    # A disabled field is never submitted, so disabling the sides made "иной габарит"
+    # unreachable: the form sent nothing, and the route fell back to the body of the list.
+    named = "@name='length' or @name='width' or @name='height'"
+    sides = card.xpath(f"//form[@class='weigh']//input[{named}]")
+    assert len(sides) == 3
+    assert [element.get("disabled") for element in sides] == [None, None, None]
