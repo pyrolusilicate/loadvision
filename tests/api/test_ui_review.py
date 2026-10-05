@@ -4,7 +4,13 @@ import pytest
 
 from loadvision.api.ui.templates import REVIEW_NOTES
 from loadvision.domain.assessment import ReviewReason, Signals
-from loadvision.domain.cargo_weight import DENSITIES, CargoKind
+from loadvision.domain.cargo_weight import (
+    BODIES,
+    DEFAULT_STACK_SHARE,
+    DENSITIES,
+    CargoKind,
+    estimate_weight,
+)
 from loadvision.domain.confirmed_label import LabelSource
 from loadvision.errors import ERROR_CATALOG, ErrorCode
 from tests.api.service import (
@@ -25,6 +31,8 @@ from tests.port_contracts.unit_of_work import store_assessment
 
 ASSESSMENT_ID = str(UUID(int=1))
 ASSESSMENT = f"/ui/assessments/{ASSESSMENT_ID}"
+# The load `make_assessment` stores, which every weight below is computed from.
+ASSESSED_LOAD = 50.0
 
 
 def assess(service: Service) -> None:
@@ -366,6 +374,62 @@ def test_the_sizes_stay_typeable_with_a_body_from_the_list(service: Service) -> 
 
     assert len(sizes) == 3
     assert [field for field in sizes if field.get("disabled") is not None] == []
+
+
+@pytest.mark.api
+def test_the_weight_uses_the_stack_measured_on_the_photo() -> None:
+    """Otherwise every body is weighed as if the cargo always reached the same height."""
+    measured = 0.9
+    service = make_service(stack=measured)
+    assess_with_signals(service, ood_score=0.1)
+    token = sign_in(service)
+
+    submit(service, f"{ASSESSMENT}/weight", csrf=token, body="t5", cargo="pallets")
+
+    expected = estimate_weight(
+        ASSESSED_LOAD,
+        body=BODIES["t5"],
+        density=DENSITIES[CargoKind.PALLETS],
+        stack_share=measured,
+    )
+    assert f"{expected.cubic_metres} м³" in text_of(get(service, ASSESSMENT))
+
+
+@pytest.mark.api
+def test_a_weight_falls_back_to_the_default_share_when_nothing_was_measured(
+    service: Service,
+) -> None:
+    """A service without a depth model still weighs; it just cannot sharpen the assumption."""
+    assess_with_signals(service, ood_score=0.1)
+    token = sign_in(service)
+
+    submit(service, f"{ASSESSMENT}/weight", csrf=token, body="t5", cargo="pallets")
+
+    expected = estimate_weight(
+        ASSESSED_LOAD,
+        body=BODIES["t5"],
+        density=DENSITIES[CargoKind.PALLETS],
+        stack_share=DEFAULT_STACK_SHARE,
+    )
+    assert f"{expected.cubic_metres} м³" in text_of(get(service, ASSESSMENT))
+
+
+@pytest.mark.api
+def test_a_stack_of_zero_does_not_weigh_the_cargo_as_nothing() -> None:
+    """The depth map found nothing standing out, which a photo of a loaded body never means."""
+    service = make_service(stack=0.0)
+    assess_with_signals(service, ood_score=0.1)
+    token = sign_in(service)
+
+    submit(service, f"{ASSESSMENT}/weight", csrf=token, body="t5", cargo="pallets")
+
+    expected = estimate_weight(
+        ASSESSED_LOAD,
+        body=BODIES["t5"],
+        density=DENSITIES[CargoKind.PALLETS],
+        stack_share=DEFAULT_STACK_SHARE,
+    )
+    assert f"{expected.cubic_metres} м³" in text_of(get(service, ASSESSMENT))
 
 
 @pytest.mark.api

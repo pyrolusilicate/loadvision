@@ -24,6 +24,8 @@ class WeighCargoRequest:
         body: Key of the body that was chosen, for the page to show it selected again.
         size: Inner size of that body.
         kind: Kind of cargo the density is taken for.
+        stack_share: Share of the body's height the cargo reaches, read off the photo; None
+            when it could not be measured, and then the default share stands in.
         author: Who weighed it; None if unknown.
     """
 
@@ -31,6 +33,7 @@ class WeighCargoRequest:
     body: str
     size: BodySize
     kind: CargoKind
+    stack_share: float | None = None
     author: str | None = None
 
 
@@ -39,8 +42,10 @@ class WeighCargo:
     """Weighs the cargo of an assessment and stores the result beside it.
 
     The arithmetic lives in the domain and the load comes from the assessment, so the operator
-    supplies only what a photo cannot tell: the body and the kind of cargo. Weighing the same
-    assessment again replaces the stored numbers.
+    supplies only what a photo cannot tell: the body and the kind of cargo. How high the cargo
+    is stacked is read off the photo and arrives with the request; a caller that cannot measure
+    it leaves it out and the default share is used. Weighing the same assessment again replaces
+    the stored numbers.
 
     Attributes:
         uow_factory: Opens database transactions.
@@ -75,7 +80,7 @@ class WeighCargo:
                     assessment.load_pct.value,
                     body=request.size,
                     density=density_of(request.kind),
-                    stack_share=DEFAULT_STACK_SHARE,
+                    stack_share=_share(request.stack_share),
                 ),
                 author=request.author,
                 at=self.clock(),
@@ -83,3 +88,14 @@ class WeighCargo:
             uow.weighings.save(weighing)
             uow.commit()
         return weighing
+
+
+def _share(measured: float | None) -> float:
+    """The measured share of the height, or the default when nothing usable was measured.
+
+    A stack of zero means the depth map found nothing standing out, which a photo of a loaded
+    body never means; then the default stands in rather than weighing the cargo as nothing.
+    """
+    if measured is None or not 0 < measured <= 1:
+        return DEFAULT_STACK_SHARE
+    return measured

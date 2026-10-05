@@ -26,6 +26,9 @@ from loadvision.ml.inference.active_model import ActiveModel
 
 # Draws the map of what the model saw: photo hash, which map, and the version that answered.
 type DrawHeatmap = Callable[[str, ExplanationKind, ModelVersionId], bytes]
+# Reads the stack off a photo: photo hash and the version that answered. None when the
+# package carries no depth model, and then the weight falls back to the default share.
+type MeasureStack = Callable[[str, ModelVersionId], float | None]
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
@@ -56,6 +59,8 @@ class UiServices:
         model: The model the service answers with, for the header.
         draw_heatmap: Draws what the model saw on a photo, or None when the service carries no
             explainer; then the pages offer no maps.
+        measure_stack: Reads how high the cargo is stacked off the photo, or None when the
+            service cannot measure it; then a weight uses the default share of the height.
     """
 
     sign_in: SignIn
@@ -80,6 +85,7 @@ class UiServices:
     storage: ImageStorage
     model: ActiveModel
     draw_heatmap: DrawHeatmap | None = None
+    measure_stack: MeasureStack | None = None
 
 
 def ui_services_of(request: Request) -> UiServices:
