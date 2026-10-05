@@ -1,9 +1,11 @@
 """The review queue: photos waiting for a confirmed load, one assessment, and its photo."""
 
 import functools
+import logging
 import re
 from typing import Annotated, Final
 from urllib.parse import urlencode
+from uuid import UUID
 
 from fastapi import APIRouter, Query
 from starlette.concurrency import run_in_threadpool
@@ -21,7 +23,7 @@ from loadvision.api.ui.assess_routes import (
 from loadvision.api.ui.cargo_form import chosen_from, stored_block
 from loadvision.api.ui.pages import page
 from loadvision.api.ui.pagination import TILES_PER_PAGE, pager
-from loadvision.api.ui.services import ui_services_of
+from loadvision.api.ui.services import UiServices, ui_services_of
 from loadvision.api.ui.session import SignedIn, checked_form
 from loadvision.api.ui.templates import UI_PREFIX
 from loadvision.application.ports import AssessmentOrder, ExplanationKind, ReviewStatus
@@ -33,6 +35,8 @@ from loadvision.domain.model_version import ModelVersionId
 from loadvision.domain.shipment import ShipmentId
 from loadvision.errors import ErrorCode, LoadvisionError
 from loadvision.imaging.validator import detect_media_type
+
+_logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
@@ -184,14 +188,16 @@ async def weigh(request: Request, session: SignedIn, assessment_id: str) -> Resp
         str(form.get("width", "")),
         str(form.get("height", "")),
     )
+    services = ui_services_of(request)
     if asked.kind is not None:
         await run_in_threadpool(
-            ui_services_of(request).weigh_cargo,
+            services.weigh_cargo,
             WeighCargoRequest(
                 assessment_id=target,
                 body=asked.body,
                 size=asked.size,
                 kind=asked.kind,
+                stack_share=await _stack_of(services, target),
                 author=session.login,
             ),
         )
@@ -199,6 +205,27 @@ async def weigh(request: Request, session: SignedIn, assessment_id: str) -> Resp
     return RedirectResponse(
         f"{UI_PREFIX}/assessments/{target}?weigh={_WEIGH_OPEN}", status_code=303
     )
+
+
+async def _stack_of(services: UiServices, assessment_id: UUID) -> float | None:
+    """How high the cargo is stacked on the photo of this assessment.
+
+    Returns None when the service cannot measure it at all, when the assessment is gone, or
+    when the depth model fails: a weight is an estimate either way, and a page that refuses to
+    weigh because one of its assumptions could not be sharpened helps nobody.
+    """
+    if services.measure_stack is None:
+        return None
+    try:
+        details = await run_in_threadpool(services.get_assessment, assessment_id)
+        return await run_in_threadpool(
+            services.measure_stack,
+            details.assessment.image_sha256,
+            details.assessment.model_version,
+        )
+    except Exception:
+        _logger.exception("the stack of %s could not be measured", assessment_id)
+        return None
 
 
 @router.post("/assessments/{assessment_id}/readable")
