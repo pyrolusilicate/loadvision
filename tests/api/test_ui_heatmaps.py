@@ -5,7 +5,7 @@ import pytest
 from loadvision.application.ports import ExplanationKind
 from loadvision.domain.model_version import ModelVersionId
 from tests.api.service import PHOTO_SHA256, Service, make_service, post, request_body
-from tests.api.ui_pages import get, page, sign_in, text_of
+from tests.api.ui_pages import form_token, get, page, sign_in, submit, text_of
 from tests.fakes.heatmaps import PICTURE
 from tests.fakes.predictor import FakePredictor
 
@@ -145,3 +145,25 @@ def test_maps_are_shown_only_to_a_signed_in_operator(drawing: Service) -> None:
     assert response.headers["location"].startswith("/ui/login")
     assert drawing.heatmaps is not None
     assert drawing.heatmaps.asked == []
+
+
+@pytest.mark.api
+def test_a_refused_load_keeps_the_card_whole(drawing: Service) -> None:
+    """The error path renders the same template, so it owes it the same context.
+
+    A context it forgets is not an error for Jinja, it is a part of the page that silently
+    disappears: the switch of the maps vanished from the card behind a refused number.
+    """
+    card = get(drawing, ASSESSMENT)
+
+    refused = submit(
+        drawing,
+        f"{ASSESSMENT}/label",
+        csrf=form_token(card),
+        action="confirm",
+        load_pct="abc",
+    )
+
+    assert refused.status_code == 400
+    whole = "//nav[@class='views']/a | //form[@class='weigh']"
+    assert len(page(refused).xpath(whole)) == len(page(card).xpath(whole))

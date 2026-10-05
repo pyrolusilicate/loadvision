@@ -43,6 +43,8 @@ _PHOTO_CACHE: Final = "private, max-age=86400, immutable"
 _MAP_CACHE: Final = "private, max-age=60"
 _MAP_TYPE: Final = "image/jpeg"
 _UNUSABLE_ACTION: Final = "unusable"
+# What the address says when the operator has opened the weight block under the photo.
+_WEIGH_OPEN: Final = "1"
 _QUEUE: Final = f"{UI_PREFIX}/"
 # Filters and orders of the queue in the words of the page.
 _STATUSES: Final = (
@@ -106,6 +108,7 @@ async def assessment(
     previous: Annotated[str, Query(alias=PREVIOUS_PARAM)] = "",
     same_as: Annotated[str, Query(alias=TAKEN_FROM_PARAM)] = "",
     view: str = "",
+    weigh: str = "",
 ) -> Response:
     """Shows one assessment: the photo, the prediction and the form for the verdict.
 
@@ -140,6 +143,7 @@ async def assessment(
         previous=_version_or_blank(previous),
         same_as=_shipment_or_blank(same_as),
         weight=stored_block(details.weighing),
+        weigh_open=weigh == _WEIGH_OPEN,
     )
 
 
@@ -191,7 +195,10 @@ async def weigh(request: Request, session: SignedIn, assessment_id: str) -> Resp
                 author=session.login,
             ),
         )
-    return RedirectResponse(f"{UI_PREFIX}/assessments/{target}", status_code=303)
+    # Back to the card with the block still open, so the operator sees what he asked for.
+    return RedirectResponse(
+        f"{UI_PREFIX}/assessments/{target}?weigh={_WEIGH_OPEN}", status_code=303
+    )
 
 
 @router.post("/assessments/{assessment_id}/readable")
@@ -219,6 +226,7 @@ async def label(request: Request, session: SignedIn, assessment_id: str) -> Resp
         load_pct = _load(str(form.get("load_pct", "")))
         if load_pct is None:
             details = await run_in_threadpool(services.get_assessment, target)
+            label_of = details.label
             return page(
                 request,
                 "assessment.html",
@@ -227,9 +235,13 @@ async def label(request: Request, session: SignedIn, assessment_id: str) -> Resp
                 details=details,
                 typed=form.get("load_pct", ""),
                 error="Загрузка — число от 0 до 100, например 72.5.",
-                # The page draws the weight block whatever brought it up, so it needs one here
-                # as well; without it a refused number turns a 400 into a 500.
+                # The card is the same card whatever brought it up, so it gets the same
+                # context. A missing one is not an error for Jinja, it is a quietly different
+                # page: without `weight` a refused number turned a 400 into a 500, and without
+                # `heatmaps` the switch of the maps disappears.
                 weight=stored_block(details.weighing),
+                unreadable=label_of is not None and label_of.source is LabelSource.MODEL,
+                heatmaps=services.draw_heatmap is not None,
             )
     await run_in_threadpool(
         services.submit_label,

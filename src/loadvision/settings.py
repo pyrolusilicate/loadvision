@@ -159,12 +159,15 @@ class ModelSettings(_Section):
         retry_seconds: Pause before a version whose package failed to load is tried again.
         device: Torch device the service runs the model on; `auto` takes the GPU when there is
             one, see `ml/devices.py`.
+        bf16: Whether the encoder runs in bfloat16. It acts only on a card, where tensor cores
+            compute bfloat16 and do not compute float32, and it is ignored everywhere else.
     """
 
     version: str = Field(min_length=1)
     check_seconds: float = Field(gt=0)
     retry_seconds: float = Field(gt=0)
     device: str = Field(min_length=1)
+    bf16: bool = False
 
 
 class TrainingSettings(_Section):

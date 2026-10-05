@@ -14,9 +14,9 @@
     <div class="loading">
       <span>{% if map %}Карта считается, это займёт секунду{% else %}Фото загружается{% endif %}</span>
       {% if map %}
-      <img src="{{ ui }}/photos/{{ a.image_sha256 }}/heatmap?kind={{ map }}" alt="Карта «{{ view_names[map] }}» для фото перевозки {{ a.shipment_id.value }}">
+      <img src="{{ ui }}/photos/{{ a.image_sha256 }}/heatmap?kind={{ map }}" width="{{ details.image.width }}" height="{{ details.image.height }}" alt="Карта «{{ view_names[map] }}» для фото перевозки {{ a.shipment_id.value }}">
       {% else %}
-      <img src="{{ ui }}/photos/{{ a.image_sha256 }}" alt="Фото перевозки {{ a.shipment_id.value }}">
+      <img src="{{ ui }}/photos/{{ a.image_sha256 }}" width="{{ details.image.width }}" height="{{ details.image.height }}" alt="Фото перевозки {{ a.shipment_id.value }}">
       {% endif %}
     </div>
     {% if maps %}
@@ -30,7 +30,13 @@
       {% if map %}{{ view_notes[map] }}
       {% else %}{{ details.image.width }}×{{ details.image.height }} · {{ details.image.media_type.value }}{% endif %}
     </figcaption>
-    {% if not unreadable %}
+    {% if not unreadable and not (weigh_open or weight.estimate) %}
+    <form class="weigh-start" method="get" action="{{ ui }}/assessments/{{ a.id }}">
+      <input type="hidden" name="weigh" value="1">
+      {% if map %}<input type="hidden" name="view" value="{{ map }}">{% endif %}
+      <button type="submit">Оценить вес груза</button>
+    </form>
+    {% elif not unreadable %}
     <form class="weigh" method="post" action="{{ ui }}/assessments/{{ a.id }}/weight">
       <input type="hidden" name="csrf" value="{{ session.csrf }}">
       <h2>Вес груза</h2>
@@ -45,7 +51,7 @@
         <label>Груз
           <select name="cargo">
             {% for key, name in kind_names.items() %}
-            <option value="{{ key.value }}"{% if key == weight.kind %} selected{% endif %}>{{ name }}</option>
+            <option value="{{ key.value }}"{% if key == weight.kind %} selected{% endif %}>{{ name }}, {{ densities[key].low|round|int }}–{{ densities[key].high|round|int }} кг/м³</option>
             {% endfor %}
           </select>
         </label>
