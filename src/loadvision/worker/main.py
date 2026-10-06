@@ -189,6 +189,7 @@ class ActivePackageRunner:
             clock=utc_now,
             active_package=active,
             device=resolve_device(training.device),
+            foreign_dir=training.foreign_dir,
         )
         return runner.run(request)
 

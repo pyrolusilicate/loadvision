@@ -76,6 +76,13 @@ def add_commands(groups: "argparse._SubParsersAction[argparse.ArgumentParser]") 
         "it is the one being packaged",
     )
     add_data_option(finetuned)
+    finetuned.add_argument(
+        "--foreign",
+        type=Path,
+        default=Path("data/probe/foreign"),
+        help="photos the service must not answer on; with the test photos of --data they pick "
+        "the line 'send this photo to a person' the package carries (default: %(default)s)",
+    )
     finetuned.add_argument("--version", required=True, help="package version, such as v2")
     finetuned.add_argument("--device", default="cpu", help="torch device (default: %(default)s)")
     finetuned.set_defaults(run=build_finetuned)
@@ -181,6 +188,7 @@ def build_finetuned(args: argparse.Namespace) -> int:
             not match each other or the dataset.
     """
     # Imported here: building needs torch, the other model commands do not.
+    from loadvision.ml.inference.review_line import record_line
     from loadvision.ml.packaging.finetuned_package import (
         build_finetuned_package,
         build_folds_package,
@@ -228,6 +236,16 @@ def build_finetuned(args: argparse.Namespace) -> int:
         len(package.manifest.members),
         package.root,
     )
+    real = args.data / "test" / "images"
+    if not real.is_dir() or not args.foreign.is_dir():
+        _logger.warning(
+            "no line is picked: %s or %s is missing; the service will use the share of its "
+            "settings for this package",
+            real,
+            args.foreign,
+        )
+        return 0
+    record_line(package.root, real, args.foreign, device=args.device)
     return 0
 
 

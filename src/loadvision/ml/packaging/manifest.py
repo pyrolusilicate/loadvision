@@ -148,12 +148,17 @@ class OodConfig(_Schema):
         k: Number of nearest train embeddings averaged into the score.
         threshold: Score above which a photo is flagged as an unusual scene.
         reference: File with the train embeddings.
+        review_share: Where the line "send this photo to a person" stands in the band, from 0
+            at `threshold` to 1 at the empty frames; picked for this package by
+            `ml/inference/review_line.py`. None in a package built before the line travelled
+            with it, and then the service uses the share of its settings.
     """
 
     member: int = Field(ge=0)
     k: int = Field(ge=1)
     threshold: float = Field(ge=0)
     reference: PackagePath
+    review_share: float | None = Field(default=None, gt=-1, lt=1)
 
 
 class DepthRef(_Schema):

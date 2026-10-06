@@ -50,6 +50,9 @@ class Prediction:
             blown-out frame - land on this model's scale, or None when the model measures no
             distances. With `ood_threshold` it gives the caller the two ends of the band, so
             it can place its own line without a number measured by hand.
+        ood_review_share: Where this model puts the line "send this photo to a person" between
+            those two ends, as a share; None when the model carries no line of its own, and
+            then the caller uses its own.
         review_reasons: Why a person should check the prediction, by the model's own
             measures; empty when none apply.
     """
@@ -59,6 +62,7 @@ class Prediction:
     ood_score: float | None = None
     ood_threshold: float | None = None
     ood_unusable: float | None = None
+    ood_review_share: float | None = None
     review_reasons: frozenset[ReviewReason] = field(default_factory=frozenset[ReviewReason])
 
 

@@ -547,6 +547,7 @@ class PackagePredictor:
             # package, not with a number of its own.
             ood_threshold=None if ood is None or ood_score is None else ood.threshold,
             ood_unusable=None if ood_score is None else self._unusable,
+            ood_review_share=None if ood is None or ood_score is None else ood.review_share,
             review_reasons=self._review_reasons(ood_score),
         )
 

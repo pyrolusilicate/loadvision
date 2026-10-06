@@ -486,3 +486,42 @@ def test_a_photo_past_the_service_line_is_sent_to_a_person(
     )
 
     assert result.assessment.review_reasons == frozenset({ReviewReason.UNUSUAL_SCENE})
+
+
+@pytest.mark.unit
+def test_a_model_with_a_line_of_its_own_is_judged_by_it_and_not_by_the_settings(
+    store: InMemoryStore, storage: InMemoryImageStorage
+) -> None:
+    """Past the line of the settings but short of the model's own: the model's line decides."""
+    between = band_line((UNUSUAL_SHARE + 0.5) / 2)
+
+    result = use_case(store, storage)(
+        request(),
+        FakePredictor(
+            ood_score=between,
+            ood_review_share=0.5,
+            review_reasons={ReviewReason.UNUSUAL_SCENE},
+        ),
+    )
+
+    assert result.assessment.review_reasons == frozenset()
+
+
+@pytest.mark.unit
+def test_a_model_line_below_the_settings_sends_the_photo_to_a_person(
+    store: InMemoryStore, storage: InMemoryImageStorage
+) -> None:
+    """Short of the line of the settings but past the model's own: it goes to a person."""
+    own = UNUSUAL_SHARE / 2
+    between = band_line((own + UNUSUAL_SHARE) / 2)
+
+    result = use_case(store, storage)(
+        request(),
+        FakePredictor(
+            ood_score=between,
+            ood_review_share=own,
+            review_reasons={ReviewReason.UNUSUAL_SCENE},
+        ),
+    )
+
+    assert result.assessment.review_reasons == frozenset({ReviewReason.UNUSUAL_SCENE})

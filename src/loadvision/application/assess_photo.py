@@ -96,9 +96,9 @@ class AssessPhoto:
             on them, whatever the model answers.
         unusual_band_share: Where the line "show this to a person" stands inside the band
             between the far edge of the training photos and the distance at which empty frames
-            land, as a share of that band. A share, not a distance and not a multiple: the
-            model measures both ends of the band itself, so the same share keeps its meaning
-            on a model with a different scale.
+            land, as a share of that band, for a model that carries no line of its own. A model
+            that carries one is judged by it: the line is picked for each model separately and
+            does not carry over between them.
         unreadable_band_share: Where the line "show no prediction at all" stands in that same
             band. Above it the frame holds nothing of a truck body.
         clock: Current time, timezone-aware.
@@ -251,9 +251,14 @@ class AssessPhoto:
         """Whether the photo is further from the training ones than the line of the service.
 
         A model that gives no band is taken at its word: the service only overrules a warning
-        it has the numbers to overrule.
+        it has the numbers to overrule. The line is the model's own when it carries one.
         """
-        line = _line(prediction.ood_threshold, prediction.ood_unusable, self.unusual_band_share)
+        share = (
+            self.unusual_band_share
+            if prediction.ood_review_share is None
+            else prediction.ood_review_share
+        )
+        line = _line(prediction.ood_threshold, prediction.ood_unusable, share)
         if line is None or prediction.ood_score is None:
             return True
         return prediction.ood_score >= line
