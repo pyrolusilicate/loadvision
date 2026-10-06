@@ -40,6 +40,7 @@ from loadvision.application.training_jobs import (
     StartTraining,
 )
 from loadvision.application.weigh_cargo import WeighCargo
+from loadvision.domain.cargo_weight import CargoKind
 from loadvision.domain.model_version import ModelVersionId
 from loadvision.domain.timestamps import utc_now
 from loadvision.imaging.validator import prepare_image
@@ -50,6 +51,8 @@ from loadvision.infrastructure.storage.local_storage import LocalImageStorage
 from loadvision.ml.devices import resolve_device
 from loadvision.ml.inference.active_explainer import ActiveExplainer
 from loadvision.ml.inference.active_model import ActiveModel
+from loadvision.ml.inference.active_sight import ActiveCargoSight
+from loadvision.ml.inference.cargo import CargoSight
 from loadvision.ml.inference.explainer import load_explainer
 from loadvision.ml.inference.model_follower import ModelFollower
 from loadvision.ml.inference.predictor import PackagePredictor
@@ -135,6 +138,15 @@ def build_service_app(settings: Settings, engine: Engine) -> FastAPI:
             return None
         return stack_meters.measure(prepare_image(raw, settings.images.limits()), version)
 
+    sight = ActiveCargoSight(functools.partial(CargoSight.load, device=device))
+
+    def recognize_cargo(sha256: str) -> CargoKind | None:
+        """Names the kind of cargo on a stored photo, or None when the photo is not stored."""
+        raw = storage.load(sha256)
+        if raw is None:
+            return None
+        return sight.kind(prepare_image(raw, settings.images.limits()))
+
     def draw_heatmap(sha256: str, kind: ExplanationKind, version: ModelVersionId) -> bytes:
         """Returns the map of what the model saw, drawing it only when it is not stored yet."""
         # The store answers before the explainer is built, so a map drawn before a restart
@@ -194,6 +206,7 @@ def build_service_app(settings: Settings, engine: Engine) -> FastAPI:
         model=model,
         draw_heatmap=draw_heatmap,
         measure_stack=measure_stack,
+        recognize_cargo=recognize_cargo,
     )
 
     @asynccontextmanager

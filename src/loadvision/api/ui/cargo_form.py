@@ -42,6 +42,9 @@ KIND_NAMES: Final = {
     CargoKind.PALLETS: "Паллеты",
     CargoKind.MIXED: "Смешанный",
 }
+# Offered first in the cargo list when the service can read the kind off the photo.
+AUTO_KIND: Final = "auto"
+AUTO_NAME: Final = "Определить по фото"
 # Sizes an operator may type, in metres. Wide enough for any lorry, tight enough that a typo
 # of a hundred metres does not turn into a hundred tonnes.
 _MIN_SIDE: Final = 0.5
@@ -58,11 +61,14 @@ class Chosen:
         body: Key of the body, or `CUSTOM_BODY`.
         size: Inner size of it, whether from the list or typed in.
         kind: Kind of cargo, or None when nothing usable was chosen.
+        auto: Whether the operator asked for the kind to be read off the photo; `kind` is None
+            then, and the service names it.
     """
 
     body: str
     size: BodySize
     kind: CargoKind | None
+    auto: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -94,7 +100,7 @@ def chosen_from(body: str, kind: str, length: str, width: str, height: str) -> C
 
     Args:
         body: Key from `BODIES`, or `CUSTOM_BODY`.
-        kind: Value of `CargoKind` from the list on the page.
+        kind: Value of `CargoKind` from the list on the page, or `AUTO_KIND`.
         length: Length in metres, used only with `CUSTOM_BODY`.
         width: Width in metres, likewise.
         height: Height in metres, likewise.
@@ -107,7 +113,12 @@ def chosen_from(body: str, kind: str, length: str, width: str, height: str) -> C
     if size is None:
         picked, size = _FIRST_BODY, BODIES[_FIRST_BODY]
     known = {value.value for value in KIND_NAMES}
-    return Chosen(body=picked, size=size, kind=CargoKind(kind) if kind in known else None)
+    return Chosen(
+        body=picked,
+        size=size,
+        kind=CargoKind(kind) if kind in known else None,
+        auto=kind == AUTO_KIND,
+    )
 
 
 def stored_block(weighing: Weighing | None) -> WeightBlock:

@@ -30,6 +30,7 @@ from loadvision.application.ports import AssessmentOrder, ExplanationKind, Revie
 from loadvision.application.submit_label import SubmitLabelRequest
 from loadvision.application.weigh_cargo import WeighCargoRequest
 from loadvision.domain.assessment import SHA256_HEX_PATTERN, LoadPercent
+from loadvision.domain.cargo_weight import CargoKind
 from loadvision.domain.confirmed_label import LabelSource
 from loadvision.domain.model_version import ModelVersionId
 from loadvision.domain.shipment import ShipmentId
@@ -49,6 +50,8 @@ _MAP_TYPE: Final = "image/jpeg"
 _UNUSABLE_ACTION: Final = "unusable"
 # What the address says when the operator has opened the weight block under the photo.
 _WEIGH_OPEN: Final = "1"
+# What the address says when the kind of cargo of the weighing was read off the photo.
+_RECOGNIZED: Final = "1"
 _QUEUE: Final = f"{UI_PREFIX}/"
 # Filters and orders of the queue in the words of the page.
 _STATUSES: Final = (
@@ -113,6 +116,7 @@ async def assessment(
     same_as: Annotated[str, Query(alias=TAKEN_FROM_PARAM)] = "",
     view: str = "",
     weigh: str = "",
+    recognized: str = "",
 ) -> Response:
     """Shows one assessment: the photo, the prediction and the form for the verdict.
 
@@ -148,6 +152,8 @@ async def assessment(
         same_as=_shipment_or_blank(same_as),
         weight=stored_block(details.weighing),
         weigh_open=weigh == _WEIGH_OPEN,
+        recognize=services.recognize_cargo is not None,
+        recognized=recognized == _RECOGNIZED,
     )
 
 
@@ -189,22 +195,43 @@ async def weigh(request: Request, session: SignedIn, assessment_id: str) -> Resp
         str(form.get("height", "")),
     )
     services = ui_services_of(request)
-    if asked.kind is not None:
+    kind = await _kind_of(services, target) if asked.auto else asked.kind
+    if kind is not None:
         await run_in_threadpool(
             services.weigh_cargo,
             WeighCargoRequest(
                 assessment_id=target,
                 body=asked.body,
                 size=asked.size,
-                kind=asked.kind,
+                kind=kind,
                 stack_share=await _stack_of(services, target),
                 author=session.login,
             ),
         )
     # Back to the card with the block still open, so the operator sees what he asked for.
+    read = f"&recognized={_RECOGNIZED}" if asked.auto else ""
     return RedirectResponse(
-        f"{UI_PREFIX}/assessments/{target}?weigh={_WEIGH_OPEN}", status_code=303
+        f"{UI_PREFIX}/assessments/{target}?weigh={_WEIGH_OPEN}{read}", status_code=303
     )
+
+
+async def _kind_of(services: UiServices, assessment_id: UUID) -> CargoKind:
+    """The kind of cargo read off the photo of this assessment.
+
+    Mixed is the answer whenever nothing better can be read: its density is the widest, so it is
+    the least wrong. A photo the model calls empty is weighed as mixed too, because how empty
+    the body is, the load already says, and the weight of "nothing" would be a weight nobody
+    asked for.
+    """
+    if services.recognize_cargo is None:
+        return CargoKind.MIXED
+    try:
+        details = await run_in_threadpool(services.get_assessment, assessment_id)
+        kind = await run_in_threadpool(services.recognize_cargo, details.assessment.image_sha256)
+    except Exception:
+        _logger.exception("the kind of cargo of %s could not be read", assessment_id)
+        return CargoKind.MIXED
+    return CargoKind.MIXED if kind is None or kind is CargoKind.EMPTY else kind
 
 
 async def _stack_of(services: UiServices, assessment_id: UUID) -> float | None:

@@ -615,3 +615,72 @@ def test_the_weight_form_posts_to_the_route_that_stores_it(service: Service) -> 
     sides = card.xpath(f"//form[@class='weigh']//input[{named}]")
     assert len(sides) == 3
     assert [element.get("disabled") for element in sides] == [None, None, None]
+
+
+@pytest.mark.api
+def test_reading_the_kind_off_the_photo_is_offered_first_until_something_is_weighed() -> None:
+    service = make_service(cargo=CargoKind.PALLETS)
+    assess_with_signals(service, ood_score=0.1)
+    sign_in(service)
+
+    options = page(get(service, f"{ASSESSMENT}?weigh=1")).xpath("//select[@name='cargo']/option")
+
+    assert options[0].get("value") == "auto"
+    assert [option.get("value") for option in options if option.get("selected") is not None] == [
+        "auto"
+    ]
+
+
+@pytest.mark.api
+def test_a_service_without_the_model_offers_no_reading(service: Service) -> None:
+    assess_with_signals(service, ood_score=0.1)
+    sign_in(service)
+
+    values = page(get(service, f"{ASSESSMENT}?weigh=1")).xpath(
+        "//select[@name='cargo']/option/@value"
+    )
+
+    assert "auto" not in values
+
+
+@pytest.mark.api
+def test_the_kind_read_off_the_photo_is_weighed_and_named() -> None:
+    service = make_service(cargo=CargoKind.PALLETS)
+    assess_with_signals(service, ood_score=0.1)
+    token = sign_in(service)
+
+    sent = submit(service, f"{ASSESSMENT}/weight", csrf=token, body="t5", cargo="auto")
+    card = text_of(get(service, sent.headers["location"]))
+
+    pallets = DENSITIES[CargoKind.PALLETS]
+    assert f"{round(pallets.low)}\u2013{round(pallets.high)} кг/м³" in card
+    assert "Вид груза определён по фото: Паллеты" in card
+
+
+@pytest.mark.api
+def test_a_body_the_model_calls_empty_is_weighed_as_mixed() -> None:
+    """How empty the body is, the load says; the weight of "nothing" was asked by nobody."""
+    service = make_service(cargo=CargoKind.EMPTY)
+    assess_with_signals(service, ood_score=0.1)
+    token = sign_in(service)
+
+    sent = submit(service, f"{ASSESSMENT}/weight", csrf=token, body="t5", cargo="auto")
+
+    card = page(get(service, sent.headers["location"]))
+    chosen = card.xpath("//select[@name='cargo']/option[@selected]/@value")
+    assert chosen == [CargoKind.MIXED.value]
+    assert "Вид груза определён по фото: Смешанный" in " ".join(card.text_content().split())
+
+
+@pytest.mark.api
+def test_asking_for_a_reading_the_service_cannot_give_weighs_as_mixed(service: Service) -> None:
+    """A page is not an API: a form sent by hand still gets a weight, the least wrong one."""
+    assess_with_signals(service, ood_score=0.1)
+    token = sign_in(service)
+
+    sent = submit(service, f"{ASSESSMENT}/weight", csrf=token, body="t5", cargo="auto")
+
+    mixed = DENSITIES[CargoKind.MIXED]
+    assert f"{round(mixed.low)}\u2013{round(mixed.high)} кг/м³" in text_of(
+        get(service, sent.headers["location"])
+    )

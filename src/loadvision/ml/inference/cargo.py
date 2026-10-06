@@ -158,7 +158,10 @@ class CargoSight:
             {"role": "user", "content": [{"type": "image"}, {"type": "text", "text": _QUESTION}]}
         ]
         prompt = self._processor.apply_chat_template(messages, add_generation_prompt=True)
-        inputs = self._processor(text=prompt, images=[picture], return_tensors="pt")
+        # The processor builds tensors on the CPU; a model on a card needs them on the card.
+        inputs = self._processor(text=prompt, images=[picture], return_tensors="pt").to(
+            self._model.device
+        )
         with torch.inference_mode():
             produced = self._model.generate(
                 **inputs, max_new_tokens=_ANSWER_TOKENS, do_sample=False

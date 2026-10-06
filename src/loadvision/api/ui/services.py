@@ -21,6 +21,7 @@ from loadvision.application.training_jobs import (
     StartTraining,
 )
 from loadvision.application.weigh_cargo import WeighCargo
+from loadvision.domain.cargo_weight import CargoKind
 from loadvision.domain.model_version import ModelVersionId
 from loadvision.ml.inference.active_model import ActiveModel
 
@@ -29,6 +30,8 @@ type DrawHeatmap = Callable[[str, ExplanationKind, ModelVersionId], bytes]
 # Reads the stack off a photo: photo hash and the version that answered. None when the
 # package carries no depth model, and then the weight falls back to the default share.
 type MeasureStack = Callable[[str, ModelVersionId], float | None]
+# Names the kind of cargo on a photo by its hash; None when the photo is not stored.
+type RecognizeCargo = Callable[[str], CargoKind | None]
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
@@ -61,6 +64,8 @@ class UiServices:
             explainer; then the pages offer no maps.
         measure_stack: Reads how high the cargo is stacked off the photo, or None when the
             service cannot measure it; then a weight uses the default share of the height.
+        recognize_cargo: Names the kind of cargo on the photo, or None when the service carries
+            no model for it; then the operator picks the kind himself.
     """
 
     sign_in: SignIn
@@ -86,6 +91,7 @@ class UiServices:
     model: ActiveModel
     draw_heatmap: DrawHeatmap | None = None
     measure_stack: MeasureStack | None = None
+    recognize_cargo: RecognizeCargo | None = None
 
 
 def ui_services_of(request: Request) -> UiServices:

@@ -49,9 +49,14 @@
           </select>
         </label>
         <label>Груз
+          {# Until something is weighed, reading the kind off the photo is the first choice. #}
+          {% set ask_photo = recognize and not weight.estimate %}
           <select name="cargo">
+            {% if recognize %}
+            <option value="{{ auto_kind }}"{% if ask_photo %} selected{% endif %}>{{ auto_name }}</option>
+            {% endif %}
             {% for key, name in kind_names.items() %}
-            <option value="{{ key.value }}"{% if key == weight.kind %} selected{% endif %}>{{ name }}, {{ densities[key].low|round|int }}–{{ densities[key].high|round|int }} кг/м³</option>
+            <option value="{{ key.value }}"{% if key == weight.kind and not ask_photo %} selected{% endif %}>{{ name }}, {{ densities[key].low|round|int }}–{{ densities[key].high|round|int }} кг/м³</option>
             {% endfor %}
           </select>
         </label>
@@ -69,6 +74,9 @@
         <dt>Плотность</dt><dd class="num">{{ weight.density.low|round|int }}–{{ weight.density.high|round|int }} кг/м³</dd>
       </dl>
       <p class="caption">Оценка по типовой плотности. Считается от загрузки на фото и выбранных габаритов.</p>
+      {% if recognized %}
+      <p class="caption">Вид груза определён по фото: {{ kind_names[weight.kind] }}. Можно выбрать другой и пересчитать.</p>
+      {% endif %}
       {% endif %}
     </form>
     {% endif %}

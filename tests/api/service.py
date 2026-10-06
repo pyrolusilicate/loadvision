@@ -32,6 +32,7 @@ from loadvision.application.training_jobs import (
     StartTraining,
 )
 from loadvision.application.weigh_cargo import WeighCargo
+from loadvision.domain.cargo_weight import CargoKind
 from loadvision.errors import ERROR_CATALOG, ErrorCode
 from loadvision.imaging.prepared_image import MediaType
 from loadvision.imaging.validator import ImageLimits, prepare_image
@@ -99,6 +100,7 @@ def make_service(
     *,
     heatmaps: bool = False,
     stack: float | None = None,
+    cargo: CargoKind | None = None,
 ) -> Service:
     """Builds the service on fakes, with the operator pages mounted like in production.
 
@@ -109,6 +111,8 @@ def make_service(
         heatmaps: Whether the pages can draw maps of what the model saw.
         stack: Share of the body's height the pages read off a photo, or None when the service
             cannot measure it and a weight falls back to the default share.
+        cargo: Kind of cargo the pages read off every photo, or None when the service carries no
+            model for it and the operator picks the kind himself.
     """
     store = InMemoryStore()
     storage = InMemoryImageStorage() if storage is None else storage
@@ -171,6 +175,7 @@ def make_service(
         model=model,
         draw_heatmap=drawing,
         measure_stack=None if stack is None else lambda *_: stack,
+        recognize_cargo=None if cargo is None else lambda _: cargo,
     )
     client = TestClient(create_app(services, ui=ui), raise_server_exceptions=False)
     return Service(
