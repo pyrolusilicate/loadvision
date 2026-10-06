@@ -31,6 +31,8 @@ class FakePredictor:
             its scale, as a real package carries it in its manifest.
         ood_unusable: Distance at which frames with nothing in them land; the far end, which
             a real package measures on itself when it loads.
+        ood_review_share: The model's own line "send this photo to a person", as a share of
+            its band; None for a model that carries none.
         review_reasons: Reasons the model reports with every prediction.
         error: Exception raised for every batch, to test model failures.
     """
@@ -43,6 +45,7 @@ class FakePredictor:
         ood_score: float | None = None,
         ood_threshold: float | None = OOD_THRESHOLD,
         ood_unusable: float | None = OOD_UNUSABLE,
+        ood_review_share: float | None = None,
         review_reasons: Iterable[ReviewReason] = (),
         error: Exception | None = None,
     ) -> None:
@@ -51,6 +54,7 @@ class FakePredictor:
         self._ood_score = ood_score
         self._ood_threshold = ood_threshold
         self._ood_unusable = ood_unusable
+        self._ood_review_share = ood_review_share
         self._reasons = frozenset(review_reasons)
         self._error = error
         self.batches: list[list[str]] = []
@@ -69,6 +73,7 @@ class FakePredictor:
                 ood_score=self._ood_score,
                 ood_threshold=self._ood_threshold,
                 ood_unusable=self._ood_unusable,
+                ood_review_share=self._ood_review_share,
                 review_reasons=self._reasons,
             )
             for image in images

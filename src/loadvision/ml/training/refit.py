@@ -15,6 +15,11 @@ sees every photo, because more photos make a better head and the encoder is froz
 head behind `metrics/oof.csv` sees only the folds its own encoder was fine-tuned on, so the
 photo it is measured on was never seen by either of them. Mixing the two would turn the number
 the gate reads into a claim about photos the model had already met.
+
+The training photos a new photo is compared with grow too. The confirmed photos join the
+reference of the unusual-scene score, its edge is measured again on all of them, and the line
+"send this photo to a person" is picked again inside the band that edge opens. Otherwise a kind
+of scene the operators have confirmed would stay unusual for a model that has learned it.
 """
 
 import logging
@@ -24,7 +29,7 @@ from collections.abc import Sequence
 from dataclasses import replace
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Final
+from typing import Any, Final
 
 import numpy as np
 from numpy.typing import NDArray
@@ -32,6 +37,7 @@ from numpy.typing import NDArray
 from loadvision.domain.timestamps import format_utc
 from loadvision.ml.data.manifest import Sample, load_split
 from loadvision.ml.data.splits import check_covers, read_folds
+from loadvision.ml.inference.review_line import record_line
 from loadvision.ml.models.backbones import load_backbone
 from loadvision.ml.models.depth import DEPTH_MODEL, GRID_COLS, GRID_ROWS, depth_grids
 from loadvision.ml.packaging.checkpoints import WEIGHTS_DIR
@@ -42,7 +48,12 @@ from loadvision.ml.packaging.model_package import (
     hash_package_files,
     write_package,
 )
-from loadvision.ml.pipeline.stages.build_package import cv_block, write_steps
+from loadvision.ml.pipeline.stages.build_package import (
+    OOD_PERCENTILE,
+    cv_block,
+    write_ood,
+    write_steps,
+)
 from loadvision.ml.pipeline.stages.extract_embeddings import EMBEDDINGS_DIR
 from loadvision.ml.pipeline.stages.train_folds import write_oof
 from loadvision.ml.postprocess import ASPECT
@@ -96,6 +107,7 @@ def refit_heads(
     device: str = "cpu",
     alpha: float = DEFAULT_ALPHA,
     now: datetime | None = None,
+    line_photos: tuple[Path, Path] | None = None,
 ) -> Path:
     """Builds a candidate package from the encoders of `active` and freshly fitted heads.
 
@@ -110,6 +122,9 @@ def refit_heads(
         device: Torch device the encoders run on.
         alpha: Ridge penalty of the refitted heads.
         now: Time written into the manifest; defaults to now.
+        line_photos: Folders of real and of foreign photos the line "send this photo to a
+            person" is picked from; without them the candidate carries no line and the service
+            uses the share of its settings.
 
     Returns:
         Path of the written package.
@@ -137,12 +152,19 @@ def refit_heads(
 
     depth = _depth(active, samples, cache_dir, device)
     root = _copy_package(active.root, out_dir)
+    ood = active.manifest.ood
+    rebuilt_ood: dict[str, Any] | None = None
     computed = {}
     for index, member in enumerate(members):
-        features = _features(active, member, index, samples, cache_dir, device, depth)
+        vectors = _vectors(active, member, index, samples, cache_dir, device)
+        features = vectors if depth is None else np.hstack([vectors, depth])
         # The head that ships sees every photo; the encoder is frozen, so nothing leaks.
         fit_head(HEAD_KIND, features, labels, {"alpha": alpha}).save(root / member.head)
         computed[index] = _by_fold(features, labels, numbers, folds.n_folds, alpha)
+        if ood is not None and index == ood.member:
+            # The confirmed photos join the photos a new one is compared with, so a scene the
+            # operators have confirmed stops being unusual for the model that learned it.
+            rebuilt_ood = write_ood(root, index, member.backbone, vectors, OOD_PERCENTILE)["ood"]
 
     raw = _out_of_fold(computed, labels, numbers, folds.n_folds)
     raw = np.clip(raw, _MIN_LOAD, _MAX_LOAD)
@@ -157,7 +179,7 @@ def refit_heads(
     oof = root / PACKAGE_OOF
     write_oof(oof, samples, numbers.tolist(), labels, raw, predicted)
     shipped = write_steps(root, fit_chain(steps, raw, labels, facts)) if steps else []
-    _write_manifest(root, active, version, folds_file, oof, shipped, now)
+    _write_manifest(root, active, version, folds_file, oof, shipped, now, rebuilt_ood)
     logger.info(
         "refit %s from %s: %d photos, %d members, out-of-fold MAE %.3f",
         version,
@@ -166,19 +188,23 @@ def refit_heads(
         len(members),
         float(np.abs(predicted - labels).mean()),
     )
+    # The edge of the training photos has moved with the new ones, so the line inside the band
+    # is picked again rather than carried over from the active package.
+    if rebuilt_ood is not None and line_photos is not None:
+        real, foreign = line_photos
+        record_line(root, real, foreign, device=device)
     return root
 
 
-def _features(
+def _vectors(
     active: ModelPackage,
     member: Member,
     index: int,
     samples: Sequence[Sample],
     cache_dir: Path,
     device: str,
-    depth: NDArray[np.float64] | None,
 ) -> NDArray[np.float64]:
-    """Returns the vectors this member's head is fitted on: its embedding, then the depth grid.
+    """Returns the embedding this member's encoder gives every photo.
 
     The cache file is named after the package and the member, not after the registry key. Two
     packages name the same architecture, and the fingerprint of the cache covers preprocessing
@@ -189,10 +215,9 @@ def _features(
         raise ModelPackageError(f"member {index} has no weights of its own to reuse")
     backbone = load_backbone(member.backbone, device, active.path(member.weights))
     named = replace(backbone, name=f"{active.version.value}-m{index}")
-    vectors = embed_samples(
+    return embed_samples(
         samples, named, cache_dir=cache_dir / EMBEDDINGS_DIR, device=device
     ).astype(np.float64)
-    return vectors if depth is None else np.hstack([vectors, depth])
 
 
 def _by_fold(
@@ -373,10 +398,16 @@ def _write_manifest(
     oof: Path,
     steps: Sequence[PostprocessStep],
     now: datetime | None,
+    ood: dict[str, Any] | None,
 ) -> None:
-    """Writes the manifest of the candidate: the active one with new heads, curves and metrics."""
+    """Writes the manifest of the candidate: the active one with new heads, curves and metrics.
+
+    When the reference of the training photos was rebuilt, its block replaces the active one.
+    """
     data = active.manifest.model_dump(mode="json")
     data["version"] = version
+    if ood is not None:
+        data["ood"] = ood
     data["created_at"] = format_utc(now or datetime.now(UTC))
     data["postprocess"] = [step.model_dump(mode="json") for step in steps]
     data.update(cv_block(oof, folds_file))

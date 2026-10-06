@@ -1,6 +1,6 @@
 """Retraining that keeps the encoders of a package and fits its heads again."""
 
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import Any
 
@@ -9,8 +9,10 @@ import pytest
 from numpy.typing import NDArray
 
 from loadvision.ml.data.manifest import load_split
+from loadvision.ml.inference.ood import OodReference
 from loadvision.ml.models.depth import GRID_COLS, GRID_ROWS
 from loadvision.ml.packaging.model_package import ModelPackage, ModelPackageError
+from loadvision.ml.pipeline.stages.build_package import OOD_PERCENTILE
 from loadvision.ml.training import refit
 from loadvision.ml.training.refit import refit_heads
 from tests.ml.test_stages import make_dataset, make_folds
@@ -20,14 +22,21 @@ from tests.model_packages import build_package, member_data
 FOLDS = 3
 # A head of this many numbers, so a fitted ridge has something to stand on without being slow.
 FEATURES = 12
+REFERENCE = "ood/reference.npz"
+# The edge the active package was built with; any measurement on real vectors lands elsewhere.
+ACTIVE_EDGE = 0.123
 
 
-def per_fold_members(root: Path) -> ModelPackage:
+def per_fold_members(
+    root: Path, extra: Mapping[str, bytes] | None = None, **overrides: Any
+) -> ModelPackage:
     """A package shaped like the served one: one member per fold, each with its own weights."""
     return build_package(
         root,
         {f"m{index}/head.npz": b"head" for index in range(FOLDS)}
-        | {f"weights/m{index}.safetensors": f"weights {index}".encode() for index in range(FOLDS)},
+        | {f"weights/m{index}.safetensors": f"weights {index}".encode() for index in range(FOLDS)}
+        | dict(extra or {}),
+        **overrides,
         members=[
             member_data(
                 backbone="dinov2_vitb14",
@@ -41,23 +50,22 @@ def per_fold_members(root: Path) -> ModelPackage:
     )
 
 
-def plain_features() -> Any:
-    """Returns a `_features` that needs no encoder: every column simply carries the label."""
+def plain_vectors() -> Any:
+    """Returns a `_vectors` that needs no encoder: every column simply carries the label."""
 
-    def features(
+    def vectors(
         _active: ModelPackage,
         _member: Any,
         index: int,
         samples: Sequence[Any],
         _cache_dir: Path,
         _device: str,
-        _depth: NDArray[np.float64] | None,
     ) -> NDArray[np.float64]:
         rng = np.random.default_rng(index)
         labels = np.array([sample.label for sample in samples], dtype=np.float64)
         return rng.normal(size=(len(samples), FEATURES)) + labels[:, None]
 
-    return features
+    return vectors
 
 
 @pytest.fixture
@@ -129,9 +137,9 @@ def test_members_that_do_not_mark_one_fold_each_are_refused() -> None:
 def test_the_candidate_keeps_everything_but_the_heads(
     tmp_path: Path, prepared: tuple[ModelPackage, Path, Path], monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """The weights, the licences and the reference travel unchanged; only the heads are new."""
+    """The weights and the licences travel unchanged; the heads are new."""
     active, data, folds = prepared
-    monkeypatch.setattr(refit, "_features", plain_features())
+    monkeypatch.setattr(refit, "_vectors", plain_vectors())
     monkeypatch.setattr(refit, "_out_of_fold", lambda computed, labels, numbers, n: labels.copy())
 
     root = refit_heads(
@@ -160,7 +168,7 @@ def test_the_candidate_carries_the_predictions_the_gate_reads(
 ) -> None:
     """Without `metrics/oof.csv` the gate has nothing to compare and refuses every candidate."""
     active, data, folds = prepared
-    monkeypatch.setattr(refit, "_features", plain_features())
+    monkeypatch.setattr(refit, "_vectors", plain_vectors())
     monkeypatch.setattr(refit, "_out_of_fold", lambda computed, labels, numbers, n: labels.copy())
 
     root = refit_heads(
@@ -185,7 +193,7 @@ def test_a_filesystem_that_refuses_a_link_still_gets_the_weights(
 ) -> None:
     """Two mounts under Docker cannot be linked across; the candidate must still be complete."""
     active, data, folds = prepared
-    monkeypatch.setattr(refit, "_features", plain_features())
+    monkeypatch.setattr(refit, "_vectors", plain_vectors())
     monkeypatch.setattr(refit, "_out_of_fold", lambda computed, labels, numbers, n: labels.copy())
 
     def refuse(_source: object, _target: object) -> None:
@@ -242,7 +250,7 @@ def test_the_depth_checkpoint_comes_from_the_package(
         return np.zeros((len(samples), GRID_ROWS * GRID_COLS), dtype=np.float32)
 
     monkeypatch.setattr(refit, "depth_grids", grids)
-    monkeypatch.setattr(refit, "_features", plain_features())
+    monkeypatch.setattr(refit, "_vectors", plain_vectors())
     monkeypatch.setattr(refit, "_out_of_fold", lambda computed, labels, numbers, n: labels.copy())
 
     refit_heads(
@@ -274,3 +282,95 @@ def test_a_depth_grid_of_another_shape_is_refused(
             out_dir=Path("candidate"),
             version="candidate",
         )
+
+
+def with_reference(root: Path) -> ModelPackage:
+    """The served shape, with an unusual-scene reference of four training photos."""
+    source = Path("reference.npz")
+    OodReference.build("dinov2_vitb14", np.eye(4, FEATURES)).save(source)
+    return per_fold_members(
+        root,
+        {REFERENCE: source.read_bytes()},
+        ood={"member": 0, "k": 1, "threshold": ACTIVE_EDGE, "reference": REFERENCE},
+    )
+
+
+def refit_with_reference(
+    data: Path, folds: Path, line_photos: tuple[Path, Path] | None = None
+) -> ModelPackage:
+    root = refit_heads(
+        active=with_reference(Path("active")),
+        dataset=data,
+        folds_file=folds,
+        cache_dir=Path("cache"),
+        out_dir=Path("candidate"),
+        version="candidate",
+        line_photos=line_photos,
+    )
+    return ModelPackage.load(root)
+
+
+@pytest.mark.ml
+def test_the_confirmed_photos_join_the_reference_of_unusual_scenes(
+    prepared: tuple[ModelPackage, Path, Path], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Every photo of the dataset, the confirmed ones among them, is now a known scene."""
+    _active, data, folds = prepared
+    monkeypatch.setattr(refit, "_vectors", plain_vectors())
+    monkeypatch.setattr(refit, "_out_of_fold", lambda computed, labels, numbers, n: labels.copy())
+
+    candidate = refit_with_reference(data, folds)
+
+    assert candidate.manifest.ood is not None
+    reference = OodReference.load(candidate.path(candidate.manifest.ood.reference), "dinov2_vitb14")
+    assert len(reference.vectors) == len(load_split(data, "train"))
+
+
+@pytest.mark.ml
+def test_the_edge_of_the_training_photos_is_measured_again_on_all_of_them(
+    prepared: tuple[ModelPackage, Path, Path], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _active, data, folds = prepared
+    monkeypatch.setattr(refit, "_vectors", plain_vectors())
+    monkeypatch.setattr(refit, "_out_of_fold", lambda computed, labels, numbers, n: labels.copy())
+
+    candidate = refit_with_reference(data, folds)
+
+    ood = candidate.manifest.ood
+    assert ood is not None
+    reference = OodReference.load(candidate.path(ood.reference), "dinov2_vitb14")
+    scores = [reference.score(row, ood.k) for row in reference.vectors]
+    assert ood.threshold != ACTIVE_EDGE
+    # The reference keeps float16 rows; the edge was measured on the vectors before rounding.
+    assert ood.threshold == pytest.approx(float(np.percentile(scores, OOD_PERCENTILE)), rel=1e-3)
+
+
+@pytest.mark.ml
+def test_the_line_is_picked_again_inside_the_band_the_new_edge_opens(
+    prepared: tuple[ModelPackage, Path, Path], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _active, data, folds = prepared
+    monkeypatch.setattr(refit, "_vectors", plain_vectors())
+    monkeypatch.setattr(refit, "_out_of_fold", lambda computed, labels, numbers, n: labels.copy())
+    asked: list[tuple[Path, Path, Path]] = []
+    monkeypatch.setattr(
+        refit, "record_line", lambda root, real, foreign, **_: asked.append((root, real, foreign))
+    )
+
+    refit_with_reference(data, folds, line_photos=(Path("real"), Path("foreign")))
+
+    assert asked == [(Path("candidate"), Path("real"), Path("foreign"))]
+
+
+@pytest.mark.ml
+def test_without_the_photos_to_pick_it_from_the_candidate_carries_no_line(
+    prepared: tuple[ModelPackage, Path, Path], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _active, data, folds = prepared
+    monkeypatch.setattr(refit, "_vectors", plain_vectors())
+    monkeypatch.setattr(refit, "_out_of_fold", lambda computed, labels, numbers, n: labels.copy())
+
+    candidate = refit_with_reference(data, folds)
+
+    assert candidate.manifest.ood is not None
+    assert candidate.manifest.ood.review_share is None

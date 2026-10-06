@@ -178,12 +178,16 @@ class TrainingSettings(_Section):
         data_dir: Base dataset the confirmed labels are added to.
         device: Torch device the encoders run on; `auto` takes the GPU when there is one.
         poll_seconds: How long the worker waits before looking for a job again.
+        foreign_dir: Photos the service must not answer on. With the test photos of
+            `data_dir` they decide the line "send this photo to a person" of every candidate;
+            None leaves candidates without a line, and the service uses its own.
     """
 
     config: Path
     data_dir: Path
     device: str = Field(min_length=1)
     poll_seconds: float = Field(gt=0)
+    foreign_dir: Path | None = None
 
 
 class Settings(_Section):

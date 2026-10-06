@@ -11,22 +11,12 @@ import logging
 from collections.abc import Iterator
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Final
 
-from loadvision.imaging.prepared_image import MediaType
-from loadvision.imaging.validator import ImageLimits, prepare_image
+from loadvision.imaging.validator import prepare_image
 from loadvision.ml.inference.predictor import PackagePredictor
+from loadvision.ml.inference.review_line import LIMITS, photos_in
 from loadvision.ml.packaging.model_package import ModelPackage
 from loadvision.settings import load_settings
-
-# Generous on purpose: this reads photos from anywhere, not requests from the API.
-LIMITS: Final = ImageLimits(
-    max_bytes=50_000_000,
-    max_pixels=50_000_000,
-    min_side=64,
-    media_types=frozenset(MediaType),
-)
-SUFFIXES: Final = (".jpg", ".jpeg", ".png", ".webp")
 
 _logger = logging.getLogger("ood_scale")
 
@@ -49,24 +39,6 @@ class Placed:
     score: float
     share: float
     verdict: str
-
-
-def photos_in(folder: Path) -> list[Path]:
-    """Returns the photos of a folder, in a stable order.
-
-    Raises:
-        FileNotFoundError: If the folder holds no photo this tool can read.
-    """
-    files = sorted(path for path in folder.rglob("*") if path.is_file())
-    found = [path for path in files if path.suffix.lower() in SUFFIXES]
-    # Said out loud: a folder where half the files are quietly ignored looks like a folder
-    # where every photo passed.
-    for path in files:
-        if path not in found:
-            _logger.warning("пропущено, формат не читаем: %s", path.name)
-    if not found:
-        raise FileNotFoundError(f"{folder} holds no {', '.join(SUFFIXES)}")
-    return found
 
 
 def place(
@@ -128,15 +100,19 @@ def main() -> int:
     predictor = PackagePredictor(package, device=args.device)
     review = load_settings().review
 
+    # The package's own line when it carries one, the service's otherwise: the same choice the
+    # service makes.
+    ood = package.manifest.ood
+    unusual = (
+        review.unusual_band_share if ood is None or ood.review_share is None else ood.review_share
+    )
     placed = sorted(
-        place(paths, predictor, review.unusual_band_share, review.unreadable_band_share),
+        place(paths, predictor, unusual, review.unreadable_band_share),
         key=lambda row: row.share,
     )
     _logger.info("\nпакет %s, %d фото", args.package.name, len(placed))
     _logger.info(
-        "линии: на проверку от доли %.2f, нечитаемо от %.2f",
-        review.unusual_band_share,
-        review.unreadable_band_share,
+        "линии: на проверку от доли %.2f, нечитаемо от %.2f", unusual, review.unreadable_band_share
     )
     _logger.info("\n%-34s %8s %8s %7s  %s", "фото", "загрузка", "скор", "доля", "вердикт")
     for row in placed:

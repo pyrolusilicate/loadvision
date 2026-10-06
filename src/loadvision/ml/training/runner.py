@@ -63,6 +63,9 @@ class PipelineTrainingRunner:
         device: Torch device the encoders run on.
         rules: Thresholds of the promotion gate.
         seed: Seed recorded in the run context.
+        foreign_dir: Photos the service must not answer on; with the test photos of
+            `data_dir` they pick the line "send this photo to a person" of the candidate. None,
+            or a folder that is not there, leaves the candidate without a line of its own.
     """
 
     def __init__(
@@ -79,6 +82,7 @@ class PipelineTrainingRunner:
         device: str = "cpu",
         rules: GateRules = DEFAULT_RULES,
         seed: int = 0,
+        foreign_dir: Path | None = None,
     ) -> None:
         self._config = dict(config)
         self._data_dir = data_dir
@@ -91,6 +95,7 @@ class PipelineTrainingRunner:
         self._device = device
         self._rules = rules
         self._seed = seed
+        self._foreign_dir = foreign_dir
 
     def run(self, request: TrainingRequest) -> TrainingOutcome:
         """Trains a candidate and reports whether it may replace the active version.
@@ -180,12 +185,27 @@ class PipelineTrainingRunner:
                 out_dir=package_path,
                 version=run_id,
                 device=self._device,
+                line_photos=self._line_photos(),
             )
         except ModelPackageError as error:
             return _failed(run_id, error.code, error.detail or "model package is invalid")
         except (OSError, ValueError) as error:
             return _failed(run_id, ErrorCode.INTERNAL_ERROR, f"{type(error).__name__}: {error}")
         return None
+
+    def _line_photos(self) -> tuple[Path, Path] | None:
+        """Real and foreign photos to pick the line of the candidate from, if both are there."""
+        real = self._data_dir / "test" / "images"
+        foreign = self._foreign_dir
+        if foreign is None or not real.is_dir() or not foreign.is_dir():
+            logger.warning(
+                "no line is picked for the candidate: %s or %s is missing; the service keeps "
+                "the share of its settings",
+                real,
+                foreign,
+            )
+            return None
+        return real, foreign
 
     def _refittable(self) -> ModelPackage | None:
         """Returns the active package when its heads can be fitted again on its own encoders.
